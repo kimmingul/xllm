@@ -1,0 +1,140 @@
+# grok-xllm provider profiles
+# Copy/override per project. Search order:
+#   1. $XLLM_PROVIDERS_PATH
+#   2. ./.grok/xllm-providers.toml  (this file when in project)
+#   3. ~/.grok/xllm-providers.toml
+#   4. built-in defaults
+
+[defaults]
+# Preferred pair for /ccg when user omits providers
+analysis_provider = "codex"
+# Prefer Antigravity over Gemini for design-side reviews
+design_provider = "antigravity"
+design_fallback = "gemini"
+timeout_ms = 300000
+
+# ---------------------------------------------------------------------------
+# Cloud
+# ---------------------------------------------------------------------------
+
+[providers.codex]
+# Model: codex -m / exec -m
+default_model = ""
+default_effort = ""
+# Effort via config key (codex -c model_reasoning_effort=high)
+effort_via = "config"
+effort_config_key = "model_reasoning_effort"
+# Allowed examples: low, medium, high, xhigh
+timeout_ms = 300000
+
+[providers.claude]
+default_model = ""
+default_effort = ""
+# claude --model … --effort …
+timeout_ms = 300000
+
+[providers.grok]
+default_model = ""
+default_effort = ""
+# grok -m … --reasoning-effort …
+timeout_ms = 300000
+
+[providers.antigravity]
+default_model = ""
+default_effort = ""
+# agy --model …
+# Preferred over gemini when available (non-Windows headless)
+timeout_ms = 300000
+
+[providers.gemini]
+default_model = ""
+default_effort = ""
+# Fallback when antigravity unavailable
+timeout_ms = 300000
+
+[providers.cursor]
+default_model = ""
+default_effort = ""
+timeout_ms = 300000
+
+# ---------------------------------------------------------------------------
+# Local
+# ---------------------------------------------------------------------------
+
+[providers.ollama]
+default_model = "llama3.2"
+default_effort = ""
+timeout_ms = 300000
+
+[providers.lmstudio]
+default_model = "local-model"
+default_effort = ""
+temperature = 0.7
+timeout_ms = 300000
+
+[providers.lemonade]
+default_model = "default"
+default_effort = ""
+timeout_ms = 300000
+
+# ---------------------------------------------------------------------------
+# Role routing (/team, pickAdvisorForRole) — override providers / effort / model
+# ---------------------------------------------------------------------------
+
+[routing.roles.explore]
+providers = "ollama,lmstudio,grok"
+effort = "low"
+prefer_native = true
+native_agent = "explore"
+
+[routing.roles.implement]
+providers = "grok,codex,ollama"
+effort = "medium"
+prefer_native = true
+native_agent = "executor"
+
+[routing.roles.security]
+providers = "codex,claude,grok"
+effort = "high"
+prefer_native = false
+native_agent = "security-reviewer"
+
+[routing.roles.architecture]
+providers = "codex,claude,grok"
+effort = "high"
+prefer_native = false
+native_agent = "architect"
+
+[routing.roles.design]
+# antigravity preferred over gemini (Windows auto-fallback inside resolver)
+providers = "antigravity,gemini,grok,ollama"
+effort = "medium"
+prefer_native = false
+
+[routing.roles.critic]
+providers = "ollama,lmstudio,grok,codex"
+effort = "medium"
+prefer_native = false
+native_agent = "critic"
+
+[routing.roles.tests]
+providers = "ollama,grok,codex"
+effort = "medium"
+prefer_native = true
+native_agent = "executor"
+
+[routing.roles.analysis]
+providers = "codex,claude,grok"
+effort = "high"
+prefer_native = false
+
+[routing.roles.docs]
+providers = "ollama,grok,antigravity"
+effort = "low"
+prefer_native = true
+
+[routing.roles.verify]
+providers = "codex,grok,ollama"
+effort = "medium"
+prefer_native = true
+native_agent = "verifier"

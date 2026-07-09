@@ -1,0 +1,34 @@
+{
+  "name": "grok-xllm",
+  "version": "0.1.0",
+  "description": "grok-xllm — multi-LLM orchestration for Grok Build. CLI advisors (ask/ccg), ralph evidence loops, thin team playbooks, first-class local LLMs.",
+  "author": {
+    "name": "grok-xllm contributors"
+  },
+  "repository": "https://github.com/your-org/grok-xllm",
+  "license": "MIT",
+  "keywords": [
+    "grok",
+    "grok-build",
+    "multi-agent",
+    "orchestration",
+    "multi-llm",
+    "xllm",
+    "ccg",
+    "headless-cli",
+    "local-llm",
+    "ollama",
+    "ralph"
+  ],
+  "skills": [
+    "./.grok/skills/ask/",
+    "./.grok/skills/ccg/",
+    "./.grok/skills/ralph/",
+    "./.grok/skills/team/",
+    "./.grok/skills/verify/",
+    "./.grok/skills/xllm-setup/"
+  ],
+  "commands": "./.grok/commands/",
+  "agents": "./.grok/agents/",
+  "personas": "./.grok/personas/"
+}

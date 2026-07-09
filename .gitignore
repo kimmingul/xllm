@@ -1,0 +1,36 @@
+# Dependencies / build
+node_modules/
+dist/
+*.log
+*.bak
+
+# Runtime artifacts (keep directory via .gitkeep)
+.grok/artifacts/ask/*
+.grok/artifacts/ccg/*
+.grok/artifacts/ralph/*
+.grok/artifacts/team/*
+.grok/artifacts/verify/*
+!.grok/artifacts/**/.gitkeep
+
+# Machine-local path marker
+.grok/xllm-advisor-path
+.grok/omg-advisor-path
+.grok/notepad.md
+.grok/RESUME.md
+
+# Local session / reference noise (never ship)
+.omc/
+.omx/
+.remember/
+.scratch/
+mcps/
+oh-my-claudecode-main/
+oh-my-claudecode*/
+dummy
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

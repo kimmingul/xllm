@@ -1,0 +1,36 @@
+{
+  "name": "grok-xllm",
+  "version": "0.1.0",
+  "description": "grok-xllm — multi-LLM orchestration for Grok Build (CLI advisors, ralph evidence loops, local+cloud).",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "bin": {
+    "xllm": "./scripts/xllm.mjs",
+    "xllm-advisor": "./scripts/grok-ask-advisor.js",
+    "xllm-doctor": "./scripts/xllm-doctor.js"
+  },
+  "scripts": {
+    "doctor": "node scripts/xllm-doctor.js",
+    "advisor": "node scripts/grok-ask-advisor.js",
+    "xllm": "node scripts/xllm.mjs",
+    "test": "node scripts/test-advisor.mjs",
+    "check": "node --check scripts/grok-ask-advisor.js && node --check scripts/xllm-doctor.js && node --check scripts/xllm-routing.js && node --check scripts/test-advisor.mjs && node --check scripts/check-plugin.mjs && node --check scripts/smoke.mjs && node --check scripts/xllm.mjs && node scripts/check-plugin.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:live": "node scripts/smoke.mjs --live",
+    "ci": "npm run check && npm test && npm run smoke"
+  },
+  "keywords": [
+    "grok",
+    "grok-build",
+    "multi-llm",
+    "orchestration",
+    "xllm",
+    "ollama",
+    "ralph",
+    "ccg"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

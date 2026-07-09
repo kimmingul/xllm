@@ -18,9 +18,11 @@ Grok Build already has subagents, plan mode, skills, and hooks.
 # Local checkout
 grok plugin install . --trust
 
-# Or from GitHub (after you publish)
-# grok plugin install your-org/grok-xllm --trust
+# From GitHub
+grok plugin install kimmingul/grok-xllm --trust
 ```
+
+Repo: [github.com/kimmingul/grok-xllm](https://github.com/kimmingul/grok-xllm)
 
 Validate:
 

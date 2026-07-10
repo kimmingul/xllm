@@ -15,6 +15,7 @@ import {
   parseProviderSpec,
   getSupportedProviders,
   detectAvailableProviders,
+  getProviderCostMeta,
 } from './grok-ask-advisor.js';
 import process from 'process';
 
@@ -227,9 +228,36 @@ function mergeRoleRoutes(profiles) {
       providers: [...(routes[k].providers || [])],
     };
   }
-  const custom = profiles?.routing?.roles || profiles?.roles || {};
+  // [routing.roles.*] object tweaks apply first; [roles] string pins are an
+  // explicit user decision and override the same role.
+  const custom = {
+    ...(profiles?.routing?.roles || {}),
+    ...(profiles?.roles || {}),
+  };
   for (const [role, conf] of Object.entries(custom)) {
     const key = normalizeRole(role) || role;
+    // String form pins the role to an exact spec: analysis = "codex@high"
+    if (typeof conf === 'string') {
+      const spec = parseProviderSpec(conf, profiles);
+      if (!spec) continue;
+      const base = routes[key] || {
+        providers: [],
+        effort: 'medium',
+        prefer_native: false,
+        native_agent: null,
+        notes: '',
+      };
+      routes[key] = {
+        ...base,
+        providers: [spec.provider],
+        model: spec.model || '',
+        effort: spec.effort || base.effort,
+        prefer_native: false,
+        pinned: true,
+        notes: `pinned by project profile (${conf})`,
+      };
+      continue;
+    }
     if (!conf || typeof conf !== 'object') continue;
     const base = routes[key] || {
       providers: [],
@@ -289,21 +317,28 @@ export function pickAdvisorForRole(role, options = {}) {
     intensity = normalizeIntensity(options.forceIntensity) || intensity;
   }
 
-  // High intensity critic/security → prefer strong cloud first (fixed priority order)
+  // Cost/tier-aware ordering (skipped for profile-pinned roles):
+  // high intensity on judgment roles → strongest tier first;
+  // low intensity outside security/arch → cheapest first (local models free).
+  // Stable sort preserves the route's preference order within equal ranks.
   let providerOrder = [...route.providers];
-  if (intensity === 'high' && ['critic', 'verify', 'tests', 'security'].includes(normRole)) {
-    const cloudPriority = ['codex', 'claude', 'grok'];
-    providerOrder = [
-      ...cloudPriority.filter((p) => providerOrder.includes(p)),
-      ...providerOrder.filter((p) => !cloudPriority.includes(p)),
-    ];
-  }
-  if (intensity === 'low' && !['security', 'architecture'].includes(normRole)) {
-    const localPriority = ['ollama', 'lmstudio', 'lemonade'];
-    providerOrder = [
-      ...localPriority.filter((p) => providerOrder.includes(p)),
-      ...providerOrder.filter((p) => !localPriority.includes(p)),
-    ];
+  if (!route.pinned) {
+    const meta = (p) => getProviderCostMeta(p, profiles);
+    if (
+      intensity === 'high' &&
+      ['critic', 'verify', 'tests', 'security'].includes(normRole)
+    ) {
+      providerOrder = providerOrder
+        .map((p, i) => ({ p, i, rank: meta(p).tier_rank }))
+        .sort((a, b) => a.rank - b.rank || a.i - b.i)
+        .map((x) => x.p);
+    }
+    if (intensity === 'low' && !['security', 'architecture'].includes(normRole)) {
+      providerOrder = providerOrder
+        .map((p, i) => ({ p, i, cost: meta(p).relative_cost }))
+        .sort((a, b) => a.cost - b.cost || a.i - b.i)
+        .map((x) => x.p);
+    }
   }
 
   const ready = options.readyProviders
@@ -336,11 +371,16 @@ export function pickAdvisorForRole(role, options = {}) {
     }
   }
 
-  let effort = bumpEffort(route.effort || 'medium', intensity);
-  // security high → xhigh
-  if (normRole === 'security' && intensity === 'high') effort = 'xhigh';
-  if (normRole === 'explore' && intensity === 'low') effort = 'low';
-  if (normRole === 'docs') effort = intensity === 'high' ? 'medium' : 'low';
+  // Pinned roles keep the user's exact effort; otherwise bump by intensity.
+  let effort = route.pinned
+    ? route.effort || 'medium'
+    : bumpEffort(route.effort || 'medium', intensity);
+  if (!route.pinned) {
+    // security high → xhigh
+    if (normRole === 'security' && intensity === 'high') effort = 'xhigh';
+    if (normRole === 'explore' && intensity === 'low') effort = 'low';
+    if (normRole === 'docs') effort = intensity === 'high' ? 'medium' : 'low';
+  }
 
   // model from route or provider profile default
   const pconf = profiles.providers?.[chosen] || {};
@@ -348,7 +388,7 @@ export function pickAdvisorForRole(role, options = {}) {
   if (options.model) model = options.model;
 
   // Prefer native when route says so and intensity not forcing external
-  const preferNative = !!route.prefer_native;
+  const preferNative = !route.pinned && !!route.prefer_native;
   const useNative =
     options.forceCli === true
       ? false
@@ -388,6 +428,8 @@ export function pickAdvisorForRole(role, options = {}) {
     fallbacks: tried.filter((p) => p !== chosen),
     substituted,
     route_effort_base: route.effort,
+    pinned: !!route.pinned,
+    cost: getProviderCostMeta(chosen, profiles),
   };
 }
 

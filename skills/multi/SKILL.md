@@ -42,20 +42,41 @@ models), artifacts secret-redacted (`--no-artifacts` to skip persistence).
 
 1. **Decompose** the task into advisor-appropriate prompts. Do not send the
    raw conversation; each advisor sees only its prompt.
-2. **Run** advisors (parallel). Collect artifact paths from stdout — `--multi`
-   prints a multi-run index whose Artifacts section lists per-advisor files.
-3. **Read every artifact**, then **synthesize**:
+2. **Run** advisors (parallel). `--multi` prints a multi-run index (`.md`)
+   listing per-advisor artifacts, plus a machine-readable `.json` sidecar.
+3. **Read every artifact**, then **synthesize with consensus depth** — label
+   every claim, citing supporting advisor specs:
 
    ```markdown
-   ## Agreed
-   ## Disagreements / trade-offs   (topic — A says… / B says… — decision + why)
+   ## Claims
+   - [unanimous] <claim> (codex@high, gemini)
+   - [majority] <claim> (2/3: codex@high, ollama; gemini silent)
+   - [split] <claim> — A says… / B says… → needs tiebreaker
+   - [single-source] <claim> (gemini only — lead, not finding)
+
+   ## Decision per split claim   (tiebreaker run or explicit judgment + why)
    ## Final direction
    ## Artifacts (paths)
    ```
 
+   Label meanings: **unanimous** = every successful advisor addressed AND
+   supported it; **majority** = >half support, no strong counter-evidence;
+   **split** = disagreement — don't act without a tiebreaker (prefer a vendor
+   not yet consulted); **single-source** = one advisor only — a lead, not a
+   finding. Failed advisors count as abstentions, never as support.
+   Consensus is confidence metadata, not truth — unanimous can still be wrong.
 4. One advisor failing does not cancel the rest — note the failure in the
    synthesis. If all fail, say so and give your own analysis labeled as
    host-only.
+
+## Proposal mode (file work, still read-only)
+
+Add `--propose` to get **candidate patches instead of opinions**: each
+advisor returns a unified diff, saved under `artifacts/proposals/` with a
+`.patch` sidecar. Advisors never apply anything. Judge the N candidates
+(correctness, minimality, style fit), pick or merge the best, validate with
+`git apply --check <patch>`, and apply only after review. Cost pattern:
+cheap/local advisors draft, one strong advisor (or you) judges.
 
 ## When NOT to use
 

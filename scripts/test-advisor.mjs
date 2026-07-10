@@ -31,6 +31,13 @@ import {
   redactSecrets,
   cleanArtifacts,
   HOST_SESSION_ENV_VARS,
+  getProviderCostMeta,
+  upsertTomlKey,
+  setProfileValue,
+  buildInventory,
+  buildProposalPrompt,
+  extractProposalPatch,
+  writeMultiIndex,
 } from './grok-ask-advisor.js';
 import fs from 'fs';
 import path from 'path';
@@ -427,6 +434,124 @@ test('cleanArtifacts removes artifact files but keeps placeholders', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Cost metadata / profile writer / inventory (improvement 1)
+// ---------------------------------------------------------------------------
+
+test('getProviderCostMeta: local free, codex strong, profile-overridable', () => {
+  const ollama = getProviderCostMeta('ollama');
+  assert.strictEqual(ollama.tier, 'local');
+  assert.strictEqual(ollama.relative_cost, 0);
+  const codex = getProviderCostMeta('codex');
+  assert.strictEqual(codex.tier, 'strong');
+  assert.ok(codex.relative_cost > 0);
+  const overridden = getProviderCostMeta('codex', {
+    providers: { codex: { tier: 'local', relative_cost: 1 } },
+  });
+  assert.strictEqual(overridden.tier, 'local');
+  assert.strictEqual(overridden.relative_cost, 1);
+});
+
+test('upsertTomlKey appends section, replaces key, preserves comments', () => {
+  const t0 = '# my comment\n[defaults]\ntimeout_ms = 5\n';
+  const t1 = upsertTomlKey(t0, 'roles', 'analysis', 'codex@high');
+  assert.ok(t1.includes('[roles]'));
+  assert.ok(t1.includes('analysis = "codex@high"'));
+  assert.ok(t1.includes('# my comment'));
+  assert.ok(t1.includes('timeout_ms = 5'));
+  const t2 = upsertTomlKey(t1, 'roles', 'analysis', 'gemini@low');
+  assert.ok(t2.includes('analysis = "gemini@low"'));
+  assert.ok(!t2.includes('codex@high'));
+  const t3 = upsertTomlKey(t2, 'roles', 'design', 'grok');
+  assert.ok(t3.includes('analysis = "gemini@low"'));
+  assert.ok(t3.includes('design = "grok"'));
+  // still exactly one [roles] header
+  assert.strictEqual(t3.split('[roles]').length, 2);
+});
+
+test('setProfileValue creates template and round-trips through parser', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-profile-'));
+  try {
+    const file = setProfileValue('roles', 'critic', 'ollama:llama3.2@low', tmp);
+    assert.ok(file.includes('.xllm'));
+    const body = fs.readFileSync(file, 'utf8');
+    assert.ok(body.includes('critic = "ollama:llama3.2@low"'));
+    const parsed = parseSimpleToml(body);
+    assert.strictEqual(parsed.roles.critic, 'ollama:llama3.2@low');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    loadProviderProfiles({ force: true });
+  }
+});
+
+test('buildInventory probes providers and caches at XLLM_HOME', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-inv-'));
+  try {
+    const env = { ...process.env, XLLM_HOME: tmp };
+    const inv = buildInventory({ refresh: true, env });
+    assert.strictEqual(inv.cached, false);
+    assert.ok(inv.providers.ollama);
+    assert.strictEqual(inv.providers.ollama.kind, 'local');
+    assert.ok('installed' in inv.providers.codex);
+    assert.ok(inv.providers.codex.tier);
+    assert.ok(fs.existsSync(path.join(tmp, 'inventory.json')));
+    const again = buildInventory({ env });
+    assert.strictEqual(again.cached, true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Multi index + consensus contract (improvement 2)
+// ---------------------------------------------------------------------------
+
+test('writeMultiIndex writes md with synthesis contract and json sidecar', () => {
+  const idx = writeMultiIndex({
+    prompt: 'unit test consensus',
+    results: [
+      { spec: 'codex@high', code: 0, artifact: 'a.md', patch: null },
+      { spec: 'gemini', code: 1, artifact: null, patch: null },
+    ],
+    root,
+  });
+  try {
+    const md = fs.readFileSync(idx.mdPath, 'utf8');
+    assert.ok(md.includes('Synthesis contract'));
+    assert.ok(md.includes('unanimous'));
+    assert.ok(md.includes('single-source'));
+    assert.ok(md.includes('confidence metadata, not truth'));
+    const json = JSON.parse(fs.readFileSync(idx.jsonPath, 'utf8'));
+    assert.strictEqual(json.failures, 1);
+    assert.strictEqual(json.results.length, 2);
+    assert.ok(json.consensus_labels.includes('majority'));
+    assert.strictEqual(idx.failed, 1);
+  } finally {
+    fs.unlinkSync(idx.mdPath);
+    fs.unlinkSync(idx.jsonPath);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Proposal mode (improvement 3)
+// ---------------------------------------------------------------------------
+
+test('buildProposalPrompt wraps task with no-apply contract', () => {
+  const p = buildProposalPrompt('add validation');
+  assert.ok(p.includes('CHANGE PROPOSAL'));
+  assert.ok(p.includes('unified diff'));
+  assert.ok(p.includes('add validation'));
+});
+
+test('extractProposalPatch pulls diff block, null when absent', () => {
+  const raw =
+    'Rationale here.\n\n```diff\n--- a/x.js\n+++ b/x.js\n@@ -1 +1 @@\n-old\n+new\n```\n';
+  const patch = extractProposalPatch(raw);
+  assert.ok(patch.startsWith('--- a/x.js'));
+  assert.ok(patch.endsWith('\n'));
+  assert.strictEqual(extractProposalPatch('no diff here'), null);
+});
+
+// ---------------------------------------------------------------------------
 // Role / intensity routing
 // ---------------------------------------------------------------------------
 
@@ -499,6 +624,55 @@ test('defaultRolesForTask includes security for auth', () => {
   const roles = defaultRolesForTask('Refactor auth and add tests');
   assert.ok(roles.includes('implement'));
   assert.ok(roles.includes('security'));
+});
+
+test('loadProviderProfiles propagates [roles] from TOML (CLI path)', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-roles-'));
+  const file = path.join(tmp, 'p.toml');
+  try {
+    fs.writeFileSync(file, '[roles]\nanalysis = "gemini@low"\n', 'utf8');
+    process.env.XLLM_PROVIDERS_PATH = file;
+    const prof = loadProviderProfiles({ force: true });
+    assert.strictEqual(prof.roles.analysis, 'gemini@low');
+    const p = pickAdvisorForRole('analysis', {
+      taskText: 'security auth payment rewrite',
+      forceCli: true,
+      readyProviders: ['gemini', 'codex'],
+    });
+    assert.strictEqual(p.provider, 'gemini');
+    assert.strictEqual(p.effort, 'low');
+    assert.strictEqual(p.pinned, true);
+  } finally {
+    delete process.env.XLLM_PROVIDERS_PATH;
+    fs.rmSync(tmp, { recursive: true, force: true });
+    loadProviderProfiles({ force: true });
+  }
+});
+
+test('profile [roles] string spec pins provider/model/effort', () => {
+  const prof = JSON.parse(JSON.stringify(loadProviderProfiles({ force: true })));
+  prof.roles = { analysis: 'gemini@low' };
+  const p = pickAdvisorForRole('analysis', {
+    profiles: prof,
+    taskText: 'security auth payment breach rewrite', // high-intensity signals
+    forceCli: true,
+    readyProviders: ['gemini', 'codex', 'grok'],
+  });
+  assert.strictEqual(p.provider, 'gemini');
+  assert.strictEqual(p.effort, 'low'); // pinned effort survives intensity bump
+  assert.strictEqual(p.pinned, true);
+});
+
+test('pick includes cost metadata and low intensity prefers cheap', () => {
+  const p = pickAdvisorForRole('docs', {
+    taskText: 'fix typo in README',
+    forceCli: true,
+    readyProviders: ['ollama', 'grok', 'antigravity'],
+  });
+  assert.strictEqual(p.provider, 'ollama'); // relative_cost 0 wins on low intensity
+  assert.ok(p.cost);
+  assert.strictEqual(p.cost.tier, 'local');
+  assert.strictEqual(p.pinned, false);
 });
 
 test('pickTeamAdvisors returns multiple picks', () => {

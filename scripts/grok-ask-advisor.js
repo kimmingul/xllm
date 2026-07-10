@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 
@@ -104,56 +104,103 @@ const BUILTIN_PROFILES = {
     timeout_ms: 300000,
   },
   providers: {
+    // tier: strong | balanced | local — coarse capability class
+    // relative_cost: 0 (free/local) … 10 — deliberately relative, NOT $ prices
+    // latency_class: fast | medium | slow — typical headless round-trip
     codex: {
       default_model: '',
       default_effort: '',
       effort_via: 'config',
       effort_config_key: 'model_reasoning_effort',
       timeout_ms: 300000,
+      tier: 'strong',
+      relative_cost: 7,
+      latency_class: 'slow',
     },
     claude: {
       default_model: '',
       default_effort: '',
       timeout_ms: 300000,
+      tier: 'strong',
+      relative_cost: 7,
+      latency_class: 'medium',
     },
     grok: {
       default_model: '',
       default_effort: '',
       timeout_ms: 300000,
+      tier: 'strong',
+      relative_cost: 6,
+      latency_class: 'medium',
     },
     antigravity: {
       default_model: '',
       default_effort: '',
       timeout_ms: 300000,
+      tier: 'balanced',
+      relative_cost: 5,
+      latency_class: 'medium',
     },
     gemini: {
       default_model: '',
       default_effort: '',
       timeout_ms: 300000,
+      tier: 'balanced',
+      relative_cost: 4,
+      latency_class: 'medium',
     },
     cursor: {
       default_model: '',
       default_effort: '',
       timeout_ms: 300000,
+      tier: 'balanced',
+      relative_cost: 5,
+      latency_class: 'medium',
     },
     ollama: {
       default_model: 'llama3.2',
       default_effort: '',
       timeout_ms: 300000,
+      tier: 'local',
+      relative_cost: 0,
+      latency_class: 'medium',
     },
     lmstudio: {
       default_model: 'local-model',
       default_effort: '',
       temperature: 0.7,
       timeout_ms: 300000,
+      tier: 'local',
+      relative_cost: 0,
+      latency_class: 'medium',
     },
     lemonade: {
       default_model: 'default',
       default_effort: '',
       timeout_ms: 300000,
+      tier: 'local',
+      relative_cost: 0,
+      latency_class: 'medium',
     },
   },
 };
+
+const TIER_RANK = { strong: 0, balanced: 1, local: 2 };
+
+/** Coarse cost/capability metadata for a provider (profile-overridable). */
+export function getProviderCostMeta(provider, profiles = null) {
+  const prof = (profiles || loadProviderProfiles()).providers[provider] || {};
+  const builtin = BUILTIN_PROFILES.providers[provider] || {};
+  const tier = prof.tier || builtin.tier || 'balanced';
+  return {
+    tier,
+    tier_rank: TIER_RANK[tier] ?? 1,
+    relative_cost: Number(
+      prof.relative_cost ?? builtin.relative_cost ?? 5
+    ),
+    latency_class: prof.latency_class || builtin.latency_class || 'medium',
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Public helpers
@@ -399,6 +446,9 @@ export function loadProviderProfiles({ force = false } = {}) {
           };
         }
       }
+      // Role pins and routing overrides consumed by xllm-routing
+      if (parsed.roles) merged.roles = { ...parsed.roles };
+      if (parsed.routing) merged.routing = parsed.routing;
       merged._loaded_from = p;
       break; // first existing wins (search order is priority)
     } catch {
@@ -414,6 +464,72 @@ export function loadProviderProfiles({ force = false } = {}) {
 
   _profilesCache = merged;
   return merged;
+}
+
+const PROFILE_TEMPLATE = `# xllm provider profile (project-local)
+# Managed by \`xllm profile set-role\` / \`set-default\`; hand-edits are preserved.
+#
+# [roles]                pins a role to an exact spec, e.g.
+#   analysis = "codex@high"
+#   design = "gemini"
+#   critic = "ollama:qwen3.6:latest@low"
+#
+# [providers.<name>]     overrides: default_model, default_effort, timeout_ms,
+#                        tier (strong|balanced|local), relative_cost (0-10),
+#                        latency_class (fast|medium|slow)
+`;
+
+/**
+ * Line-based TOML upsert: replaces \`key = ...\` inside [section] (or appends
+ * the section) while preserving every other line and comment.
+ */
+export function upsertTomlKey(text, section, key, value) {
+  const lines = String(text || '').split(/\r?\n/);
+  const header = `[${section}]`;
+  const kvLine = `${key} = ${JSON.stringify(String(value))}`;
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === header) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1) {
+    const out = [...lines];
+    while (out.length && out[out.length - 1].trim() === '') out.pop();
+    out.push('', header, kvLine, '');
+    return out.join('\n');
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\s*\[/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const keyRe = new RegExp('^\\s*' + escapedKey + '\\s*=');
+  for (let i = start + 1; i < end; i++) {
+    if (keyRe.test(lines[i])) {
+      lines[i] = kvLine;
+      return lines.join('\n');
+    }
+  }
+  lines.splice(end, 0, kvLine);
+  return lines.join('\n');
+}
+
+/** Write a key into the project profile TOML (created from template if absent). */
+export function setProfileValue(section, key, value, root = process.cwd()) {
+  const dir = resolveStateDir(root);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'xllm-providers.toml');
+  const text = fs.existsSync(file)
+    ? fs.readFileSync(file, 'utf8')
+    : PROFILE_TEMPLATE;
+  fs.writeFileSync(file, upsertTomlKey(text, section, key, value), 'utf8');
+  loadProviderProfiles({ force: true });
+  return file;
 }
 
 /**
@@ -875,7 +991,32 @@ export function redactSecrets(text) {
   return s;
 }
 
-export const ARTIFACT_SUBDIRS = ['ask', 'xllm', 'ralph', 'team', 'verify'];
+export const ARTIFACT_SUBDIRS = ['ask', 'xllm', 'ralph', 'team', 'verify', 'proposals'];
+
+/**
+ * Proposal mode: the advisor must PROPOSE a change, never claim to apply one.
+ * Output contract keeps advisors read-only while enabling file work.
+ */
+export const PROPOSAL_INSTRUCTIONS = `You are producing a CHANGE PROPOSAL. You must NOT apply, write, or claim to have applied any change — you have no write access.
+
+Output contract:
+1. A short rationale (a few sentences).
+2. Exactly one fenced code block labeled diff containing a unified diff (git style, a/ and b/ path prefixes) that implements the requested change. For a new document, use a diff that creates the file.
+3. Nothing after the diff block.
+
+If you cannot produce a concrete diff, say why instead of inventing one.`;
+
+export function buildProposalPrompt(task) {
+  return `${PROPOSAL_INSTRUCTIONS}\n\n## Requested change\n\n${task}`;
+}
+
+/** Extract the unified diff from a proposal response, or null. */
+export function extractProposalPatch(raw) {
+  const m = String(raw || '').match(/```(?:diff|patch)\r?\n([\s\S]*?)```/);
+  if (!m) return null;
+  const body = m[1].replace(/\r/g, '');
+  return body.endsWith('\n') ? body : body + '\n';
+}
 
 /**
  * Create artifact subdirs under the project state dir, and drop a
@@ -930,9 +1071,11 @@ export function writeArtifact({
   exitCode,
   durationMs = null,
   meta = {},
+  kind = 'ask',
 }) {
   const root = process.cwd();
-  const dir = path.join(ensureArtifactDirs(root), 'ask');
+  const sub = ARTIFACT_SUBDIRS.includes(kind) ? kind : 'ask';
+  const dir = path.join(ensureArtifactDirs(root), sub);
   original = redactSecrets(original);
   finalPrompt = redactSecrets(finalPrompt);
   raw = redactSecrets(raw);
@@ -988,6 +1131,105 @@ function ts() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
+export const CONSENSUS_LABELS = ['unanimous', 'majority', 'split', 'single-source'];
+
+export const SYNTHESIS_CONTRACT = `## Synthesis contract (for the host)
+
+Read every artifact above, extract the substantive claims, and label each:
+
+| Label | Meaning |
+|-------|---------|
+| unanimous | every successful advisor addressed AND supported it |
+| majority | more than half support it; no strong counter-evidence from the rest |
+| split | advisors disagree — do not act on it without a tiebreaker |
+| single-source | only one advisor raised it — treat as a lead, not a finding |
+
+Rules:
+- Cite the supporting/opposing advisor specs next to each claim.
+- Consensus is confidence metadata, not truth — unanimous claims can still be wrong.
+- For split claims, consider one tiebreaker run with a vendor not yet consulted.
+- Advisors that failed count as abstentions, never as support.`;
+
+/**
+ * Write the multi-run index: human markdown + machine-readable JSON sidecar.
+ * results: [{ spec, code, artifact }]
+ */
+export function writeMultiIndex({
+  prompt,
+  results,
+  propose = false,
+  root = process.cwd(),
+}) {
+  const dir = path.join(ensureArtifactDirs(root), 'xllm');
+  const base = `multi-${slugify(prompt)}-${ts()}`;
+  const mdPath = path.join(dir, `${base}.md`);
+  const jsonPath = path.join(dir, `${base}.json`);
+  const failed = results.filter((r) => r.code !== 0).length;
+  const task = redactSecrets(prompt);
+
+  fs.writeFileSync(
+    jsonPath,
+    JSON.stringify(
+      {
+        created_at: new Date().toISOString(),
+        advisor_version: VERSION,
+        task,
+        propose,
+        failures: failed,
+        results: results.map((r) => ({
+          spec: r.spec,
+          exit_code: r.code,
+          artifact: r.artifact || null,
+          patch: r.patch || null,
+        })),
+        consensus_labels: CONSENSUS_LABELS,
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+
+  fs.writeFileSync(
+    mdPath,
+    [
+      `# xllm multi-run index${propose ? ' (proposal mode)' : ''}`,
+      '',
+      `- Created at: ${new Date().toISOString()}`,
+      `- Providers: ${results.map((r) => r.spec).join(', ')}`,
+      `- Failures: ${failed}`,
+      `- Machine-readable: ${jsonPath}`,
+      '',
+      '## Results',
+      '',
+      ...results.map(
+        (r) =>
+          `- ${r.spec}: exit ${r.code}${r.artifact ? ` — ${r.artifact}` : ''}${r.patch ? ` (patch: ${r.patch})` : ''}`
+      ),
+      '',
+      '## Task',
+      '',
+      task,
+      '',
+      SYNTHESIS_CONTRACT,
+      '',
+      ...(propose
+        ? [
+            '## Proposal handling (for the host)',
+            '',
+            'Each successful advisor produced a candidate patch. Judge them against',
+            'each other (correctness, minimality, style fit), pick or merge the best,',
+            'validate with `git apply --check <patch>`, and apply only after review.',
+            '',
+          ]
+        : []),
+    ].join('\n'),
+    'utf8'
+  );
+
+  return { mdPath, jsonPath, failed };
+}
+
 function usage(exitCode = 1) {
   console.error(`${PRODUCT} advisor v${VERSION}
 Usage:
@@ -997,6 +1239,11 @@ Usage:
   node scripts/grok-ask-advisor.js --which | --remember
   node scripts/grok-ask-advisor.js --dry-run <spec> "<prompt>"
   node scripts/grok-ask-advisor.js --multi p1,p2[,p3] "<prompt>"   (runs in parallel)
+  node scripts/grok-ask-advisor.js --propose <spec> "<change request>"   (diff proposal)
+  node scripts/grok-ask-advisor.js --inventory [--refresh]   (machine capability cache)
+  node scripts/grok-ask-advisor.js --profile-show
+  node scripts/grok-ask-advisor.js --set-role <role> <spec>   (project role pin)
+  node scripts/grok-ask-advisor.js --set-default <key> <value>
   node scripts/grok-ask-advisor.js --clean-artifacts [--older-than=DAYS]
 
 Safety (defaults):
@@ -1161,6 +1408,93 @@ export function detectHostCli(env = process.env) {
   return null;
 }
 
+/** Machine-level xllm home (inventory cache). Overridable for tests. */
+export function xllmHomeDir(env = process.env) {
+  if (env.XLLM_HOME) return env.XLLM_HOME;
+  const home = env.USERPROFILE || env.HOME || process.cwd();
+  return path.join(home, NEUTRAL_STATE_DIR);
+}
+
+/**
+ * Machine capability inventory: which advisor CLIs are installed/healthy and
+ * (for ollama) which models are actually pulled. Cached with a TTL because
+ * probing every binary takes seconds. Cloud model catalogs are deliberately
+ * NOT enumerated — CLIs expose them inconsistently and auth is only proven
+ * by a live call (smoke --live).
+ */
+export function buildInventory({
+  refresh = false,
+  ttlMs = 24 * 60 * 60 * 1000,
+  env = process.env,
+} = {}) {
+  const dir = xllmHomeDir(env);
+  const file = path.join(dir, 'inventory.json');
+  if (!refresh) {
+    try {
+      const st = fs.statSync(file);
+      if (Date.now() - st.mtimeMs < ttlMs) {
+        const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
+        return { ...cached, cached: true, path: file };
+      }
+    } catch {
+      /* probe fresh */
+    }
+  }
+
+  const profiles = loadProviderProfiles();
+  const providers = {};
+  for (const p of getSupportedProviders()) {
+    const entry = {
+      binary: p === 'lemonade' ? env.LEMONADE_BIN || null : PROVIDER_BINARIES[p],
+      kind: LOCAL_PROVIDERS.includes(p) ? 'local' : 'cloud',
+      installed: false,
+      healthy: false,
+      auth_verified: null,
+      notes: [],
+      ...getProviderCostMeta(p, profiles),
+    };
+    if (p === 'lmstudio') {
+      entry.installed = binaryOnPath('curl') || binaryOnPath('curl.exe');
+      entry.healthy = checkServerHealth('lmstudio');
+      if (!entry.healthy) entry.notes.push(`server not responding at ${LMSTUDIO_BASE}`);
+    } else if (p === 'lemonade') {
+      entry.installed = !!env.LEMONADE_BIN && binaryOnPath(env.LEMONADE_BIN);
+      entry.healthy = entry.installed;
+      if (!env.LEMONADE_BIN) entry.notes.push('LEMONADE_BIN not set — unavailable');
+    } else {
+      entry.installed = binaryOnPath(PROVIDER_BINARIES[p]);
+      if (LOCAL_PROVIDERS.includes(p)) {
+        entry.healthy = entry.installed && checkServerHealth(p);
+        if (p === 'ollama' && entry.healthy) entry.models = getOllamaModels();
+      } else {
+        entry.healthy = entry.installed;
+        if (entry.installed) entry.notes.push('binary found; auth unverified (smoke --live)');
+      }
+      if (p === 'antigravity' && IS_WINDOWS) {
+        entry.healthy = false;
+        entry.notes.push('headless blocked on Windows — gemini fallback');
+      }
+    }
+    providers[p] = entry;
+  }
+
+  const inv = {
+    inventory_version: 1,
+    advisor_version: VERSION,
+    created_at: new Date().toISOString(),
+    platform: process.platform,
+    host_cli: detectHostCli(env),
+    providers,
+  };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(inv, null, 2), 'utf8');
+  } catch {
+    /* inventory is best-effort cache */
+  }
+  return { ...inv, cached: false, path: file };
+}
+
 /**
  * Cheap availability probe for routing: binary present (plus server health
  * for local providers). Does NOT verify cloud auth — see doctor/smoke --live.
@@ -1321,6 +1655,7 @@ export function runAdvisor({
   allowWrite = false,
   allowSelf = false,
   noArtifacts = false,
+  propose = false,
 }) {
   const profiles = loadProviderProfiles();
   let meta = {};
@@ -1366,7 +1701,9 @@ export function runAdvisor({
     }
   }
 
-  const cfg = resolveSpawnConfig(provider, resolvedModel, prompt, env, {
+  const promptToSend = propose ? buildProposalPrompt(prompt) : prompt;
+
+  const cfg = resolveSpawnConfig(provider, resolvedModel, promptToSend, env, {
     effort: resolvedEffort || null,
     profiles,
     allowMutation,
@@ -1449,7 +1786,7 @@ export function runAdvisor({
     timeout: cfg.timeoutMs,
     killSignal: 'SIGKILL',
     windowsHide: true,
-    ...(cfg.usesStdin ? { input: prompt } : {}),
+    ...(cfg.usesStdin ? { input: promptToSend } : {}),
   };
 
   const started = Date.now();
@@ -1485,6 +1822,7 @@ export function runAdvisor({
   }
 
   let artifactPath = null;
+  let patchPath = null;
   if (noArtifacts || process.env.XLLM_NO_ARTIFACTS === '1') {
     console.log(raw || '(no output)');
   } else {
@@ -1493,19 +1831,35 @@ export function runAdvisor({
       model: finalModel,
       effort: finalEffort,
       original,
-      finalPrompt: prompt,
+      finalPrompt: promptToSend,
       raw,
       exitCode: code,
       durationMs,
-      meta: { multi, ...meta },
+      meta: { multi, propose, ...meta },
+      kind: propose ? 'proposals' : 'ask',
     });
+    if (propose && code === 0) {
+      const patch = extractProposalPatch(raw);
+      if (patch) {
+        patchPath = artifactPath.replace(/\.md$/, '.patch');
+        fs.writeFileSync(patchPath, patch, 'utf8');
+        console.error(`[${provider}] patch: ${patchPath}`);
+        console.error(
+          `[${provider}] review then apply with: git apply --check "${patchPath}"`
+        );
+      } else {
+        console.error(
+          `[${provider}] proposal contained no diff block — read the artifact for its explanation`
+        );
+      }
+    }
     console.log(artifactPath);
   }
   if (result.error) {
     console.error(`[${provider}] ${result.error.message}`);
   }
 
-  return { artifactPath, exitCode: code, raw, durationMs };
+  return { artifactPath, patchPath, exitCode: code, raw, durationMs };
 }
 
 export function runDoctor() {
@@ -1631,7 +1985,13 @@ export function runDoctor() {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const flags = { allowWrite: false, allowSelf: false, noArtifacts: false };
+  const flags = {
+    allowWrite: false,
+    allowSelf: false,
+    noArtifacts: false,
+    propose: false,
+    refresh: false,
+  };
   let olderThan = null;
   const args = [];
   for (const a of argv.slice(2)) {
@@ -1641,6 +2001,10 @@ function parseArgs(argv) {
       flags.allowSelf = true;
     } else if (a === '--no-artifacts') {
       flags.noArtifacts = true;
+    } else if (a === '--propose') {
+      flags.propose = true;
+    } else if (a === '--refresh') {
+      flags.refresh = true;
     } else if (/^--older-than=\d+$/.test(a)) {
       olderThan = Number(a.split('=')[1]);
     } else {
@@ -1653,6 +2017,22 @@ function parseArgs(argv) {
   if (args[0] === '--doctor') return { mode: 'doctor', flags };
   if (args[0] === '--which') return { mode: 'which', flags };
   if (args[0] === '--remember') return { mode: 'remember', flags };
+  if (args[0] === '--inventory') return { mode: 'inventory', flags };
+  if (args[0] === '--profile-show') return { mode: 'profile-show', flags };
+  if (args[0] === '--set-role') {
+    if (args.length < 3) {
+      console.error('Usage: --set-role <role> <provider[:model][@effort]>');
+      process.exit(1);
+    }
+    return { mode: 'set-role', role: args[1], spec: args[2], flags };
+  }
+  if (args[0] === '--set-default') {
+    if (args.length < 3) {
+      console.error('Usage: --set-default <key> <value>');
+      process.exit(1);
+    }
+    return { mode: 'set-default', key: args[1], value: args[2], flags };
+  }
   if (args[0] === '--clean-artifacts') {
     return { mode: 'clean-artifacts', flags, olderThan };
   }
@@ -1723,6 +2103,38 @@ async function main() {
     console.log(`removed ${removed} artifact file(s)`);
     process.exit(0);
   }
+  if (parsed.mode === 'inventory') {
+    const inv = buildInventory({ refresh: parsed.flags.refresh });
+    console.log(JSON.stringify(inv, null, 2));
+    process.exit(0);
+  }
+  if (parsed.mode === 'profile-show') {
+    const profiles = loadProviderProfiles({ force: true });
+    console.log(
+      JSON.stringify(
+        { state_dir: resolveStateDir(), ...profiles },
+        null,
+        2
+      )
+    );
+    process.exit(0);
+  }
+  if (parsed.mode === 'set-role') {
+    const spec = parseProviderSpec(parsed.spec);
+    if (!spec) {
+      console.error(`Invalid spec: ${parsed.spec}`);
+      process.exit(1);
+    }
+    const role = String(parsed.role).toLowerCase();
+    const file = setProfileValue('roles', role, parsed.spec);
+    console.log(`${file}: roles.${role} = "${parsed.spec}"`);
+    process.exit(0);
+  }
+  if (parsed.mode === 'set-default') {
+    const file = setProfileValue('defaults', parsed.key, parsed.value);
+    console.log(`${file}: defaults.${parsed.key} = "${parsed.value}"`);
+    process.exit(0);
+  }
 
   if (parsed.mode === 'dry-run') {
     runAdvisor({
@@ -1732,6 +2144,7 @@ async function main() {
       prompt: parsed.prompt,
       dryRun: true,
       allowWrite: parsed.flags.allowWrite,
+      propose: parsed.flags.propose,
     });
     process.exit(0);
   }
@@ -1743,6 +2156,7 @@ async function main() {
     if (parsed.flags.allowWrite) childFlags.push('--allow-write');
     if (parsed.flags.allowSelf) childFlags.push('--allow-self');
     if (parsed.flags.noArtifacts) childFlags.push('--no-artifacts');
+    if (parsed.flags.propose) childFlags.push('--propose');
 
     const runOne = (p) =>
       new Promise((resolve) => {
@@ -1753,17 +2167,26 @@ async function main() {
           { env: process.env, windowsHide: true }
         );
         let out = '';
+        let errBuf = '';
         child.stdout.on('data', (d) => (out += d));
-        child.stderr.on('data', (d) => process.stderr.write(d));
+        child.stderr.on('data', (d) => {
+          errBuf += d;
+          process.stderr.write(d);
+        });
         child.on('error', (e) =>
-          resolve({ spec: p.spec, code: 1, out: `[spawn error] ${e.message}` })
+          resolve({ spec: p.spec, code: 1, out: `[spawn error] ${e.message}`, err: '' })
         );
         child.on('close', (code) =>
-          resolve({ spec: p.spec, code: code ?? 1, out: out.trim() })
+          resolve({ spec: p.spec, code: code ?? 1, out: out.trim(), err: errBuf })
         );
       });
 
-    const results = await Promise.all(parsed.providers.map(runOne));
+    const raw = await Promise.all(parsed.providers.map(runOne));
+    const results = raw.map((r) => {
+      const artifact = r.code === 0 && r.out ? r.out.split(/\r?\n/).pop() : null;
+      const patchMatch = (r.err || '').match(/patch: (.+\.patch)/);
+      return { spec: r.spec, code: r.code, artifact, patch: patchMatch ? patchMatch[1].trim() : null, out: r.out };
+    });
     const failed = results.filter((r) => r.code !== 0).length;
 
     if (parsed.flags.noArtifacts || process.env.XLLM_NO_ARTIFACTS === '1') {
@@ -1774,36 +2197,12 @@ async function main() {
       process.exit(failed > 0 && failed === results.length ? 1 : 0);
     }
 
-    const paths = results
-      .filter((r) => r.code === 0 && r.out)
-      .map((r) => r.out.split(/\r?\n/).pop());
-    const dir = path.join(ensureArtifactDirs(process.cwd()), 'xllm');
-    const indexPath = path.join(dir, `multi-${slugify(parsed.prompt)}-${ts()}.md`);
-    fs.writeFileSync(
-      indexPath,
-      [
-        '# xllm multi-run index',
-        '',
-        `- Created at: ${new Date().toISOString()}`,
-        `- Providers: ${parsed.providers.map((p) => p.spec).join(', ')}`,
-        `- Failures: ${failed}`,
-        '',
-        '## Results',
-        '',
-        ...results.map((r) => `- ${r.spec}: exit ${r.code}`),
-        '',
-        '## Artifacts',
-        '',
-        ...paths.map((p) => `- ${p}`),
-        '',
-        '## Task',
-        '',
-        redactSecrets(parsed.prompt),
-        '',
-      ].join('\n'),
-      'utf8'
-    );
-    console.log(indexPath);
+    const index = writeMultiIndex({
+      prompt: parsed.prompt,
+      results,
+      propose: parsed.flags.propose,
+    });
+    console.log(index.mdPath);
     process.exit(failed > 0 && failed === results.length ? 1 : 0);
   }
 
@@ -1815,6 +2214,7 @@ async function main() {
     allowWrite: parsed.flags.allowWrite,
     allowSelf: parsed.flags.allowSelf,
     noArtifacts: parsed.flags.noArtifacts,
+    propose: parsed.flags.propose,
   });
   process.exit(result.exitCode === 0 ? 0 : result.exitCode || 1);
 }

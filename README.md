@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.4.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai), **Claude Code**, and **Codex**.
+**v0.5.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai), **Claude Code**, and **Codex**.
 
 The host CLI is the **conductor**. External and local models are **advisors**.
 
@@ -129,12 +129,35 @@ Profiles and role routing: [`.grok/xllm-providers.toml`](.grok/xllm-providers.to
 
 | Skill | Purpose |
 |-------|---------|
-| `/ask` | One headless advisor + artifact |
-| `/xllm` | 2+ advisors + synthesis |
+| `/ask` | One headless advisor + artifact (`--propose` → diff proposal) |
+| `/xllm` | 2+ advisors + consensus-labeled synthesis (unanimous/majority/split/single-source) |
 | `/ralph` | Story loop until evidence |
 | `/verify` | PASS/FAIL evidence table |
 | `/team` | Parallel workers; **must** run `pick-team` first |
-| `/xllm-setup` | Doctor + path marker + recommendations |
+| `/xllm-setup` | Inventory + doctor + per-project advisor wizard (`--set-role`) |
+
+## Per-project profile & cost-aware routing
+
+```bash
+node scripts/xllm.mjs inventory              # machine capability cache (24h TTL)
+node scripts/xllm.mjs profile set-role analysis codex@high   # pin for THIS project
+node scripts/xllm.mjs profile show
+```
+
+Providers carry coarse `tier` / `relative_cost` / `latency_class` metadata
+(TOML-overridable). Routing sends low-intensity work to the cheapest healthy
+model (local first) and high-intensity judgment roles to the strongest tier;
+`[roles]` pins override everything, effort included.
+
+## Proposal mode (file work, advisors stay read-only)
+
+```bash
+node scripts/xllm.mjs propose codex@high "add input validation to login()"
+node scripts/grok-ask-advisor.js --multi --propose codex,gemini "…"  # N candidate patches
+```
+
+Advisors return unified diffs saved as `.patch` artifacts; nothing is applied.
+Validate with `git apply --check`, review, then apply yourself.
 
 Artifacts: `<state>/artifacts/{ask,xllm,ralph,team,verify}/` (secret-redacted; see Safety model)
 

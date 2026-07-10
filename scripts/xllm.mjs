@@ -40,7 +40,12 @@ Commands:
   remember           Write xllm-advisor-path marker (.xllm/, legacy .grok/)
   doctor             Provider + path health (human)
   ask <p> <prompt>   Single advisor call (read-only by default; --allow-write to opt in)
-  multi p1,p2 <prompt>   Parallel multi-advisor run
+  multi p1,p2 <prompt>   Parallel multi-advisor run (index has consensus contract + JSON)
+  propose <p> <change>   Read-only change proposal → artifact + .patch (host applies)
+  inventory [--refresh]  Machine capability cache (installed CLIs, ollama models)
+  profile show           Resolved provider profile + state dir
+  profile set-role <role> <spec>     Pin a role for THIS project (e.g. analysis codex@high)
+  profile set-default <key> <value>  Set a [defaults] key in the project profile
   clean [--older-than=DAYS]   Delete persisted advisor artifacts
   smoke [--live]     Dry smoke or live READY provider
   list               List providers JSON
@@ -57,6 +62,8 @@ Examples:
   node scripts/xllm.mjs pick security "auth token refresh"
   node scripts/xllm.mjs pick-team "refactor payment webhooks" --json
   node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "review risks"
+  node scripts/xllm.mjs propose codex@high "add input validation to login()"
+  node scripts/xllm.mjs profile set-role critic ollama:qwen3.6:latest@low
   node scripts/xllm.mjs clean --older-than=7
 `);
 }
@@ -101,6 +108,31 @@ switch (cmd) {
   case 'clean-artifacts':
     run(advisor, ['--clean-artifacts', ...rest]);
     break;
+  case 'inventory':
+    run(advisor, ['--inventory', ...rest]);
+    break;
+  case 'propose':
+    if (rest.length < 2) {
+      console.error('Usage: xllm propose <provider> <change request>');
+      process.exit(1);
+    }
+    run(advisor, ['--propose', ...rest]);
+    break;
+  case 'profile': {
+    const [sub, ...pr] = rest;
+    if (sub === 'show') run(advisor, ['--profile-show']);
+    else if (sub === 'set-role' && pr.length >= 2) {
+      run(advisor, ['--set-role', pr[0], pr[1]]);
+    } else if (sub === 'set-default' && pr.length >= 2) {
+      run(advisor, ['--set-default', pr[0], pr[1]]);
+    } else {
+      console.error(
+        'Usage: xllm profile show | set-role <role> <spec> | set-default <key> <value>'
+      );
+      process.exit(1);
+    }
+    break;
+  }
   case 'dry-run':
     run(advisor, ['--dry-run', ...rest]);
     break;

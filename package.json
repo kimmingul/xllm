@@ -1,6 +1,6 @@
 {
   "name": "grok-xllm",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "grok-xllm — multi-LLM orchestration for Grok Build (CLI advisors, ralph evidence loops, local+cloud).",
   "type": "module",
   "license": "MIT",

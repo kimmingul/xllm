@@ -35,10 +35,26 @@ Confirm `.grok/xllm-advisor-path` exists and points at a real file.
 Ensure:
 
 ```text
-<state>/artifacts/ask|xllm|ralph|team|verify/
+<state>/artifacts/ask|xllm|ralph|team|verify|proposals/
 ```
 
 (`--remember` / `--doctor` also create these.)
+
+## 2.5 Project advisor wizard (optional)
+
+Pin per-project roles interactively — recommend from the machine inventory
+(`node <advisor.js> --inventory`, 24h cache; `--refresh` to re-probe). Never
+send repository contents to advisors during setup; analyze locally, ask the
+user per role, then persist:
+
+```bash
+node <advisor.js> --set-role analysis codex@high
+node <advisor.js> --set-role critic ollama:qwen3.6:latest@low
+node <advisor.js> --profile-show
+```
+
+Pinned roles override built-in routing exactly (effort included). If the
+project is empty, ask the user what they intend to build first.
 
 ## 3. Doctor
 

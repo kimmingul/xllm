@@ -55,25 +55,25 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
 4. **Read** every artifact path printed on stdout (files live under the state
    dir: `.xllm/artifacts/` or legacy `.grok/artifacts/`, including the
    multi-run index).
-5. **Synthesize** one response:
+5. **Synthesize with consensus depth** — label every claim, citing advisor specs:
 
    ```markdown
-   ## Agreed
-   - ...
+   ## Claims
+   - [unanimous] <claim> (codex@high, antigravity)
+   - [majority] <claim> (2/3 support; one silent)
+   - [split] <claim> — A says … / B says … → tiebreaker or explicit decision
+   - [single-source] <claim> (one advisor — lead, not finding)
 
-   ## Disagreements / trade-offs
-   - Topic — A says … / B says … — **decision:** …
-
+   ## Decision per split claim
    ## Final direction
-   ...
-
    ## Action checklist
-   1. ...
-
    ## Artifacts
-   - path1
-   - path2
    ```
+
+   unanimous = every successful advisor addressed AND supported it; failed
+   advisors are abstentions, never support. Consensus is confidence metadata,
+   not truth. For split claims prefer one tiebreaker from an unconsulted
+   vendor. The `--multi` index also writes a machine-readable `.json` sidecar.
 
 ## Provider syntax
 

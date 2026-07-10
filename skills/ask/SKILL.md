@@ -68,6 +68,13 @@ Examples: `codex@high`, `claude:opus@medium`, `gemini`, `grok:grok-4@high`,
    and suggest the `setup` skill to diagnose. Never fabricate an advisor
    opinion.
 
+## Proposal mode (file work, still read-only)
+
+`--propose` asks the advisor for a **unified diff** instead of an opinion:
+artifact lands under `artifacts/proposals/` with an extracted `.patch`
+sidecar. The advisor never applies anything — validate with
+`git apply --check <patch>`, review, then apply yourself.
+
 ## When NOT to use
 
 - Parallel work-splitting → use your host's native agents/subagents.

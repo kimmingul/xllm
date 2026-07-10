@@ -1,14 +1,14 @@
 ---
 name: setup
 description: >
-  Diagnose and initialize xllm cross-vendor advisors in this project: check
-  which advisor CLIs (codex, claude, gemini, grok, cursor, ollama, lmstudio)
-  are installed and healthy, write the advisor-path marker, and prepare
-  artifact directories. Use for "set up xllm", "xllm doctor", or when the ask
-  or multi skills cannot find providers.
+  Diagnose and configure xllm cross-vendor advisors for THIS project: scan the
+  machine for installed advisor CLIs and local models, then run a short Q&A to
+  pin which provider+model+effort each role should use here, with recommended
+  defaults. Use for "set up xllm", "xllm doctor", "configure advisors for this
+  project", or when the ask or multi skills cannot find providers.
 ---
 
-# setup — Doctor + project marker (xllm)
+# setup — Machine inventory + per-project advisor wizard (xllm)
 
 ## Resolve the advisor script
 
@@ -16,36 +16,58 @@ Claude Code: `"${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js"`.
 Codex / other hosts: the plugin root is two directories above this SKILL.md —
 use `<plugin-root>/scripts/grok-ask-advisor.js`.
 
-## Steps
+## Step 1 — Machine inventory (what CAN run here)
 
-1. **Doctor** (shell/Bash tool):
+```bash
+node <advisor.js> --inventory            # cached (24h TTL)
+node <advisor.js> --inventory --refresh  # force re-probe
+```
+
+Reports per provider: installed, healthy, tier (strong/balanced/local),
+relative cost, and for ollama the **actually pulled models**. Cloud model
+catalogs are not enumerated — for cloud CLIs, installed means the binary
+responds; auth is only proven by `node <plugin-root>/scripts/smoke.mjs --live`.
+
+## Step 2 — Project marker + artifact dirs
+
+```bash
+node <advisor.js> --remember
+```
+
+Writes `.xllm/xllm-advisor-path` (legacy `.grok/` honored) and creates
+secret-redacting artifact dirs with a self-ignoring `.gitignore`.
+
+## Step 3 — Per-project advisor wizard (Q&A)
+
+Goal: pin role → `provider[:model][@effort]` for THIS project.
+
+1. **Understand the project locally.** Look at languages, stack, and
+   security-sensitivity (auth/payment/crypto code) using your own file access.
+   **Never send repository contents to advisors during setup** — your analysis
+   stays local; only the resulting config is written.
+   If the project is empty, ask the user to describe what they intend to
+   build before recommending anything.
+2. **Draft recommendations** from the inventory: strong tier for
+   analysis/security, balanced for design, cheapest healthy local model for
+   critic/docs. Cross-vendor rule: never recommend the host's own vendor.
+3. **Ask the user** one focused question per role that matters (usually
+   analysis, design, critic). Use the host's native question UI — on Claude
+   Code, AskUserQuestion with your recommendation as the first option labeled
+   "(Recommended)"; elsewhere, a compact numbered list. Include a "skip
+   (use built-in routing)" option.
+4. **Persist each answer**:
 
    ```bash
-   node <advisor.js> --doctor
+   node <advisor.js> --set-role analysis codex@high
+   node <advisor.js> --set-role critic ollama:qwen3.6:latest@low
    ```
 
-   Report per-provider status. Note honestly: for cloud CLIs, READY means the
-   binary responds — auth is only proven by a live call
-   (`node <plugin-root>/scripts/smoke.mjs --live`).
+   Verify with `node <advisor.js> --profile-show`. Pinned roles override
+   built-in routing exactly (including effort — no intensity bumping).
 
-2. **Remember the advisor path** in this project (writes
-   `.xllm/xllm-advisor-path`, or legacy `.grok/` if the project already uses
-   it, and creates secret-redacting artifact dirs with a self-ignoring
-   `.gitignore`):
+## Step 4 — Summarize
 
-   ```bash
-   node <advisor.js> --remember
-   ```
-
-3. **Summarize for the user**: which advisors are usable now, which need
-   installing (codex/claude/gemini/grok CLIs, or `ollama serve` for local),
-   and that your host's own vendor is not usable as an advisor from inside
-   itself (same-provider nesting is refused by design — e.g. no claude
-   advisor inside Claude Code, no codex advisor inside Codex).
-
-## Safety reminders to surface
-
-- Advisors are read-only by default; `--allow-write` / `XLLM_ALLOW_MUTATION=1`
-  is the explicit opt-in.
-- Artifacts persist prompts/outputs (redacted); retention via
-  `--clean-artifacts [--older-than=DAYS]`, opt-out via `--no-artifacts`.
+Report: usable advisors now, what needs installing (`ollama serve`, missing
+CLIs), pinned roles, and the standing safety defaults — advisors read-only
+(`--allow-write` to opt in), same-vendor nesting refused, artifacts redacted
+with `--clean-artifacts [--older-than=DAYS]` retention.

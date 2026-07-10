@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.5.0 — 2026-07-11
+
+Three improvements approved after a cross-vendor design review (codex@high +
+grok@high independent evaluations, unanimous on scope).
+
+### Added — machine inventory + per-project advisor profile
+- `--inventory [--refresh]` / `xllm inventory`: machine capability cache at
+  `~/.xllm/inventory.json` (24h TTL) — installed CLIs, health, tier/cost
+  metadata, and actually-pulled ollama models. Cloud model catalogs are
+  deliberately not enumerated (auth only proven by `smoke --live`).
+- Coarse cost metadata per provider (`tier` strong/balanced/local,
+  `relative_cost` 0–10, `latency_class`), TOML-overridable; deliberately
+  relative — no absolute prices.
+- Project role pins: `[roles]` table (`analysis = "codex@high"`) via
+  `--set-role` / `--set-default` / `--profile-show` (`xllm profile …`),
+  written with a comment-preserving line-based TOML upsert. Pinned roles
+  bypass routing reorder and intensity effort-bumping.
+- Cost-aware routing: low-intensity roles sort candidates by relative cost
+  (local models first), high-intensity judgment roles sort by tier strength;
+  `pick` output now includes `pinned` and `cost` metadata.
+- setup skills rewritten as a per-project wizard: inventory → recommendations
+  (host analyzes the project locally; repo contents never sent to advisors) →
+  host-native Q&A (AskUserQuestion on Claude Code, "(Recommended)" first) →
+  `--set-role` persistence. Empty project → ask the user to describe it.
+
+### Added — consensus-depth synthesis
+- `--multi` index now includes a synthesis contract (unanimous / majority /
+  split / single-source label definitions, advisor citations, "failed
+  advisors are abstentions", "consensus is confidence metadata, not truth",
+  split → tiebreaker from an unconsulted vendor) plus a machine-readable
+  `.json` sidecar (specs, exit codes, artifact/patch paths, labels).
+- multi/xllm skills synthesize with labeled claims instead of a flat
+  agreed/disagreed list.
+
+### Added — proposal mode (file work, advisors stay read-only)
+- `--propose` / `xllm propose`: wraps the request in a change-proposal
+  contract (rationale + exactly one unified-diff block, no apply claims);
+  artifact under `artifacts/proposals/` with an extracted `.patch` sidecar
+  and a `git apply --check` hint. Works through `--multi` for N candidate
+  patches (cheap models draft, strong model judges). Application is always
+  host/user-side after review.
+
 ## 0.4.0 — 2026-07-11
 
 ### Added

@@ -59,7 +59,7 @@ for (const r of report.recommendations || []) {
   console.log('•', r);
 }
 
-const skills = ['ask', 'ccg', 'ralph', 'team', 'verify', 'xllm-setup'];
+const skills = ['ask', 'xllm', 'ralph', 'team', 'verify', 'xllm-setup'];
 const skillRoot = path.join(process.cwd(), '.grok', 'skills');
 if (fs.existsSync(skillRoot)) {
   console.log('');

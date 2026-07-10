@@ -1,11 +1,17 @@
 # Changelog
 
+## 0.1.1 — 2026-07-10
+
+### Changed
+- Rename multi-advisor skill **`/ccg` → `/xllm`** (drop OMC-derived name)
+- Artifact dir: `.grok/artifacts/xllm/` (was `ccg/`)
+
 ## 0.1.0 — 2026-07-10
 
 Initial public release of **grok-xllm** — multi-LLM orchestration for Grok Build.
 
 ### Features
-- Headless multi-CLI advisors: `/ask`, `/ccg` via `scripts/grok-ask-advisor.js`
+- Headless multi-CLI advisors: `/ask`, `/xllm` via `scripts/grok-ask-advisor.js`
 - Spec syntax: `provider[:model][@effort]` (e.g. `codex@high`, `ollama:qwen3.6:latest`)
 - Provider profiles: `.grok/xllm-providers.toml`
 - Prefer **antigravity** over gemini for design-side defaults (Windows → gemini fallback)
@@ -17,4 +23,4 @@ Initial public release of **grok-xllm** — multi-LLM orchestration for Grok Bui
 - First-class Windows support (`shell:false`, npm `.cmd` shim unwrap)
 
 ### Skills
-`ask`, `ccg`, `ralph`, `team`, `verify`, `xllm-setup`
+`ask`, `xllm`, `ralph`, `team`, `verify`, `xllm-setup`

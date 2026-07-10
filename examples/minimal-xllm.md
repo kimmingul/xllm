@@ -15,7 +15,7 @@ node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "Security review of the 
 
 ```text
 /xllm-setup
-/ccg ollama:qwen3.6:latest,codex Review scripts/grok-ask-advisor.js for security and simplicity
+/xllm ollama:qwen3.6:latest,codex Review scripts/grok-ask-advisor.js for security and simplicity
 ```
 
 ## Ralph micro-task

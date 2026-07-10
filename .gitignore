@@ -6,7 +6,7 @@ dist/
 
 # Runtime artifacts (keep directory via .gitkeep)
 .grok/artifacts/ask/*
-.grok/artifacts/ccg/*
+.grok/artifacts/xllm/*
 .grok/artifacts/ralph/*
 .grok/artifacts/team/*
 .grok/artifacts/verify/*

@@ -5,7 +5,7 @@ description: >
   Use when you want authentic responses from external CLIs: claude, codex, gemini,
   antigravity (agy), grok, cursor, or local ollama/lmstudio/lemonade.
   Routes a task through the chosen provider's headless mode and saves a structured artifact.
-  Primary building block for /ccg, /ralph, and /team.
+  Primary building block for /xllm, /ralph, and /team.
 argument-hint: "<provider[:model]> <task or question>"
 user-invocable: true
 ---

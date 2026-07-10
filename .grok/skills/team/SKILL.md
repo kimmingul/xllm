@@ -53,7 +53,7 @@ node …/xllm-routing.js pick-team "<task>" --ready=codex,ollama,grok --json
 | critic | ollama; high→codex | medium | volume local |
 | tests | native / ollama | medium | |
 | docs | native / ollama | low | |
-| analysis | codex | high | CCG-style |
+| analysis | codex | high | xllm multi-advisor style |
 | verify | native verifier | medium | CLI second opinion on high |
 
 Intensity signals (examples): security/auth/payment/race/migrate → **high**; typo/readme/nit → **low**.
@@ -82,7 +82,7 @@ Intensity signals (examples): security/auth/payment/race/migrate → **high**; t
 ## 4. Synthesize
 
 - Read artifacts + subagent summaries.
-- Optional: `/ccg` using analysis+design defaults (codex + antigravity).
+- Optional: `/xllm` using analysis+design defaults (codex + antigravity).
 - Write `.grok/artifacts/team/<slug>-summary.md` including **routing plan JSON** (roles, intensity, specs used).
 
 ## 5. Done

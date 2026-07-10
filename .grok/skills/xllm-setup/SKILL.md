@@ -33,7 +33,7 @@ Confirm `.grok/xllm-advisor-path` exists and points at a real file.
 Ensure:
 
 ```text
-.grok/artifacts/ask|ccg|ralph|team|verify/
+.grok/artifacts/ask|xllm|ralph|team|verify/
 ```
 
 (`--remember` / `--doctor` also create these.)
@@ -59,7 +59,7 @@ node <advisor.js> ollama:… "Reply with exactly: xllm-setup-ok"
 
 ## 5. Inventory
 
-Skills: ask, ccg, ralph, team, verify, xllm-setup  
+Skills: ask, xllm, ralph, team, verify, xllm-setup  
 Agents: critic, executor, verifier, security-reviewer (and friends)
 
 ## 6. User summary
@@ -71,7 +71,7 @@ Print:
 - Recommended:
 
 ```text
-/ccg <local>,<cloud> "…"
+/xllm <local>,<cloud> "…"
 /ralph --critic=<local>,<cloud> "…"
 /ask <provider> "…"
 ```

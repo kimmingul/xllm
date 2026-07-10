@@ -70,7 +70,7 @@ Use `/verify` or the same protocol:
 
 ### 5. Final gate (all stories done)
 
-1. Optional `/ccg` cross-check on the whole change.
+1. Optional `/xllm` cross-check on the whole change.
 2. Full test/build sweep.
 3. Summary: stories, evidence paths, remaining risks.
 4. **Only then** claim done.

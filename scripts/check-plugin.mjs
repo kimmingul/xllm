@@ -29,7 +29,7 @@ ok(plugin.name === 'grok-xllm', 'plugin name is grok-xllm');
 ok(typeof plugin.version === 'string' && /^\d+\.\d+\.\d+/.test(plugin.version), 'semver version');
 ok(Array.isArray(plugin.skills) && plugin.skills.length >= 6, 'skills array has core set');
 
-const requiredSkills = ['ask', 'ccg', 'ralph', 'team', 'verify', 'xllm-setup'];
+const requiredSkills = ['ask', 'xllm', 'ralph', 'team', 'verify', 'xllm-setup'];
 for (const s of requiredSkills) {
   const skillMd = path.join(root, '.grok', 'skills', s, 'SKILL.md');
   ok(fs.existsSync(skillMd), `skill ${s}/SKILL.md`);
@@ -87,7 +87,7 @@ ok(
 );
 
 // Skills must route through the advisor (by name or path-resolution contract)
-for (const s of ['ask', 'ccg', 'ralph', 'team']) {
+for (const s of ['ask', 'xllm', 'ralph', 'team']) {
   const body = fs.readFileSync(path.join(root, '.grok', 'skills', s, 'SKILL.md'), 'utf8');
   const wired =
     body.includes('grok-ask-advisor.js') ||
@@ -100,7 +100,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 ok(pkg.name === 'grok-xllm', 'package.json name is grok-xllm');
 ok(pkg.version === plugin.version, `package.json version matches plugin.json (${pkg.version})`);
 
-for (const sub of ['ask', 'ccg', 'ralph', 'team', 'verify']) {
+for (const sub of ['ask', 'xllm', 'ralph', 'team', 'verify']) {
   ok(
     fs.existsSync(path.join(root, '.grok', 'artifacts', sub, '.gitkeep')) ||
       fs.existsSync(path.join(root, '.grok', 'artifacts', sub)),

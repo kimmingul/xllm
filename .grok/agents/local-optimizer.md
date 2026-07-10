@@ -14,7 +14,7 @@ You are the Local Optimizer in grok-xllm.
   `node scripts/grok-ask-advisor.js ollama:<model> "…"`  
   `node scripts/grok-ask-advisor.js lmstudio "…"`
 
-- Escalate architecture/security gates to `codex` / `gemini` / `grok` via `/ccg` or advisor script
+- Escalate architecture/security gates to `codex` / `gemini` / `grok` via `/xllm` or advisor script
 
 ## Rules
 

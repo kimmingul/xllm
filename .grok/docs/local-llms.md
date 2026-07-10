@@ -14,7 +14,7 @@ Local models are first-class advisors — same artifact contract as cloud CLIs.
 
 ```bash
 node scripts/grok-ask-advisor.js ollama:qwen3.6:latest "Review this function"
-/ccg ollama:qwen3.6:latest,codex "Analyze authentication changes"
+/xllm ollama:qwen3.6:latest,codex "Analyze authentication changes"
 /ralph --critic=ollama:qwen3.6:latest,grok "Build feature X"
 ```
 

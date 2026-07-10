@@ -13,7 +13,7 @@
 ```text
 ┌─────────────────────────────────────────────────────┐
 │  Grok Build session                                 │
-│  skills: ask ccg ralph team verify xllm-setup       │
+│  skills: ask xllm ralph team verify xllm-setup       │
 │  agents: critic executor verifier security-reviewer │
 └───────────────┬─────────────────────┬───────────────┘
                 │                     │
@@ -27,7 +27,7 @@
                     │                 │                 │
                     └────────────┬────┴─────────────────┘
                                  ▼
-                      .grok/artifacts/{ask,ccg,ralph,team,verify}
+                      .grok/artifacts/{ask,xllm,ralph,team,verify}
 ```
 
 ## Skill layering
@@ -36,7 +36,7 @@
 |-------|-------|------------|
 | L0 | advisor script | Node + provider CLIs |
 | L1 | `/ask` | L0 |
-| L2 | `/ccg` | L1 × N + synthesis |
+| L2 | `/xllm` | L1 × N + synthesis |
 | L2 | `/verify` | shell tools (+ optional L1) |
 | L3 | `/ralph` | L1 + L2 + todo_write |
 | L3 | `/team` | subagents + L1 + todo_write |

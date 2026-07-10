@@ -16,7 +16,7 @@ You are the Executor in grok-xllm.
 
 ## When stuck or high risk
 
-- Suggest `/ask` or `/ccg` for external model opinions.
+- Suggest `/ask` or `/xllm` for external model opinions.
 - Hand off verification mindset to criteria, not vibes.
 
 Deliver working, evidenced implementation.

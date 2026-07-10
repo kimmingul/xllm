@@ -32,7 +32,7 @@ You want at least **one** READY advisor. See [install.md](./install.md).
 
 ```text
 /ask grok "Summarize scripts/grok-ask-advisor.js in 5 bullets"
-/ccg ollama:qwen3.6:latest,codex "Review the advisor script for security"
+/xllm ollama:qwen3.6:latest,codex "Review the advisor script for security"
 ```
 
 ## 4. Evidence-gated work

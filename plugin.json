@@ -1,7 +1,7 @@
 {
   "name": "grok-xllm",
-  "version": "0.1.0",
-  "description": "grok-xllm — multi-LLM orchestration for Grok Build. CLI advisors (ask/ccg), ralph evidence loops, thin team playbooks, first-class local LLMs.",
+  "version": "0.1.1",
+  "description": "grok-xllm — multi-LLM orchestration for Grok Build. CLI advisors (/ask, /xllm), ralph evidence loops, thin team playbooks, first-class local LLMs.",
   "author": {
     "name": "grok-xllm contributors"
   },
@@ -14,7 +14,6 @@
     "orchestration",
     "multi-llm",
     "xllm",
-    "ccg",
     "headless-cli",
     "local-llm",
     "ollama",
@@ -22,7 +21,7 @@
   ],
   "skills": [
     "./.grok/skills/ask/",
-    "./.grok/skills/ccg/",
+    "./.grok/skills/xllm/",
     "./.grok/skills/ralph/",
     "./.grok/skills/team/",
     "./.grok/skills/verify/",

@@ -28,7 +28,7 @@ Writes:
 
 ```text
 .grok/xllm-advisor-path          # absolute path to grok-ask-advisor.js
-.grok/artifacts/{ask,ccg,...}/
+.grok/artifacts/{ask,xllm,...}/
 ```
 
 ### Environment variables (optional)

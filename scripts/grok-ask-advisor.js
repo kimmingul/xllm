@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 
@@ -148,7 +148,7 @@ export function getProviderMeta() {
     spec_syntax: 'provider[:model][@effort]',
     efforts: [...KNOWN_EFFORTS],
     notes: {
-      antigravity: 'Preferred over gemini for design-side /ccg when available',
+      antigravity: 'Preferred over gemini for design-side /xllm when available',
       windows_antigravity: 'Falls back to gemini on Windows headless',
     },
   };
@@ -399,7 +399,7 @@ export function resolvePreferredProvider(name, profiles = null) {
   return { provider: p, substituted: false };
 }
 
-export function pickDefaultCcgPair(readyCloud = [], readyLocal = [], profiles = null) {
+export function pickDefaultXllmPair(readyCloud = [], readyLocal = [], profiles = null) {
   const prof = profiles || loadProviderProfiles();
   const analysis = (prof.defaults.analysis_provider || 'codex').toLowerCase();
   let design = (prof.defaults.design_provider || 'antigravity').toLowerCase();
@@ -1127,7 +1127,7 @@ export function rememberAdvisorPath(projectRoot = process.cwd()) {
   fs.mkdirSync(dir, { recursive: true });
   const marker = path.join(dir, 'xllm-advisor-path');
   fs.writeFileSync(marker, `${advisor}\n`, 'utf8');
-  for (const sub of ['ask', 'ccg', 'ralph', 'team', 'verify']) {
+  for (const sub of ['ask', 'xllm', 'ralph', 'team', 'verify']) {
     fs.mkdirSync(path.join(dir, 'artifacts', sub), { recursive: true });
   }
   return { advisor, marker };
@@ -1376,9 +1376,9 @@ export function runDoctor() {
       'No advisors ready. Install codex/antigravity/grok or start ollama.'
     );
   } else {
-    const pair = pickDefaultCcgPair(readyCloud, readyLocal, profiles);
+    const pair = pickDefaultXllmPair(readyCloud, readyLocal, profiles);
     report.recommendations.push(
-      `Suggested /ccg default (antigravity>gemini for design): ${pair.join(',')}`
+      `Suggested /xllm default (antigravity>gemini for design): ${pair.join(',')}`
     );
   }
   if (IS_WINDOWS) {
@@ -1394,7 +1394,7 @@ export function runDoctor() {
     'Spec syntax: provider[:model][@effort]  e.g. codex@high  antigravity:model  ollama:qwen3.6:latest'
   );
 
-  for (const sub of ['ask', 'ralph', 'team', 'verify', 'ccg']) {
+  for (const sub of ['ask', 'ralph', 'team', 'verify', 'xllm']) {
     fs.mkdirSync(path.join(process.cwd(), '.grok', 'artifacts', sub), { recursive: true });
   }
   report.artifactsReady = true;
@@ -1511,13 +1511,13 @@ async function main() {
       if (result.artifactPath) paths.push(result.artifactPath);
       if (result.exitCode !== 0) failed += 1;
     }
-    const dir = path.join(process.cwd(), '.grok', 'artifacts', 'ccg');
+    const dir = path.join(process.cwd(), '.grok', 'artifacts', 'xllm');
     fs.mkdirSync(dir, { recursive: true });
     const indexPath = path.join(dir, `multi-${slugify(parsed.prompt)}-${ts()}.md`);
     fs.writeFileSync(
       indexPath,
       [
-        '# CCG multi-run index',
+        '# xllm multi-run index',
         '',
         `- Created at: ${new Date().toISOString()}`,
         `- Providers: ${parsed.providers.map((p) => p.spec).join(', ')}`,

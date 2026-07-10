@@ -21,7 +21,7 @@ import {
   rememberAdvisorPath,
   parseSimpleToml,
   loadProviderProfiles,
-  pickDefaultCcgPair,
+  pickDefaultXllmPair,
   resolvePreferredProvider,
   isEffortToken,
 } from './grok-ask-advisor.js';
@@ -238,8 +238,8 @@ test('loadProviderProfiles prefers antigravity design', () => {
   assert.strictEqual(p.defaults.design_fallback, 'gemini');
 });
 
-test('pickDefaultCcgPair prefers antigravity when ready', () => {
-  const pair = pickDefaultCcgPair(
+test('pickDefaultXllmPair prefers antigravity when ready', () => {
+  const pair = pickDefaultXllmPair(
     ['codex', 'antigravity', 'gemini', 'grok'],
     ['ollama']
   );

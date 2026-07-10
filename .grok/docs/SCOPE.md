@@ -17,7 +17,7 @@ It does **not** natively provide:
 | Priority | Capability | Mechanism |
 |----------|------------|-----------|
 | P0 | Single advisor | `/ask` + `scripts/grok-ask-advisor.js` |
-| P0 | Multi advisor + synthesis | `/ccg` + artifacts |
+| P0 | Multi advisor + synthesis | `/xllm` + artifacts |
 | P0 | Local LLMs | ollama / lmstudio / lemonade |
 | P0 | Reliable Windows quoting | `shell: false`, stdin, cmd-shim unwrap |
 | P1 | Evidence loop | `/ralph` + `/verify` |
@@ -37,7 +37,7 @@ It does **not** natively provide:
 
 1. `npm test` and `npm run check` pass without live LLMs  
 2. `--doctor` reports READY providers accurately  
-3. A `/ccg` run produces ≥2 artifacts + synthesis  
+3. A `/xllm` run produces ≥2 artifacts + synthesis  
 4. A `/ralph` run refuses completion without critic + verify evidence  
 
 ## Naming / version

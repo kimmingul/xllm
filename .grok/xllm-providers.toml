@@ -6,7 +6,7 @@
 #   4. built-in defaults
 
 [defaults]
-# Preferred pair for /ccg when user omits providers
+# Preferred pair for /xllm when user omits providers
 analysis_provider = "codex"
 # Prefer Antigravity over Gemini for design-side reviews
 design_provider = "antigravity"

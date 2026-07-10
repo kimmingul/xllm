@@ -8,7 +8,7 @@ Prioritize clarity, usability, accessibility with low cost.
 
 Suggest copy, flow, and small UI improvements.
 
-Perfect for pairing with cloud architect in /ccg or /team.
+Perfect for pairing with cloud architect in /xllm or /team.
 """
 reasoning_effort = "medium"
 default_capability_mode = "read-only"

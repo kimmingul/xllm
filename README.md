@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.1.0** — Multi-LLM orchestration plugin for [Grok Build](https://grok.x.ai).
+**v0.1.1** — Multi-LLM orchestration plugin for [Grok Build](https://grok.x.ai).
 
 Grok is the **conductor**. External and local models are **advisors**.
 
@@ -35,7 +35,7 @@ In a Grok session:
 ```text
 /xllm-setup
 /ask codex@high "Review this change"
-/ccg codex,antigravity "Security + design review"
+/xllm codex,antigravity "Security + design review"
 /team "Refactor auth with tests"
 ```
 
@@ -81,13 +81,13 @@ Profiles and role routing: [`.grok/xllm-providers.toml`](.grok/xllm-providers.to
 | Skill | Purpose |
 |-------|---------|
 | `/ask` | One headless advisor + artifact |
-| `/ccg` | 2+ advisors + synthesis |
+| `/xllm` | 2+ advisors + synthesis |
 | `/ralph` | Story loop until evidence |
 | `/verify` | PASS/FAIL evidence table |
 | `/team` | Parallel workers; **must** run `pick-team` first |
 | `/xllm-setup` | Doctor + path marker + recommendations |
 
-Artifacts: `.grok/artifacts/{ask,ccg,ralph,team,verify}/`
+Artifacts: `.grok/artifacts/{ask,xllm,ralph,team,verify}/`
 
 ## Auto routing (/team)
 
@@ -146,4 +146,4 @@ MIT — see [LICENSE](LICENSE).
 ## Notes
 
 - **Windows:** antigravity headless is limited → auto-fallback to gemini when chosen.  
-- **v0.1.0** is the first public release number for this plugin.  
+- Public version line starts at **0.1.x**.  

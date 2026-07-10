@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Role + intensity based advisor routing for grok-xllm (/team, /ralph, /ccg helpers).
+ * Role + intensity based advisor routing for grok-xllm (/team, /ralph, /xllm helpers).
  *
  *   node scripts/xllm-routing.js pick security "auth token refresh"
  *   node scripts/xllm-routing.js pick-team "refactor payment webhooks" --roles implement,security,critic
@@ -90,7 +90,7 @@ export const BUILTIN_ROLE_ROUTES = {
     effort: 'high',
     native_agent: 'planner',
     prefer_native: false,
-    notes: 'CCG analysis lane',
+    notes: 'xllm analysis lane',
   },
   docs: {
     providers: ['ollama', 'grok', 'antigravity'],

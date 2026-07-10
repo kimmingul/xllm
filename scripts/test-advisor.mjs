@@ -241,6 +241,16 @@ test('writeArtifact includes effort', () => {
   assert.ok(body.includes('Advisor version'));
 });
 
+test('cleanModelText strips spinner CSI sequences (not just colors)', () => {
+  const raw =
+    '\x1b[?25l\x1b[1G⠙ \x1b[K\x1b[?25h\x1b[?2026lwriting manifest \x1b[Ksuccess\x1b[?2026l\n\nXLLM_SMOKE_OK';
+  const cleaned = cleanOllamaOutput(raw);
+  assert.ok(cleaned.includes('XLLM_SMOKE_OK'));
+  assert.ok(!cleaned.includes('[K'));
+  assert.ok(!cleaned.includes('[?25'));
+  assert.ok(!cleaned.includes('\x1b'));
+});
+
 test('cleanOllamaOutput strips thinking blocks', () => {
   const raw = `Thinking...\nsecret chain\n...done thinking.\n\nXLLM_SMOKE_OK\n\n? ? ? `;
   const cleaned = cleanOllamaOutput(raw);

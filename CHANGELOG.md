@@ -17,6 +17,18 @@
   sync, skills dir, interface block, marketplace self-hosting) and that
   shared skills document non-Claude plugin-root resolution.
 
+### Fixed
+- `cleanModelText` now strips all ANSI CSI/OSC escape sequences (cursor
+  moves, erase, private modes like `[?25h` from ollama pull spinners), not
+  just SGR color codes — found via live install e2e where spinner control
+  codes leaked into artifact summaries.
+
+### Notes (verified against Codex CLI 0.144.1)
+- `codex plugin marketplace add <local-git-repo>` snapshots **git HEAD**,
+  not the working tree — commit before installing from a local checkout.
+- When `.codex-plugin/plugin.json` is absent, Codex falls back to reading
+  `.claude-plugin/plugin.json` (Claude-plugin compatibility).
+
 ## 0.3.0 — 2026-07-11
 
 ### Added

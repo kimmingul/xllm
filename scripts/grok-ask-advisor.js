@@ -811,7 +811,12 @@ function isNoiseLine(line) {
 
 export function cleanModelText(raw) {
   let s = String(raw || '')
-    .replace(/\x1b\[[0-9;]*m/g, '')
+    // All CSI sequences (colors, cursor moves, erase, private modes like
+    // [?25h/[?2026l from progress spinners), OSC titles, and stray ESCs —
+    // not just SGR color codes.
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b./g, '')
     .replace(/\r/g, '');
   s = s.replace(/Thinking\.\.\.[\s\S]*?\.\.\.done thinking\./gi, '');
   s = s.replace(/<think>[\s\S]*?<\/think>/gi, '');

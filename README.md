@@ -1,8 +1,8 @@
 # grok-xllm
 
-**v0.2.0** — Multi-LLM orchestration plugin for [Grok Build](https://grok.x.ai).
+**v0.3.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai) and **Claude Code**.
 
-Grok is the **conductor**. External and local models are **advisors**.
+The host CLI is the **conductor**. External and local models are **advisors**.
 
 Grok Build already has subagents, plan mode, skills, and hooks.  
 **grok-xllm** adds:
@@ -27,7 +27,9 @@ Grok Build already has subagents, plan mode, skills, and hooks.
   Use `--no-artifacts` / `XLLM_NO_ARTIFACTS=1` to print instead of writing,
   and `xllm clean [--older-than=DAYS]` for retention.
 
-## Install (Grok plugin)
+## Install
+
+### Grok Build
 
 ```bash
 # Local checkout
@@ -36,6 +38,22 @@ grok plugin install . --trust
 # From GitHub
 grok plugin install kimmingul/grok-xllm --trust
 ```
+
+### Claude Code
+
+```text
+/plugin marketplace add kimmingul/grok-xllm
+/plugin install xllm@xllm
+```
+
+Then in a session: `/xllm:setup`, `/xllm:ask codex@high "…"`,
+`/xllm:multi codex,gemini "…"`.
+
+The Claude adapter ports **only** the cross-vendor core (`ask`, `multi`,
+`setup`). Teams, loops, planning, and verification are NOT ported — Claude
+Code's native agents, tasks, and verify/review skills already cover them.
+Note: `claude` as an advisor is refused inside Claude Code (same-provider
+nesting); use codex/gemini/grok/cursor or local models.
 
 Repo: [github.com/kimmingul/grok-xllm](https://github.com/kimmingul/grok-xllm)
 
@@ -133,14 +151,16 @@ npm run smoke:live   # optional live READY provider
 ## Layout
 
 ```text
-plugin.json
+plugin.json             # Grok Build manifest
+.claude-plugin/         # Claude Code manifest + marketplace (plugin name: xllm)
+skills/                 # Claude Code skills: ask, multi, setup
 package.json
-scripts/
+scripts/                # host-neutral core
   grok-ask-advisor.js   # multi-LLM entry
   xllm-routing.js       # role/intensity picker
   xllm.mjs              # CLI
   xllm-doctor.js
-.grok/
+.grok/                  # Grok Build adapter
   skills/ agents/ personas/
   xllm-providers.toml
   docs/

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 — 2026-07-11
+
+### Added
+- **Claude Code adapter** (`.claude-plugin/plugin.json` +
+  `.claude-plugin/marketplace.json` + `skills/`): namespaced skills
+  `/xllm:ask`, `/xllm:multi`, `/xllm:setup` over the same host-neutral core.
+  Install: `/plugin marketplace add kimmingul/grok-xllm` →
+  `/plugin install xllm@xllm`.
+- Deliberately NOT ported to Claude Code: `/ralph`, `/team`, `/verify`,
+  agents, personas — Claude Code's native agents/tasks/verification cover
+  those; porting them would recreate redundant-orchestration overhead.
+- `check-plugin` now validates the Claude adapter (manifest/marketplace
+  parse, version sync with package.json, skill frontmatter,
+  CLAUDE_PLUGIN_ROOT wiring, read-only language).
+
 ## 0.2.0 — 2026-07-11
 
 ### Security / safety (breaking defaults)

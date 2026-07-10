@@ -112,6 +112,34 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 ok(pkg.name === 'grok-xllm', 'package.json name is grok-xllm');
 ok(pkg.version === plugin.version, `package.json version matches plugin.json (${pkg.version})`);
 
+// Claude Code adapter (.claude-plugin/ + ./skills/)
+{
+  const cPluginPath = path.join(root, '.claude-plugin', 'plugin.json');
+  const cMarketPath = path.join(root, '.claude-plugin', 'marketplace.json');
+  ok(fs.existsSync(cPluginPath), 'claude adapter: .claude-plugin/plugin.json exists');
+  ok(fs.existsSync(cMarketPath), 'claude adapter: .claude-plugin/marketplace.json exists');
+  const cPlugin = JSON.parse(fs.readFileSync(cPluginPath, 'utf8'));
+  const cMarket = JSON.parse(fs.readFileSync(cMarketPath, 'utf8'));
+  ok(cPlugin.name === 'xllm', 'claude adapter: plugin name is xllm');
+  ok(cPlugin.version === pkg.version, `claude adapter: version matches package.json (${cPlugin.version})`);
+  ok(
+    Array.isArray(cMarket.plugins) && cMarket.plugins[0]?.source === './',
+    'claude adapter: marketplace self-hosts plugin at ./'
+  );
+  ok(
+    cMarket.plugins?.[0]?.version === pkg.version,
+    'claude adapter: marketplace version matches package.json'
+  );
+  for (const entry of cPlugin.skills || []) {
+    const skillMd = path.join(root, entry, 'SKILL.md');
+    ok(fs.existsSync(skillMd), `claude skill ${entry}SKILL.md exists`);
+    const body = fs.readFileSync(skillMd, 'utf8');
+    ok(/^---\n[\s\S]*?name:\s*\S+/m.test(body), `claude skill ${entry} has frontmatter name`);
+    ok(body.includes('CLAUDE_PLUGIN_ROOT'), `claude skill ${entry} wires advisor via CLAUDE_PLUGIN_ROOT`);
+    ok(/read-only/i.test(body), `claude skill ${entry} states read-only default`);
+  }
+}
+
 for (const sub of ['ask', 'xllm', 'ralph', 'team', 'verify']) {
   ok(
     fs.existsSync(path.join(root, '.grok', 'artifacts', sub, '.gitkeep')) ||

@@ -1,0 +1,26 @@
+{
+  "name": "xllm",
+  "version": "0.3.0",
+  "description": "Cross-vendor LLM advisors for Claude Code: ask codex, gemini, grok, cursor, or local ollama/lmstudio from inside a session and synthesize their independent opinions. Read-only by default.",
+  "author": {
+    "name": "grok-xllm contributors"
+  },
+  "repository": "https://github.com/kimmingul/grok-xllm",
+  "homepage": "https://github.com/kimmingul/grok-xllm",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "multi-llm",
+    "advisors",
+    "cross-vendor",
+    "second-opinion",
+    "ollama",
+    "local-llm",
+    "xllm"
+  ],
+  "skills": [
+    "./skills/ask/",
+    "./skills/multi/",
+    "./skills/setup/"
+  ]
+}

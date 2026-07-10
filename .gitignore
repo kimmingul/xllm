@@ -20,6 +20,7 @@ dist/
 
 # Local session / reference noise (never ship)
 .omc/
+.serena/
 .omx/
 .remember/
 .scratch/

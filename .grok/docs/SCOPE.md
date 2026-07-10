@@ -36,9 +36,9 @@ It does **not** natively provide:
 ## Success metrics
 
 1. `npm test` and `npm run check` pass without live LLMs  
-2. `--doctor` reports READY providers accurately  
+2. `--doctor` reports provider availability accurately (READY = binary responds; auth is only proven by `smoke --live`)  
 3. A `/xllm` run produces ≥2 artifacts + synthesis  
-4. A `/ralph` run refuses completion without critic + verify evidence  
+4. The `/ralph` playbook instructs the host not to claim completion without critic + verify evidence (prompt-level protocol — not a mechanical stop-gate, which is out of scope by design)  
 
 ## Naming / version
 

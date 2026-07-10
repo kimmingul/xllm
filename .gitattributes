@@ -1,0 +1,5 @@
+# Keep LF everywhere: SKILL.md frontmatter checks and Node scripts assume LF,
+# and Windows contributors with core.autocrlf=true would otherwise break them.
+* text=auto eol=lf
+*.jpg binary
+*.png binary

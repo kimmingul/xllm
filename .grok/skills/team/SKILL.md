@@ -10,6 +10,8 @@ user-invocable: true
 
 # /team — Parallel mixed workers + auto routing
 
+> `<state>` = project state dir: `.xllm/` (default) or legacy `.grok/` when the project already uses it.
+
 Not a heavy runtime. Use Grok natives + advisor script.  
 **Always pick model/effort via the routing table before launching CLI workers.**
 
@@ -76,14 +78,14 @@ Intensity signals (examples): security/auth/payment/race/migrate → **high**; t
 
 ## 3. Coordinate
 
-- Update todos; collect `.grok/artifacts/ask/*`.
+- Update todos; collect `<state>/artifacts/ask/*`.
 - Stuck → re-`pick` with `--force-cli` or higher intensity, or reassign.
 
 ## 4. Synthesize
 
 - Read artifacts + subagent summaries.
 - Optional: `/xllm` using analysis+design defaults (codex + antigravity).
-- Write `.grok/artifacts/team/<slug>-summary.md` including **routing plan JSON** (roles, intensity, specs used).
+- Write `<state>/artifacts/team/<slug>-summary.md` including **routing plan JSON** (roles, intensity, specs used).
 
 ## 5. Done
 

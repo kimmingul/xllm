@@ -24,6 +24,13 @@ import {
   pickDefaultXllmPair,
   resolvePreferredProvider,
   isEffortToken,
+  resolveStateDir,
+  mutationAllowed,
+  buildAdvisorEnv,
+  detectHostCli,
+  redactSecrets,
+  cleanArtifacts,
+  HOST_SESSION_ENV_VARS,
 } from './grok-ask-advisor.js';
 import fs from 'fs';
 import path from 'path';
@@ -108,7 +115,7 @@ test('slugify truncates and sanitizes', () => {
   assert.ok(slugify('a'.repeat(100)).length <= 60);
 });
 
-test('resolveSpawnConfig grok model+effort', () => {
+test('resolveSpawnConfig grok model+effort (read-only default)', () => {
   const c = resolveSpawnConfig('grok', 'grok-4', 'hi', process.env, {
     effort: 'high',
   });
@@ -117,10 +124,18 @@ test('resolveSpawnConfig grok model+effort', () => {
   assert.ok(c.args.includes('grok-4'));
   assert.ok(c.args.includes('--reasoning-effort'));
   assert.ok(c.args.includes('high'));
-  assert.ok(c.args.includes('--always-approve'));
+  assert.ok(!c.args.includes('--always-approve'));
 });
 
-test('resolveSpawnConfig codex model+effort', () => {
+test('resolveSpawnConfig grok mutation opt-in restores approval flag', () => {
+  const c = resolveSpawnConfig('grok', null, 'hi', process.env, {
+    allowMutation: true,
+  });
+  assert.ok(c.args.includes('--always-approve'));
+  assert.strictEqual(c.mutation, true);
+});
+
+test('resolveSpawnConfig codex model+effort (read-only sandbox default)', () => {
   const c = resolveSpawnConfig('codex', 'o3', 'short', process.env, {
     effort: 'xhigh',
   });
@@ -129,6 +144,46 @@ test('resolveSpawnConfig codex model+effort', () => {
   assert.ok(c.args.includes('o3'));
   assert.ok(c.args.includes('-c'));
   assert.ok(c.args.some((a) => String(a).includes('model_reasoning_effort=xhigh')));
+  assert.ok(c.args.includes('--sandbox'));
+  assert.ok(c.args.includes('read-only'));
+  assert.ok(!c.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+});
+
+test('resolveSpawnConfig codex mutation opt-in uses dangerous flag', () => {
+  const c = resolveSpawnConfig('codex', null, 'short', process.env, {
+    allowMutation: true,
+  });
+  assert.ok(c.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.ok(!c.args.includes('read-only'));
+});
+
+test('resolveSpawnConfig gemini has no --yolo by default', () => {
+  const c = resolveSpawnConfig('gemini', null, 'hi', process.env, {});
+  assert.ok(!c.args.includes('--yolo'));
+  const m = resolveSpawnConfig('gemini', null, 'hi', process.env, {
+    allowMutation: true,
+  });
+  assert.ok(m.args.includes('--yolo'));
+});
+
+test('resolveSpawnConfig antigravity has no permission bypass by default', () => {
+  const c = resolveSpawnConfig('antigravity', null, 'hi', process.env, {});
+  assert.ok(!c.args.includes('--dangerously-skip-permissions'));
+});
+
+test('resolveSpawnConfig cursor keeps sandbox by default', () => {
+  const c = resolveSpawnConfig('cursor', null, 'hi', process.env, {});
+  assert.ok(!c.args.includes('disabled'));
+  assert.ok(!c.args.includes('--force'));
+  assert.ok(c.args.includes('--print'));
+});
+
+test('resolveSpawnConfig lemonade without LEMONADE_BIN is unavailable', () => {
+  const env = { ...process.env };
+  delete env.LEMONADE_BIN;
+  const c = resolveSpawnConfig('lemonade', null, 'hi', env, {});
+  assert.ok(c.unavailable);
+  assert.strictEqual(c.binary, null);
 });
 
 test('resolveSpawnConfig claude model+effort', () => {
@@ -269,6 +324,96 @@ test('rememberAdvisorPath writes marker', () => {
   const r = rememberAdvisorPath(root);
   assert.ok(fs.existsSync(r.marker));
   assert.ok(r.marker.endsWith('xllm-advisor-path'));
+});
+
+// ---------------------------------------------------------------------------
+// Safety / namespace helpers
+// ---------------------------------------------------------------------------
+
+test('resolveStateDir prefers existing legacy .grok in this repo', () => {
+  const dir = resolveStateDir(root, {});
+  assert.ok(dir.endsWith('.grok') || dir.endsWith('.xllm'));
+  assert.ok(fs.existsSync(dir));
+});
+
+test('resolveStateDir honors XLLM_STATE_DIR and defaults to .xllm', () => {
+  const forced = resolveStateDir(root, { XLLM_STATE_DIR: '.custom-state' });
+  assert.ok(forced.endsWith('.custom-state'));
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-state-'));
+  try {
+    const fresh = resolveStateDir(tmp, {});
+    assert.ok(fresh.endsWith('.xllm'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('mutationAllowed requires explicit opt-in', () => {
+  assert.strictEqual(mutationAllowed({}, {}), false);
+  assert.strictEqual(mutationAllowed({ XLLM_ALLOW_MUTATION: '1' }, {}), true);
+  assert.strictEqual(mutationAllowed({}, { allowWrite: true }), true);
+});
+
+test('buildAdvisorEnv strips host session variables', () => {
+  const base = { PATH: 'x' };
+  for (const k of HOST_SESSION_ENV_VARS) base[k] = 'leak';
+  const env = buildAdvisorEnv('codex', base);
+  for (const k of HOST_SESSION_ENV_VARS) {
+    assert.strictEqual(env[k], undefined, `${k} must be stripped`);
+  }
+  assert.strictEqual(env.PATH, 'x');
+});
+
+test('detectHostCli identifies claude/codex/grok hosts', () => {
+  assert.strictEqual(detectHostCli({ CLAUDECODE: '1' }), 'claude');
+  assert.strictEqual(detectHostCli({ CODEX_THREAD_ID: 't' }), 'codex');
+  assert.strictEqual(detectHostCli({ GROK_SESSION_ID: 's' }), 'grok');
+  assert.strictEqual(detectHostCli({}), null);
+});
+
+test('redactSecrets masks well-known token formats', () => {
+  const input =
+    'key sk-abcdefghijklmnop1234 and ghp_ABCDEFGHIJKLMNOPQRSTuvwx and AKIAABCDEFGHIJKLMNOP end';
+  const out = redactSecrets(input);
+  assert.ok(!out.includes('sk-abcdefghijklmnop1234'));
+  assert.ok(!out.includes('ghp_ABCDEFGHIJKLMNOPQRSTuvwx'));
+  assert.ok(!out.includes('AKIAABCDEFGHIJKLMNOP'));
+  assert.ok(out.includes('[REDACTED]'));
+  assert.ok(out.endsWith('end'));
+});
+
+test('writeArtifact redacts secrets before persisting', () => {
+  const file = writeArtifact({
+    provider: 'test',
+    model: 'unit',
+    effort: null,
+    original: 'leak check',
+    finalPrompt: 'use ghp_ABCDEFGHIJKLMNOPQRSTuvwx please',
+    raw: 'token was sk-abcdefghijklmnop1234',
+    exitCode: 0,
+  });
+  const body = fs.readFileSync(file, 'utf8');
+  assert.ok(!body.includes('ghp_ABCDEFGHIJKLMNOPQRSTuvwx'));
+  assert.ok(!body.includes('sk-abcdefghijklmnop1234'));
+  fs.unlinkSync(file);
+});
+
+test('cleanArtifacts removes artifact files but keeps placeholders', () => {
+  const file = writeArtifact({
+    provider: 'test',
+    model: 'clean',
+    effort: null,
+    original: 'cleanup target',
+    finalPrompt: 'cleanup target',
+    raw: 'output',
+    exitCode: 0,
+  });
+  assert.ok(fs.existsSync(file));
+  const removed = cleanArtifacts(root);
+  assert.ok(removed >= 1);
+  assert.ok(!fs.existsSync(file));
+  const askDir = path.dirname(file);
+  assert.ok(fs.existsSync(askDir));
 });
 
 // ---------------------------------------------------------------------------

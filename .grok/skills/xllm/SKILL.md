@@ -15,7 +15,7 @@ Grok is the **synthesizer**. External CLIs are the **advisors**.
 
 ## Defaults
 
-If the user omits providers, use profile defaults from `.grok/xllm-providers.toml`:
+If the user omits providers, use profile defaults from `.xllm/xllm-providers.toml` (legacy `.grok/`):
 
 | Role | Preferred | Fallback |
 |------|-----------|----------|
@@ -23,7 +23,7 @@ If the user omits providers, use profile defaults from `.grok/xllm-providers.tom
 | Design | **`antigravity`** (over gemini) | `gemini` (esp. Windows headless) |
 | Mix | local + cloud when both READY | e.g. `ollama:…,codex` |
 
-Resolve advisor path like `/ask` (`.grok/xllm-advisor-path` → env → `./scripts/…`).  
+Resolve advisor path like `/ask` (`.xllm/xllm-advisor-path` or legacy `.grok/` → env → `./scripts/…`).  
 Run `node <advisor.js> --doctor` for READY set.  
 Doctor prints a suggested pair with **antigravity > gemini**.
 
@@ -46,11 +46,15 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
    ```bash
    node <advisor.js> codex@high "<analysis prompt>"
    node <advisor.js> antigravity "<design prompt>"
-   # or --multi when the same prompt is acceptable:
+   # or --multi when the same prompt is acceptable (providers run in parallel):
    node <advisor.js> --multi codex@high,antigravity "<shared prompt>"
    ```
 
-4. **Read** every `.grok/artifacts/ask/*.md` path (and any `.grok/artifacts/xllm/*` multi-run index).
+   Advisors run **read-only by default** (`--allow-write` only on explicit user request).
+
+4. **Read** every artifact path printed on stdout (files live under the state
+   dir: `.xllm/artifacts/` or legacy `.grok/artifacts/`, including the
+   multi-run index).
 5. **Synthesize** one response:
 
    ```markdown

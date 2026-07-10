@@ -18,7 +18,7 @@ Get one authentic external model opinion. Always go through the advisor script.
 
 Pick the first that exists:
 
-1. Contents of `.grok/xllm-advisor-path` (legacy: `.grok/xllm-advisor-path`)
+1. Contents of `.xllm/xllm-advisor-path` (legacy: `.grok/xllm-advisor-path`)
 2. `$XLLM_ADVISOR_PATH` (legacy `$XLLM_ADVISOR_PATH`)
 3. `$GROK_PLUGIN_ROOT/scripts/grok-ask-advisor.js` or `$XLLM_PLUGIN_ROOT/scripts/…`
 4. `./scripts/grok-ask-advisor.js` (plugin repo or vendored copy)
@@ -47,8 +47,18 @@ provider:model@effort
 Examples: `codex@high`, `claude:opus@medium`, `grok:grok-4@high`,  
 `antigravity:Gemini 3.5 Flash`, `ollama:qwen3.6:latest`, `ollama:qwen3.6:latest@low`
 
-Profiles / defaults: `.grok/xllm-providers.toml`  
+Profiles / defaults: `.xllm/xllm-providers.toml` (legacy `.grok/` honored)  
 (design side prefers **antigravity** over gemini; Windows auto-falls back to gemini)
+
+## Safety defaults
+
+- Advisors run **read-only**: no approval bypass, no sandbox escape. Opt in to
+  mutating advisors only when the user explicitly asks: `--allow-write`
+  (or `XLLM_ALLOW_MUTATION=1`).
+- Same-provider advising inside that provider's own CLI is refused
+  (`--allow-self` to override).
+- Artifacts persist prompts/outputs with secret redaction; `--no-artifacts`
+  prints instead of writing.
 
 ## Supported providers
 
@@ -73,7 +83,9 @@ Profiles / defaults: `.grok/xllm-providers.toml`
    node <advisor.js> <provider> "<prompt>"
    ```
 
-3. Stdout last path line = artifact under **cwd** `.grok/artifacts/ask/`.
+3. Stdout last path line = artifact under the **cwd** state dir
+   (`.xllm/artifacts/ask/`, or legacy `.grok/artifacts/ask/`). Always read the
+   printed path rather than guessing the directory.
 4. Surface path + short excerpt (not full raw dump unless asked).
 
 Optional: `--dry-run`, env `XLLM_ASK_ORIGINAL_TASK`.

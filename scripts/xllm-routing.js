@@ -14,6 +14,7 @@ import {
   resolvePreferredProvider,
   parseProviderSpec,
   getSupportedProviders,
+  detectAvailableProviders,
 } from './grok-ask-advisor.js';
 import process from 'process';
 
@@ -478,7 +479,7 @@ Options:
   --intensity=low|medium|high
   --force-cli          Prefer CLI even if role prefers native
   --force-native       Prefer native agent
-  --ready=codex,ollama Comma list of READY providers (else assume all known)
+  --ready=codex,ollama Comma list of READY providers (else detect installed binaries)
   --json               JSON output
 `);
   process.exit(1);
@@ -539,7 +540,7 @@ function main() {
       intensity: flags.intensity,
       forceCli: flags.forceCli,
       forceNative: flags.forceNative,
-      readyProviders: flags.readyProviders || getSupportedProviders(),
+      readyProviders: flags.readyProviders || detectAvailableProviders(),
     });
     if (flags.json) console.log(JSON.stringify(pick, null, 2));
     else {
@@ -559,7 +560,7 @@ function main() {
       intensity: flags.intensity,
       forceCli: flags.forceCli,
       forceNative: flags.forceNative,
-      readyProviders: flags.readyProviders || getSupportedProviders(),
+      readyProviders: flags.readyProviders || detectAvailableProviders(),
     });
     if (flags.json) {
       console.log(JSON.stringify(plan, null, 2));

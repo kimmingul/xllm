@@ -20,13 +20,13 @@
  * Profiles: .grok/xllm-providers.toml (see loadProviderProfiles)
  */
 
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.1.1';
+const VERSION = '0.2.0';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 
@@ -67,6 +67,33 @@ const KNOWN_EFFORTS = new Set([
 const IS_WINDOWS = process.platform === 'win32';
 const LMSTUDIO_BASE = process.env.LMSTUDIO_BASE || 'http://localhost:1234';
 const MARKER_NAMES = ['xllm-advisor-path', 'omg-advisor-path'];
+
+// Host-neutral state dir (.xllm) with legacy .grok fallback for existing projects
+const NEUTRAL_STATE_DIR = '.xllm';
+const LEGACY_STATE_DIR = '.grok';
+const STATE_DIRS = [NEUTRAL_STATE_DIR, LEGACY_STATE_DIR];
+
+/**
+ * Resolve the per-project state directory.
+ * Priority: XLLM_STATE_DIR env → existing .xllm/ → existing .grok/ → .xllm/ (new default).
+ */
+export function resolveStateDir(root = process.cwd(), env = process.env) {
+  if (env.XLLM_STATE_DIR) return path.resolve(root, env.XLLM_STATE_DIR);
+  for (const d of STATE_DIRS) {
+    try {
+      if (fs.existsSync(path.join(root, d))) return path.join(root, d);
+    } catch {
+      /* ignore */
+    }
+  }
+  return path.join(root, NEUTRAL_STATE_DIR);
+}
+
+/** Advisors are read-only by default; mutation requires explicit opt-in. */
+export function mutationAllowed(env = process.env, flags = {}) {
+  if (flags.allowWrite) return true;
+  return env.XLLM_ALLOW_MUTATION === '1';
+}
 
 /** Built-in defaults; overridden by xllm-providers.toml */
 const BUILTIN_PROFILES = {
@@ -325,13 +352,21 @@ function deepMerge(base, over) {
 function profileSearchPaths() {
   const paths = [];
   if (process.env.XLLM_PROVIDERS_PATH) paths.push(process.env.XLLM_PROVIDERS_PATH);
-  paths.push(path.join(process.cwd(), '.grok', 'xllm-providers.toml'));
+  for (const dir of STATE_DIRS) {
+    paths.push(path.join(process.cwd(), dir, 'xllm-providers.toml'));
+  }
   const home = process.env.USERPROFILE || process.env.HOME;
-  if (home) paths.push(path.join(home, '.grok', 'xllm-providers.toml'));
+  if (home) {
+    for (const dir of STATE_DIRS) {
+      paths.push(path.join(home, dir, 'xllm-providers.toml'));
+    }
+  }
   // plugin checkout relative to this file
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    paths.push(path.join(here, '..', '.grok', 'xllm-providers.toml'));
+    for (const dir of STATE_DIRS) {
+      paths.push(path.join(here, '..', dir, 'xllm-providers.toml'));
+    }
   } catch {
     /* ignore */
   }
@@ -441,6 +476,11 @@ export function resolveSpawnConfig(
   const profiles = options.profiles || loadProviderProfiles();
   const pconf = profiles.providers[provider] || {};
   const effort = options.effort || null;
+  const allowMutation = !!options.allowMutation;
+  // Advisors give opinions; by default they must not be able to edit the tree.
+  const codexSafety = allowMutation
+    ? ['--dangerously-bypass-approvals-and-sandbox']
+    : ['--sandbox', 'read-only'];
   const timeoutMs =
     options.timeoutMs ||
     pconf.timeout_ms ||
@@ -489,14 +529,12 @@ export function resolveSpawnConfig(
     if (provider === 'codex') {
       return {
         binary: 'codex',
-        args: withModelEffort(
-          ['exec', '--dangerously-bypass-approvals-and-sandbox', '-'],
-          'stdin-dash'
-        ),
+        args: withModelEffort(['exec', ...codexSafety, '-'], 'stdin-dash'),
         usesStdin: true,
         timeoutMs,
         model: resolvedModel,
         effort,
+        mutation: allowMutation,
       };
     }
     // claude: flags before -p; prompt via stdin
@@ -518,19 +556,18 @@ export function resolveSpawnConfig(
     case 'codex':
       return {
         binary: 'codex',
-        args: withModelEffort(
-          ['exec', '--dangerously-bypass-approvals-and-sandbox', prompt],
-          'arg'
-        ),
+        args: withModelEffort(['exec', ...codexSafety, prompt], 'arg'),
         usesStdin: false,
         timeoutMs,
         model: resolvedModel,
         effort,
+        mutation: allowMutation,
       };
     case 'gemini': {
       const args = [];
       if (resolvedModel) args.push('--model', resolvedModel);
-      args.push('-p', prompt, '--yolo');
+      args.push('-p', prompt);
+      if (allowMutation) args.push('--yolo');
       return {
         binary: 'gemini',
         args,
@@ -538,10 +575,11 @@ export function resolveSpawnConfig(
         timeoutMs,
         model: resolvedModel,
         effort,
+        mutation: allowMutation,
       };
     }
     case 'antigravity': {
-      const args = ['--dangerously-skip-permissions'];
+      const args = allowMutation ? ['--dangerously-skip-permissions'] : [];
       if (resolvedModel) args.push('--model', resolvedModel);
       args.push('-p', prompt);
       return {
@@ -551,13 +589,15 @@ export function resolveSpawnConfig(
         timeoutMs,
         model: resolvedModel,
         effort,
+        mutation: allowMutation,
       };
     }
     case 'grok': {
       const args = [];
       if (resolvedModel) args.push('-m', resolvedModel);
       if (effort) args.push('--reasoning-effort', effort);
-      args.push('-p', prompt, '--always-approve');
+      args.push('-p', prompt);
+      if (allowMutation) args.push('--always-approve');
       return {
         binary: 'grok',
         args,
@@ -565,20 +605,23 @@ export function resolveSpawnConfig(
         timeoutMs,
         model: resolvedModel,
         effort,
+        mutation: allowMutation,
       };
     }
-    case 'cursor':
+    case 'cursor': {
+      const cursorArgs = allowMutation
+        ? ['--print', '--force', '--trust', '--sandbox', 'disabled', prompt]
+        : ['--print', prompt];
       return {
         binary: 'cursor-agent',
-        args: withModelEffort(
-          ['--print', '--force', '--trust', '--sandbox', 'disabled', prompt],
-          'arg'
-        ),
+        args: withModelEffort(cursorArgs, 'arg'),
         usesStdin: false,
         timeoutMs,
         model: resolvedModel,
         effort,
+        mutation: allowMutation,
       };
+    }
     case 'claude':
       return {
         binary: 'claude',
@@ -631,27 +674,27 @@ export function resolveSpawnConfig(
     }
     case 'lemonade': {
       const lemonadeModel = resolvedModel || 'default';
-      if (env.LEMONADE_BIN) {
+      if (!env.LEMONADE_BIN) {
+        // No synthetic fallback: an unavailable advisor must fail loudly,
+        // otherwise its "opinion" gets synthesized into real decisions.
         return {
-          binary: env.LEMONADE_BIN,
-          args: ['run', lemonadeModel, prompt],
+          binary: null,
+          args: [],
           usesStdin: false,
           timeoutMs,
           model: lemonadeModel,
           effort,
+          unavailable:
+            'LEMONADE_BIN is not set — lemonade advisor is unavailable',
         };
       }
       return {
-        binary: process.execPath,
-        args: [
-          '-e',
-          `console.log("LEMONADE[${lemonadeModel}] (set LEMONADE_BIN): " + ${JSON.stringify(prompt.slice(0, 200))})`,
-        ],
+        binary: env.LEMONADE_BIN,
+        args: ['run', lemonadeModel, prompt],
         usesStdin: false,
         timeoutMs,
         model: lemonadeModel,
         effort,
-        synthetic: true,
       };
     }
     default:
@@ -807,6 +850,71 @@ export function cleanCodexOutput(raw) {
   return cleanModelText(s);
 }
 
+/** Conservative patterns for well-known credential formats. */
+export const SECRET_PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{16,}\b/g, // OpenAI / Anthropic style keys
+  /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
+  /\bghp_[A-Za-z0-9]{20,}\b/g, // GitHub PAT (classic)
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, // GitHub PAT (fine-grained)
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, // Slack tokens
+  /\bAIza[0-9A-Za-z_-]{30,}\b/g, // Google API key
+  /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, // JWT
+];
+
+/** Redact well-known secret formats before anything is persisted to disk. */
+export function redactSecrets(text) {
+  let s = String(text ?? '');
+  for (const re of SECRET_PATTERNS) {
+    s = s.replace(re, (m) => `${m.slice(0, 6)}…[REDACTED]`);
+  }
+  return s;
+}
+
+export const ARTIFACT_SUBDIRS = ['ask', 'xllm', 'ralph', 'team', 'verify'];
+
+/**
+ * Create artifact subdirs under the project state dir, and drop a
+ * self-ignoring .gitignore so raw prompts/outputs never get committed.
+ */
+export function ensureArtifactDirs(root = process.cwd()) {
+  const base = path.join(resolveStateDir(root), 'artifacts');
+  for (const sub of ARTIFACT_SUBDIRS) {
+    fs.mkdirSync(path.join(base, sub), { recursive: true });
+  }
+  const gi = path.join(base, '.gitignore');
+  if (!fs.existsSync(gi)) {
+    fs.writeFileSync(gi, '*\n!.gitignore\n', 'utf8');
+  }
+  return base;
+}
+
+/** Delete persisted artifacts (optionally only those older than N days). */
+export function cleanArtifacts(root = process.cwd(), { olderThanDays = null } = {}) {
+  const base = path.join(resolveStateDir(root), 'artifacts');
+  const cutoff =
+    olderThanDays != null ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000 : null;
+  let removed = 0;
+  if (!fs.existsSync(base)) return removed;
+  for (const sub of ARTIFACT_SUBDIRS) {
+    const dir = path.join(base, sub);
+    if (!fs.existsSync(dir)) continue;
+    for (const name of fs.readdirSync(dir)) {
+      if (name === '.gitkeep' || name === '.gitignore') continue;
+      const file = path.join(dir, name);
+      try {
+        const st = fs.statSync(file);
+        if (!st.isFile()) continue;
+        if (cutoff != null && st.mtimeMs >= cutoff) continue;
+        fs.unlinkSync(file);
+        removed += 1;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return removed;
+}
+
 export function writeArtifact({
   provider,
   model = null,
@@ -819,8 +927,10 @@ export function writeArtifact({
   meta = {},
 }) {
   const root = process.cwd();
-  const dir = path.join(root, '.grok', 'artifacts', 'ask');
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = path.join(ensureArtifactDirs(root), 'ask');
+  original = redactSecrets(original);
+  finalPrompt = redactSecrets(finalPrompt);
+  raw = redactSecrets(raw);
 
   const providerLabel = model ? `${provider}-${slugify(model)}` : provider;
   const file = path.join(dir, `${providerLabel}-${slugify(original)}-${ts()}.md`);
@@ -881,13 +991,23 @@ Usage:
   node scripts/grok-ask-advisor.js --doctor
   node scripts/grok-ask-advisor.js --which | --remember
   node scripts/grok-ask-advisor.js --dry-run <spec> "<prompt>"
-  node scripts/grok-ask-advisor.js --multi p1,p2[,p3] "<prompt>"
+  node scripts/grok-ask-advisor.js --multi p1,p2[,p3] "<prompt>"   (runs in parallel)
+  node scripts/grok-ask-advisor.js --clean-artifacts [--older-than=DAYS]
+
+Safety (defaults):
+  Advisors run READ-ONLY (no approvals bypass / no sandbox escape).
+    --allow-write | XLLM_ALLOW_MUTATION=1   opt in to mutating advisors
+  Same-provider advising inside that provider's own CLI is refused.
+    --allow-self  | XLLM_ALLOW_SELF=1       override
+  Artifacts persist prompts/outputs (secrets redacted).
+    --no-artifacts | XLLM_NO_ARTIFACTS=1    print output instead of writing
 
 Providers: ${getSupportedProviders().join(', ')}
 Spec: provider | provider:model | provider@effort | provider:model@effort
   e.g. codex@high  claude:opus@medium  ollama:qwen3.6:latest  antigravity:…
-Profiles: .grok/xllm-providers.toml  (design_provider=antigravity preferred over gemini)
-Env: XLLM_ADVISOR_PATH, XLLM_PLUGIN_ROOT, XLLM_PROVIDERS_PATH, XLLM_ADVISOR_TIMEOUT_MS
+Profiles: .xllm/xllm-providers.toml (legacy .grok/ also honored)
+Env: XLLM_ADVISOR_PATH, XLLM_PLUGIN_ROOT, XLLM_PROVIDERS_PATH,
+     XLLM_ADVISOR_TIMEOUT_MS, XLLM_STATE_DIR
 `);
   process.exit(exitCode);
 }
@@ -999,17 +1119,64 @@ function ensureBinary(binary, { isLocal = false, optional = false } = {}) {
   process.exit(1);
 }
 
-function buildEnv(provider) {
-  const env = { ...process.env };
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_SESSION_ID;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
-  delete env.GROK_SESSION_ID;
+/** Host session variables that must never leak into a spawned advisor CLI. */
+export const HOST_SESSION_ENV_VARS = [
+  'CLAUDECODE',
+  'CLAUDECODE_SESSION_ID',
+  'CLAUDE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_SSE_PORT',
+  'GROK_SESSION_ID',
+  'GROK_CLI_SESSION',
+  'CODEX_SANDBOX',
+  'CODEX_SANDBOX_NETWORK_DISABLED',
+  'CODEX_THREAD_ID',
+  'CODEX_SESSION_ID',
+];
+
+export function buildAdvisorEnv(provider, baseEnv = process.env) {
+  const env = { ...baseEnv };
+  for (const k of HOST_SESSION_ENV_VARS) delete env[k];
   if (provider === 'codex') {
     delete env.RUST_LOG;
     delete env.RUST_BACKTRACE;
   }
   return env;
+}
+
+/** Detect which agentic CLI (if any) is hosting this process. */
+export function detectHostCli(env = process.env) {
+  if (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT || env.CLAUDECODE_SESSION_ID) {
+    return 'claude';
+  }
+  if (env.CODEX_SANDBOX || env.CODEX_THREAD_ID || env.CODEX_SESSION_ID) {
+    return 'codex';
+  }
+  if (env.GROK_SESSION_ID || env.GROK_CLI_SESSION) return 'grok';
+  return null;
+}
+
+/**
+ * Cheap availability probe for routing: binary present (plus server health
+ * for local providers). Does NOT verify cloud auth — see doctor/smoke --live.
+ */
+export function detectAvailableProviders(env = process.env) {
+  const out = [];
+  for (const p of getSupportedProviders()) {
+    if (p === 'lemonade') {
+      if (env.LEMONADE_BIN && binaryOnPath(env.LEMONADE_BIN)) out.push(p);
+      continue;
+    }
+    if (p === 'lmstudio') {
+      if (checkServerHealth('lmstudio')) out.push(p);
+      continue;
+    }
+    if (p === 'antigravity' && IS_WINDOWS) continue; // headless blocked
+    if (!binaryOnPath(PROVIDER_BINARIES[p])) continue;
+    if (p === 'ollama' && !checkServerHealth('ollama')) continue;
+    out.push(p);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1090,21 +1257,24 @@ export function resolveAdvisorScriptPath() {
     'XLLM_PLUGIN_ROOT',
     'OMG_PLUGIN_ROOT',
     'CLAUDE_PLUGIN_ROOT',
+    'CODEX_PLUGIN_ROOT',
   ]) {
     const hit = advisorUnderRoot(process.env[key]);
     if (hit) return hit;
   }
 
-  for (const markerName of MARKER_NAMES) {
-    const marker = path.join(process.cwd(), '.grok', markerName);
-    try {
-      if (fs.existsSync(marker)) {
-        const line = fs.readFileSync(marker, 'utf8').trim().split(/\r?\n/)[0];
-        const hit = pathIfExists(line);
-        if (hit) return hit;
+  for (const dir of STATE_DIRS) {
+    for (const markerName of MARKER_NAMES) {
+      const marker = path.join(process.cwd(), dir, markerName);
+      try {
+        if (fs.existsSync(marker)) {
+          const line = fs.readFileSync(marker, 'utf8').trim().split(/\r?\n/)[0];
+          const hit = pathIfExists(line);
+          if (hit) return hit;
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
   }
 
@@ -1123,13 +1293,11 @@ export function resolveAdvisorScriptPath() {
 
 export function rememberAdvisorPath(projectRoot = process.cwd()) {
   const advisor = resolveAdvisorScriptPath();
-  const dir = path.join(projectRoot, '.grok');
+  const dir = resolveStateDir(projectRoot);
   fs.mkdirSync(dir, { recursive: true });
   const marker = path.join(dir, 'xllm-advisor-path');
   fs.writeFileSync(marker, `${advisor}\n`, 'utf8');
-  for (const sub of ['ask', 'xllm', 'ralph', 'team', 'verify']) {
-    fs.mkdirSync(path.join(dir, 'artifacts', sub), { recursive: true });
-  }
+  ensureArtifactDirs(projectRoot);
   return { advisor, marker };
 }
 
@@ -1145,6 +1313,9 @@ export function runAdvisor({
   originalTask = null,
   dryRun = false,
   multi = false,
+  allowWrite = false,
+  allowSelf = false,
+  noArtifacts = false,
 }) {
   const profiles = loadProviderProfiles();
   let meta = {};
@@ -1159,7 +1330,8 @@ export function runAdvisor({
     provider = pref.provider;
   }
 
-  const env = buildEnv(provider);
+  const allowMutation = mutationAllowed(process.env, { allowWrite });
+  const env = buildAdvisorEnv(provider);
   const original =
     originalTask ||
     process.env.XLLM_ASK_ORIGINAL_TASK ||
@@ -1192,6 +1364,7 @@ export function runAdvisor({
   const cfg = resolveSpawnConfig(provider, resolvedModel, prompt, env, {
     effort: resolvedEffort || null,
     profiles,
+    allowMutation,
   });
   const finalModel = cfg.model || resolvedModel;
   const finalEffort = cfg.effort || resolvedEffort;
@@ -1209,7 +1382,8 @@ export function runAdvisor({
           ),
           usesStdin: cfg.usesStdin,
           timeoutMs: cfg.timeoutMs,
-          synthetic: !!cfg.synthetic,
+          mutation: allowMutation,
+          unavailable: cfg.unavailable || false,
           substituted: meta.substituted || false,
         },
         null,
@@ -1219,16 +1393,36 @@ export function runAdvisor({
     return { artifactPath: null, exitCode: 0, raw: '', durationMs: 0, dryRun: true };
   }
 
-  if (provider !== 'lmstudio' && !cfg.synthetic) {
+  if (cfg.unavailable) {
+    const msg = `[${provider}] ${cfg.unavailable}`;
+    console.error(msg);
+    return { artifactPath: null, exitCode: 1, raw: msg, durationMs: 0 };
+  }
+
+  // Same-provider advising from inside that provider's own CLI nests
+  // sessions and shares auth/sandbox state — refuse unless explicitly allowed.
+  const host = detectHostCli();
+  if (
+    host &&
+    host === provider &&
+    !allowSelf &&
+    process.env.XLLM_ALLOW_SELF !== '1'
+  ) {
+    const msg =
+      `[xllm] Refusing same-provider advising: host CLI is '${host}'. ` +
+      `Pass --allow-self or set XLLM_ALLOW_SELF=1 to override.`;
+    console.error(msg);
+    return { artifactPath: null, exitCode: 1, raw: msg, durationMs: 0 };
+  }
+
+  if (provider !== 'lmstudio') {
     const isLocal = LOCAL_PROVIDERS.includes(provider);
     ensureBinary(cfg.binary, { isLocal });
-  } else if (provider === 'lmstudio') {
+  } else {
     ensureBinary(cfg.binary, { isLocal: true, optional: true });
   }
 
-  const target = cfg.synthetic
-    ? { command: cfg.binary, argsPrefix: [] }
-    : resolveSpawnTarget(cfg.binary);
+  const target = resolveSpawnTarget(cfg.binary);
 
   let finalCommand = target.command;
   let finalArgs = [...(target.argsPrefix || []), ...cfg.args];
@@ -1285,19 +1479,23 @@ export function runAdvisor({
     raw = raw || '(empty output from antigravity — treated as failure)';
   }
 
-  const artifactPath = writeArtifact({
-    provider,
-    model: finalModel,
-    effort: finalEffort,
-    original,
-    finalPrompt: prompt,
-    raw,
-    exitCode: code,
-    durationMs,
-    meta: { multi, ...meta },
-  });
-
-  console.log(artifactPath);
+  let artifactPath = null;
+  if (noArtifacts || process.env.XLLM_NO_ARTIFACTS === '1') {
+    console.log(raw || '(no output)');
+  } else {
+    artifactPath = writeArtifact({
+      provider,
+      model: finalModel,
+      effort: finalEffort,
+      original,
+      finalPrompt: prompt,
+      raw,
+      exitCode: code,
+      durationMs,
+      meta: { multi, ...meta },
+    });
+    console.log(artifactPath);
+  }
   if (result.error) {
     console.error(`[${provider}] ${result.error.message}`);
   }
@@ -1312,8 +1510,13 @@ export function runDoctor() {
     product: PRODUCT,
     platform: process.platform,
     cwd: process.cwd(),
+    state_dir: resolveStateDir(),
     profiles_loaded_from: profiles._loaded_from || '(built-in)',
     defaults: profiles.defaults,
+    safety: {
+      advisors_read_only: !mutationAllowed(),
+      mutation_opt_in: '--allow-write or XLLM_ALLOW_MUTATION=1',
+    },
     providers: {},
     recommendations: [],
   };
@@ -1340,7 +1543,7 @@ export function runDoctor() {
       } else {
         entry.binaryOk = false;
         entry.healthOk = false;
-        entry.notes.push('Set LEMONADE_BIN for a real runner (synthetic fallback only)');
+        entry.notes.push('Set LEMONADE_BIN — lemonade is unavailable without it');
       }
     } else if (p === 'antigravity' && IS_WINDOWS) {
       entry.binaryOk = binaryOnPath('agy');
@@ -1356,7 +1559,15 @@ export function runDoctor() {
           entry.models = getOllamaModels();
         }
       } else {
+        // "READY" for cloud providers means the binary responds — it does
+        // NOT prove auth or a working headless request.
         entry.healthOk = entry.binaryOk;
+        entry.authVerified = null;
+        if (entry.binaryOk) {
+          entry.notes.push(
+            'binary found; auth not verified — run `smoke --live` to confirm'
+          );
+        }
       }
     }
 
@@ -1394,9 +1605,7 @@ export function runDoctor() {
     'Spec syntax: provider[:model][@effort]  e.g. codex@high  antigravity:model  ollama:qwen3.6:latest'
   );
 
-  for (const sub of ['ask', 'ralph', 'team', 'verify', 'xllm']) {
-    fs.mkdirSync(path.join(process.cwd(), '.grok', 'artifacts', sub), { recursive: true });
-  }
+  ensureArtifactDirs(process.cwd());
   report.artifactsReady = true;
 
   try {
@@ -1417,20 +1626,38 @@ export function runDoctor() {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const args = argv.slice(2);
+  const flags = { allowWrite: false, allowSelf: false, noArtifacts: false };
+  let olderThan = null;
+  const args = [];
+  for (const a of argv.slice(2)) {
+    if (a === '--allow-write') {
+      flags.allowWrite = true;
+    } else if (a === '--allow-self') {
+      flags.allowSelf = true;
+    } else if (a === '--no-artifacts') {
+      flags.noArtifacts = true;
+    } else if (/^--older-than=\d+$/.test(a)) {
+      olderThan = Number(a.split('=')[1]);
+    } else {
+      args.push(a);
+    }
+  }
   if (args.length === 0) usage();
 
-  if (args[0] === '--list-providers') return { mode: 'list' };
-  if (args[0] === '--doctor') return { mode: 'doctor' };
-  if (args[0] === '--which') return { mode: 'which' };
-  if (args[0] === '--remember') return { mode: 'remember' };
-  if (args[0] === '--help' || args[0] === '-h') return { mode: 'help' };
+  if (args[0] === '--list-providers') return { mode: 'list', flags };
+  if (args[0] === '--doctor') return { mode: 'doctor', flags };
+  if (args[0] === '--which') return { mode: 'which', flags };
+  if (args[0] === '--remember') return { mode: 'remember', flags };
+  if (args[0] === '--clean-artifacts') {
+    return { mode: 'clean-artifacts', flags, olderThan };
+  }
+  if (args[0] === '--help' || args[0] === '-h') return { mode: 'help', flags };
 
   if (args[0] === '--dry-run') {
     const spec = parseProviderSpec(args[1]);
     const prompt = args.slice(2).join(' ').trim();
     if (!spec || !prompt) usage();
-    return { mode: 'dry-run', ...spec, prompt };
+    return { mode: 'dry-run', ...spec, prompt, flags };
   }
   if (args[0] === '--multi') {
     const list = (args[1] || '')
@@ -1450,13 +1677,13 @@ function parseArgs(argv) {
       }
       return p;
     });
-    return { mode: 'multi', providers, prompt };
+    return { mode: 'multi', providers, prompt, flags };
   }
 
   const spec = parseProviderSpec(args[0]);
   const prompt = args.slice(1).join(' ').trim();
   if (!spec || !prompt) usage();
-  return { mode: 'run', ...spec, prompt };
+  return { mode: 'run', ...spec, prompt, flags };
 }
 
 async function main() {
@@ -1484,6 +1711,13 @@ async function main() {
       (report.readyLocal && report.readyLocal.length > 0);
     process.exit(anyReady ? 0 : 2);
   }
+  if (parsed.mode === 'clean-artifacts') {
+    const removed = cleanArtifacts(process.cwd(), {
+      olderThanDays: parsed.olderThan,
+    });
+    console.log(`removed ${removed} artifact file(s)`);
+    process.exit(0);
+  }
 
   if (parsed.mode === 'dry-run') {
     runAdvisor({
@@ -1492,27 +1726,53 @@ async function main() {
       effort: parsed.effort,
       prompt: parsed.prompt,
       dryRun: true,
+      allowWrite: parsed.flags.allowWrite,
     });
     process.exit(0);
   }
 
   if (parsed.mode === 'multi') {
-    const paths = [];
-    let failed = 0;
-    for (const p of parsed.providers) {
-      console.error(`[multi] running ${p.spec}...`);
-      const result = runAdvisor({
-        provider: p.provider,
-        model: p.model,
-        effort: p.effort,
-        prompt: parsed.prompt,
-        multi: true,
+    // Each provider runs as its own child process, concurrently.
+    const self = fileURLToPath(import.meta.url);
+    const childFlags = [];
+    if (parsed.flags.allowWrite) childFlags.push('--allow-write');
+    if (parsed.flags.allowSelf) childFlags.push('--allow-self');
+    if (parsed.flags.noArtifacts) childFlags.push('--no-artifacts');
+
+    const runOne = (p) =>
+      new Promise((resolve) => {
+        console.error(`[multi] running ${p.spec}...`);
+        const child = spawn(
+          process.execPath,
+          [self, ...childFlags, p.spec, parsed.prompt],
+          { env: process.env, windowsHide: true }
+        );
+        let out = '';
+        child.stdout.on('data', (d) => (out += d));
+        child.stderr.on('data', (d) => process.stderr.write(d));
+        child.on('error', (e) =>
+          resolve({ spec: p.spec, code: 1, out: `[spawn error] ${e.message}` })
+        );
+        child.on('close', (code) =>
+          resolve({ spec: p.spec, code: code ?? 1, out: out.trim() })
+        );
       });
-      if (result.artifactPath) paths.push(result.artifactPath);
-      if (result.exitCode !== 0) failed += 1;
+
+    const results = await Promise.all(parsed.providers.map(runOne));
+    const failed = results.filter((r) => r.code !== 0).length;
+
+    if (parsed.flags.noArtifacts || process.env.XLLM_NO_ARTIFACTS === '1') {
+      for (const r of results) {
+        console.log(`\n===== ${r.spec} (exit ${r.code}) =====\n`);
+        console.log(r.out || '(no output)');
+      }
+      process.exit(failed > 0 && failed === results.length ? 1 : 0);
     }
-    const dir = path.join(process.cwd(), '.grok', 'artifacts', 'xllm');
-    fs.mkdirSync(dir, { recursive: true });
+
+    const paths = results
+      .filter((r) => r.code === 0 && r.out)
+      .map((r) => r.out.split(/\r?\n/).pop());
+    const dir = path.join(ensureArtifactDirs(process.cwd()), 'xllm');
     const indexPath = path.join(dir, `multi-${slugify(parsed.prompt)}-${ts()}.md`);
     fs.writeFileSync(
       indexPath,
@@ -1523,19 +1783,23 @@ async function main() {
         `- Providers: ${parsed.providers.map((p) => p.spec).join(', ')}`,
         `- Failures: ${failed}`,
         '',
+        '## Results',
+        '',
+        ...results.map((r) => `- ${r.spec}: exit ${r.code}`),
+        '',
         '## Artifacts',
         '',
         ...paths.map((p) => `- ${p}`),
         '',
         '## Task',
         '',
-        parsed.prompt,
+        redactSecrets(parsed.prompt),
         '',
       ].join('\n'),
       'utf8'
     );
     console.log(indexPath);
-    process.exit(failed > 0 && failed === paths.length ? 1 : 0);
+    process.exit(failed > 0 && failed === results.length ? 1 : 0);
   }
 
   const result = runAdvisor({
@@ -1543,6 +1807,9 @@ async function main() {
     model: parsed.model,
     effort: parsed.effort,
     prompt: parsed.prompt,
+    allowWrite: parsed.flags.allowWrite,
+    allowSelf: parsed.flags.allowSelf,
+    noArtifacts: parsed.flags.noArtifacts,
   });
   process.exit(result.exitCode === 0 ? 0 : result.exitCode || 1);
 }

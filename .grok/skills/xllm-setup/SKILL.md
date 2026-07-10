@@ -8,6 +8,8 @@ user-invocable: true
 
 # /xllm-setup — Install health check
 
+> `<state>` = project state dir: `.xllm/` (default) or legacy `.grok/` when the project already uses it.
+
 Run these steps (do not only describe them).
 
 ## 1. Resolve + remember advisor path
@@ -33,7 +35,7 @@ Confirm `.grok/xllm-advisor-path` exists and points at a real file.
 Ensure:
 
 ```text
-.grok/artifacts/ask|xllm|ralph|team|verify/
+<state>/artifacts/ask|xllm|ralph|team|verify/
 ```
 
 (`--remember` / `--doctor` also create these.)

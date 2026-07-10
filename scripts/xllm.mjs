@@ -37,10 +37,11 @@ function help() {
 
 Commands:
   which              Print resolved advisor script path
-  remember           Write .grok/xllm-advisor-path in current project
+  remember           Write xllm-advisor-path marker (.xllm/, legacy .grok/)
   doctor             Provider + path health (human)
-  ask <p> <prompt>   Single advisor call
-  multi p1,p2 <prompt>
+  ask <p> <prompt>   Single advisor call (read-only by default; --allow-write to opt in)
+  multi p1,p2 <prompt>   Parallel multi-advisor run
+  clean [--older-than=DAYS]   Delete persisted advisor artifacts
   smoke [--live]     Dry smoke or live READY provider
   list               List providers JSON
   pick <role> <task> Auto model/effort for a role (see xllm-routing)
@@ -48,12 +49,15 @@ Commands:
   infer <task>       Infer intensity low|medium|high
   roles              List routing roles
 
+Safety flags (ask/multi): --allow-write --allow-self --no-artifacts
+
 Examples:
   node scripts/xllm.mjs remember
   node scripts/xllm.mjs ask codex@high "ping"
   node scripts/xllm.mjs pick security "auth token refresh"
   node scripts/xllm.mjs pick-team "refactor payment webhooks" --json
   node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "review risks"
+  node scripts/xllm.mjs clean --older-than=7
 `);
 }
 
@@ -92,6 +96,10 @@ switch (cmd) {
     break;
   case 'smoke':
     run(smoke, rest);
+    break;
+  case 'clean':
+  case 'clean-artifacts':
+    run(advisor, ['--clean-artifacts', ...rest]);
     break;
   case 'dry-run':
     run(advisor, ['--dry-run', ...rest]);

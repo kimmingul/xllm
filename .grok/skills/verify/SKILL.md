@@ -3,12 +3,14 @@ name: verify
 description: >
   Structured evidence-based verification against acceptance criteria.
   Use after implementation, before claiming done, and inside /ralph loops.
-  Writes a pass/fail report under .grok/artifacts/verify/.
+  Writes a pass/fail report under <state>/artifacts/verify/.
 argument-hint: "<what to verify> [criteria: ...]"
 user-invocable: true
 ---
 
 # /verify — Evidence table, not vibes
+
+> `<state>` = project state dir: `.xllm/` (default) or legacy `.grok/` when the project already uses it.
 
 ## Protocol
 
@@ -29,7 +31,7 @@ user-invocable: true
 
 4. **Write report**
 
-   Path: `.grok/artifacts/verify/<slug>-<timestamp>.md`
+   Path: `<state>/artifacts/verify/<slug>-<timestamp>.md`
 
    ```markdown
    # Verify report

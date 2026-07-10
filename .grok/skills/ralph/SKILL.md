@@ -10,6 +10,8 @@ user-invocable: true
 
 # /ralph — Evidence-gated implementation loop
 
+> `<state>` = project state dir: `.xllm/` (default) or legacy `.grok/` when the project already uses it.
+
 Ralph exists to stop **fake completion**: “looks good”, skipped tests, and unchecked acceptance criteria.
 
 ## Parse flags
@@ -31,9 +33,9 @@ node <advisor.js> --doctor
 
 ### 0. Setup (once)
 
-1. Create `.grok/artifacts/ralph/` if needed.
+1. Create `<state>/artifacts/ralph/` if needed.
 2. `todo_write` stories with **verifiable** acceptance criteria in each description.
-3. Write `.grok/artifacts/ralph/plan.md` with: goal, critics, max iterations, story list.
+3. Write `<state>/artifacts/ralph/plan.md` with: goal, critics, max iterations, story list.
 4. iteration = 1.
 
 ### 1. Pick story
@@ -55,9 +57,9 @@ For the story just implemented, call **at least one** critic (prefer **local + c
 node <advisor.js> <critic> "Story: <id>. Acceptance criteria (verbatim): <list>. Changed files: <paths>. Diff summary: <...>. For EACH criterion: PASS/FAIL with evidence. Blockers? Risks?"
 ```
 
-- `read_file` critic artifacts under `.grok/artifacts/ask/`.
+- `read_file` critic artifacts under `<state>/artifacts/ask/`.
 - Any FAIL / gap → fix, re-critic, **do not** mark story completed.
-- Log critic paths into `.grok/artifacts/ralph/iteration-<n>.md`.
+- Log critic paths into `<state>/artifacts/ralph/iteration-<n>.md`.
 
 ### 4. Verify gate
 
@@ -65,7 +67,7 @@ Use `/verify` or the same protocol:
 
 - Fresh test/build/lint commands via `run_terminal_command`.
 - Per criterion: evidence (command output, file:line).
-- Write `.grok/artifacts/verify/<story>-<ts>.md` when possible.
+- Write `<state>/artifacts/verify/<story>-<ts>.md` when possible.
 - Only if critics OK **and** verify OK → mark story `completed`.
 
 ### 5. Final gate (all stories done)

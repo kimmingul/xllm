@@ -1,6 +1,6 @@
 {
   "name": "grok-xllm",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "grok-xllm — multi-LLM orchestration for Grok Build. CLI advisors (/ask, /xllm), ralph evidence loops, thin team playbooks, first-class local LLMs.",
   "author": {
     "name": "grok-xllm contributors"
@@ -27,7 +27,6 @@
     "./.grok/skills/verify/",
     "./.grok/skills/xllm-setup/"
   ],
-  "commands": "./.grok/commands/",
   "agents": "./.grok/agents/",
   "personas": "./.grok/personas/"
 }

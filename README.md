@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.1.1** — Multi-LLM orchestration plugin for [Grok Build](https://grok.x.ai).
+**v0.2.0** — Multi-LLM orchestration plugin for [Grok Build](https://grok.x.ai).
 
 Grok is the **conductor**. External and local models are **advisors**.
 
@@ -8,9 +8,24 @@ Grok Build already has subagents, plan mode, skills, and hooks.
 **grok-xllm** adds:
 
 1. **Real multi-CLI advisors** — codex, claude, grok, antigravity (gemini fallback), cursor, plus **local** ollama / lmstudio  
-2. **Evidence-gated work** — `/ralph` + `/verify`  
+2. **Evidence-guided work** — `/ralph` + `/verify` (prompt-level protocol: the skills instruct the host to demand evidence; they are not a mechanical gate)  
 3. **Team playbook with auto routing** — role + intensity → model/effort (`pick-team`)  
-4. **Provider profiles** — `.grok/xllm-providers.toml`
+4. **Provider profiles** — `.xllm/xllm-providers.toml` (legacy `.grok/` honored)
+
+## Safety model
+
+- **Advisors are read-only by default.** No approval bypass, no sandbox escape
+  (`codex --sandbox read-only`; no `--yolo`, no `--dangerously-*`, no
+  `--always-approve`). Opt in to mutating advisors with `--allow-write` or
+  `XLLM_ALLOW_MUTATION=1`.
+- **Same-provider nesting is refused** (e.g. asking a claude advisor from
+  inside Claude Code). Override with `--allow-self` / `XLLM_ALLOW_SELF=1`.
+- **Host session env vars are stripped** before spawning advisors
+  (Claude/Codex/Grok session identifiers).
+- **Artifacts persist prompts and outputs** under `<state>/artifacts/` with
+  well-known secret formats redacted, plus a self-ignoring `.gitignore`.
+  Use `--no-artifacts` / `XLLM_NO_ARTIFACTS=1` to print instead of writing,
+  and `xllm clean [--older-than=DAYS]` for retention.
 
 ## Install (Grok plugin)
 
@@ -47,7 +62,7 @@ Scripts live in the plugin install path, not always in your app repo. Once per p
 node /path/to/grok-xllm/scripts/xllm.mjs remember
 ```
 
-This writes `.grok/xllm-advisor-path`. See [`.grok/docs/install.md`](.grok/docs/install.md).
+This writes `<state>/xllm-advisor-path` (state dir: `.xllm/`, or legacy `.grok/` when the project already uses it). See [`.grok/docs/install.md`](.grok/docs/install.md).
 
 **Requirements:** Node ≥ 18. Install only the advisor CLIs you need (codex, claude, ollama, …).
 
@@ -87,7 +102,7 @@ Profiles and role routing: [`.grok/xllm-providers.toml`](.grok/xllm-providers.to
 | `/team` | Parallel workers; **must** run `pick-team` first |
 | `/xllm-setup` | Doctor + path marker + recommendations |
 
-Artifacts: `.grok/artifacts/{ask,xllm,ralph,team,verify}/`
+Artifacts: `<state>/artifacts/{ask,xllm,ralph,team,verify}/` (secret-redacted; see Safety model)
 
 ## Auto routing (/team)
 

@@ -29,6 +29,18 @@ ok(plugin.name === 'grok-xllm', 'plugin name is grok-xllm');
 ok(typeof plugin.version === 'string' && /^\d+\.\d+\.\d+/.test(plugin.version), 'semver version');
 ok(Array.isArray(plugin.skills) && plugin.skills.length >= 6, 'skills array has core set');
 
+// Every path the manifest references must exist (no dangling targets)
+for (const key of ['commands', 'agents', 'personas', 'skills']) {
+  const val = plugin[key];
+  if (typeof val === 'string') {
+    ok(fs.existsSync(path.join(root, val)), `plugin.json ${key} target exists (${val})`);
+  } else if (Array.isArray(val)) {
+    for (const entry of val) {
+      ok(fs.existsSync(path.join(root, entry)), `plugin.json ${key} entry exists (${entry})`);
+    }
+  }
+}
+
 const requiredSkills = ['ask', 'xllm', 'ralph', 'team', 'verify', 'xllm-setup'];
 for (const s of requiredSkills) {
   const skillMd = path.join(root, '.grok', 'skills', s, 'SKILL.md');

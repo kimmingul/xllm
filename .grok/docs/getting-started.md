@@ -35,7 +35,7 @@ You want at least **one** READY advisor. See [install.md](./install.md).
 /xllm ollama:qwen3.6:latest,codex "Review the advisor script for security"
 ```
 
-## 4. Evidence-gated work
+## 4. Evidence-guided work (prompt-level protocol)
 
 ```text
 /ralph --critic=codex "Add a unit test for slugify"

@@ -1,5 +1,7 @@
 # Install & use outside the plugin repo
 
+> `<state>` = project state dir: `.xllm/` (default) or legacy `.grok/` when the project already uses it.
+
 **grok-xllm** skills call a **Node advisor script**. When you work in another project, that script is not under `./scripts/` — resolve it once, then reuse.
 
 ## Install the plugin
@@ -28,7 +30,7 @@ Writes:
 
 ```text
 .grok/xllm-advisor-path          # absolute path to grok-ask-advisor.js
-.grok/artifacts/{ask,xllm,...}/
+<state>/artifacts/{ask,xllm,...}/
 ```
 
 ### Environment variables (optional)
@@ -68,7 +70,7 @@ node scripts/xllm.mjs which
 4. Else tell user to run /xllm-setup or node …/xllm.mjs remember
 ```
 
-Artifacts land in the **current project** `.grok/artifacts/…` (cwd).
+Artifacts land in the **current project** `<state>/artifacts/…` (cwd).
 
 ## Health
 

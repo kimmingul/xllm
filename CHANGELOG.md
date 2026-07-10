@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 — 2026-07-11
+
+### Added
+- **Codex adapter** (`.codex-plugin/plugin.json` +
+  `.agents/plugins/marketplace.json`): the same `ask` / `multi` / `setup`
+  skills load in Codex from the shared `./skills/` directory. Install:
+  `codex plugin marketplace add <repo>` → `codex plugin add xllm@xllm`.
+  Manifest format verified against Codex CLI 0.144 installed plugins
+  (visualize, superpowers), not guessed.
+- Skills rewritten host-neutral: advisor script resolution documented per
+  host (`CLAUDE_PLUGIN_ROOT` on Claude Code, plugin-root-relative on Codex,
+  `.xllm/xllm-advisor-path` marker anywhere); same-vendor refusal wording
+  generalized (no codex advisor inside Codex, etc.).
+- `check-plugin` validates the Codex adapter (manifest parse, name/version
+  sync, skills dir, interface block, marketplace self-hosting) and that
+  shared skills document non-Claude plugin-root resolution.
+
 ## 0.3.0 — 2026-07-11
 
 ### Added

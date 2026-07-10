@@ -2,25 +2,31 @@
 name: setup
 description: >
   Diagnose and initialize xllm cross-vendor advisors in this project: check
-  which advisor CLIs (codex, gemini, grok, cursor, ollama, lmstudio) are
-  installed and healthy, write the advisor-path marker, and prepare artifact
-  directories. Use for "set up xllm", "xllm doctor", or when /xllm:ask or
-  /xllm:multi cannot find providers.
+  which advisor CLIs (codex, claude, gemini, grok, cursor, ollama, lmstudio)
+  are installed and healthy, write the advisor-path marker, and prepare
+  artifact directories. Use for "set up xllm", "xllm doctor", or when the ask
+  or multi skills cannot find providers.
 ---
 
-# /xllm:setup — Doctor + project marker
+# setup — Doctor + project marker (xllm)
+
+## Resolve the advisor script
+
+Claude Code: `"${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js"`.
+Codex / other hosts: the plugin root is two directories above this SKILL.md —
+use `<plugin-root>/scripts/grok-ask-advisor.js`.
 
 ## Steps
 
-1. **Doctor** (Bash tool):
+1. **Doctor** (shell/Bash tool):
 
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js" --doctor
+   node <advisor.js> --doctor
    ```
 
    Report per-provider status. Note honestly: for cloud CLIs, READY means the
    binary responds — auth is only proven by a live call
-   (`node "${CLAUDE_PLUGIN_ROOT}/scripts/smoke.mjs" --live`).
+   (`node <plugin-root>/scripts/smoke.mjs --live`).
 
 2. **Remember the advisor path** in this project (writes
    `.xllm/xllm-advisor-path`, or legacy `.grok/` if the project already uses
@@ -28,13 +34,14 @@ description: >
    `.gitignore`):
 
    ```bash
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js" --remember
+   node <advisor.js> --remember
    ```
 
 3. **Summarize for the user**: which advisors are usable now, which need
-   installing (codex/gemini/grok CLIs, or `ollama serve` for local), and that
-   `claude` itself is not usable as an advisor from inside Claude Code
-   (same-provider nesting is refused by design).
+   installing (codex/claude/gemini/grok CLIs, or `ollama serve` for local),
+   and that your host's own vendor is not usable as an advisor from inside
+   itself (same-provider nesting is refused by design — e.g. no claude
+   advisor inside Claude Code, no codex advisor inside Codex).
 
 ## Safety reminders to surface
 

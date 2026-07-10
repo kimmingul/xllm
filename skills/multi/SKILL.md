@@ -1,37 +1,42 @@
 ---
 name: multi
 description: >
-  Run 2+ external LLM advisors in parallel (codex, gemini, grok, cursor, local
-  ollama/lmstudio) and synthesize their independent opinions into one
-  agreements/disagreements verdict. Use for cross-vendor design or security
-  review, "get multiple opinions", or comparing cloud vs local model takes.
-  Advisors run read-only by default.
+  Run 2+ external LLM advisors in parallel (codex, claude, gemini, grok,
+  cursor, local ollama/lmstudio) and synthesize their independent opinions
+  into one agreements/disagreements verdict. Use for cross-vendor design or
+  security review, "get multiple opinions", or comparing cloud vs local model
+  takes. Advisors run read-only by default.
 ---
 
-# /xllm:multi — Parallel multi-advisor review + synthesis
+# multi — Parallel multi-advisor review + synthesis (xllm)
 
-Claude is the **synthesizer**; external CLIs are the **advisors**. Providers
-run concurrently (one child process each).
+Your host CLI is the **synthesizer**; external CLIs are the **advisors**.
+Providers run concurrently (one child process each).
 
-## Run (Bash tool)
+## Run
+
+Resolve the advisor script exactly as in the `ask` skill (Claude Code:
+`${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js`; Codex/other hosts:
+`<plugin-root>/scripts/grok-ask-advisor.js` two directories above this
+SKILL.md; any host: the `.xllm/xllm-advisor-path` marker), then:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js" --multi p1,p2[,p3] "<shared prompt>"
+node <advisor.js> --multi p1,p2[,p3] "<shared prompt>"
 ```
 
-For per-advisor specialized prompts (better than one shared prompt when roles
-differ), run single `ask` invocations in parallel Bash calls instead:
+For per-advisor specialized prompts (better than one shared prompt when
+roles differ), run single invocations in parallel shell calls instead:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js" codex@high "<analysis prompt>"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js" gemini "<design prompt>"
+node <advisor.js> codex@high "<analysis prompt>"
+node <advisor.js> gemini "<design prompt>"
 ```
 
 ## Safety defaults
 
-Same as `/xllm:ask`: read-only advisors (`--allow-write` only on explicit user
-request), `claude`-as-advisor refused inside Claude Code (pick other vendors),
-artifacts secret-redacted (`--no-artifacts` to skip persistence).
+Same as `ask`: read-only advisors (`--allow-write` only on explicit user
+request), your own vendor refused as advisor (pick other vendors or local
+models), artifacts secret-redacted (`--no-artifacts` to skip persistence).
 
 ## Flow (strict)
 
@@ -50,10 +55,10 @@ artifacts secret-redacted (`--no-artifacts` to skip persistence).
 
 4. One advisor failing does not cancel the rest — note the failure in the
    synthesis. If all fail, say so and give your own analysis labeled as
-   Claude-only.
+   host-only.
 
 ## When NOT to use
 
-Native Claude Code agents already cover same-model parallelism, planning, and
-verification. Reach for this skill only when **cross-vendor disagreement**
-(or a local-model perspective) is the point.
+Your host's native agents already cover same-model parallelism, planning,
+and verification. Reach for this skill only when **cross-vendor
+disagreement** (or a local-model perspective) is the point.

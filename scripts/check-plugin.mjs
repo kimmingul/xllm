@@ -140,6 +140,31 @@ ok(pkg.version === plugin.version, `package.json version matches plugin.json (${
   }
 }
 
+// Codex adapter (.codex-plugin/ + .agents/plugins/marketplace.json + shared ./skills/)
+{
+  const xPluginPath = path.join(root, '.codex-plugin', 'plugin.json');
+  const xMarketPath = path.join(root, '.agents', 'plugins', 'marketplace.json');
+  ok(fs.existsSync(xPluginPath), 'codex adapter: .codex-plugin/plugin.json exists');
+  ok(fs.existsSync(xMarketPath), 'codex adapter: .agents/plugins/marketplace.json exists');
+  const xPlugin = JSON.parse(fs.readFileSync(xPluginPath, 'utf8'));
+  const xMarket = JSON.parse(fs.readFileSync(xMarketPath, 'utf8'));
+  ok(xPlugin.name === 'xllm', 'codex adapter: plugin name is xllm');
+  ok(xPlugin.version === pkg.version, `codex adapter: version matches package.json (${xPlugin.version})`);
+  ok(typeof xPlugin.skills === 'string' && fs.existsSync(path.join(root, xPlugin.skills)),
+    `codex adapter: skills dir exists (${xPlugin.skills})`);
+  ok(xPlugin.interface && typeof xPlugin.interface.displayName === 'string',
+    'codex adapter: interface.displayName present');
+  const xEntry = Array.isArray(xMarket.plugins) ? xMarket.plugins[0] : null;
+  ok(xEntry?.name === 'xllm', 'codex adapter: marketplace entry name is xllm');
+  ok(xEntry?.source?.url === './', 'codex adapter: marketplace self-hosts plugin at ./');
+  // Shared skills must not be Claude-only: advisor resolution has to work on
+  // hosts without CLAUDE_PLUGIN_ROOT (Codex resolves relative to the SKILL.md).
+  for (const s of ['ask', 'multi', 'setup']) {
+    const body = fs.readFileSync(path.join(root, 'skills', s, 'SKILL.md'), 'utf8');
+    ok(/plugin.root|plugin-root/i.test(body), `shared skill ${s} documents non-Claude plugin-root resolution`);
+  }
+}
+
 for (const sub of ['ask', 'xllm', 'ralph', 'team', 'verify']) {
   ok(
     fs.existsSync(path.join(root, '.grok', 'artifacts', sub, '.gitkeep')) ||

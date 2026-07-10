@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.3.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai) and **Claude Code**.
+**v0.4.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai), **Claude Code**, and **Codex**.
 
 The host CLI is the **conductor**. External and local models are **advisors**.
 
@@ -54,6 +54,22 @@ The Claude adapter ports **only** the cross-vendor core (`ask`, `multi`,
 Code's native agents, tasks, and verify/review skills already cover them.
 Note: `claude` as an advisor is refused inside Claude Code (same-provider
 nesting); use codex/gemini/grok/cursor or local models.
+
+### Codex
+
+```bash
+# From GitHub
+codex plugin marketplace add https://github.com/kimmingul/grok-xllm.git
+codex plugin add xllm@xllm
+
+# Local checkout
+codex plugin marketplace add D:\repo\xllm
+codex plugin add xllm@xllm
+```
+
+The same three skills (`ask`, `multi`, `setup`) load from `./skills/` via
+`.codex-plugin/plugin.json`. Inside Codex, `codex` as an advisor is refused
+(same-provider nesting); use claude/gemini/grok/cursor or local models.
 
 Repo: [github.com/kimmingul/grok-xllm](https://github.com/kimmingul/grok-xllm)
 
@@ -153,7 +169,9 @@ npm run smoke:live   # optional live READY provider
 ```text
 plugin.json             # Grok Build manifest
 .claude-plugin/         # Claude Code manifest + marketplace (plugin name: xllm)
-skills/                 # Claude Code skills: ask, multi, setup
+.codex-plugin/          # Codex manifest (plugin name: xllm)
+.agents/plugins/        # Codex marketplace.json (self-hosted)
+skills/                 # Host-neutral skills shared by Claude Code + Codex
 package.json
 scripts/                # host-neutral core
   grok-ask-advisor.js   # multi-LLM entry

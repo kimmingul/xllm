@@ -1,4 +1,4 @@
-# CLI orchestration (ask + ccg) — grok-xllm
+# CLI orchestration (ask + xllm) — grok-xllm
 
 Canonical docs:
 

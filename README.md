@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.5.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai), **Claude Code**, and **Codex**.
+**v0.6.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai), **Claude Code**, and **Codex**.
 
 The host CLI is the **conductor**. External and local models are **advisors**.
 
@@ -149,17 +149,34 @@ Providers carry coarse `tier` / `relative_cost` / `latency_class` metadata
 model (local first) and high-intensity judgment roles to the strongest tier;
 `[roles]` pins override everything, effort included.
 
-## Proposal mode (file work, advisors stay read-only)
+## Escalation ladder: ask → propose → exec
+
+Advisor privilege grows per rung, but privilege over **your checkout stays
+zero on every rung** — only freedom inside isolation increases.
 
 ```bash
+# opinion (read-only)
+node scripts/xllm.mjs ask codex@high "review this design"
+
+# static diff proposal — you apply after git apply --check
 node scripts/xllm.mjs propose codex@high "add input validation to login()"
 node scripts/grok-ask-advisor.js --multi --propose codex,gemini "…"  # N candidate patches
+
+# verified execution in an EPHEMERAL CLONE — edits, builds, tests there,
+# hands back refs/xllm/exec/<id> + patch + evidence; you review and merge
+node scripts/xllm.mjs exec codex@high "implement X" --test-cmd "npm test"
+node scripts/xllm.mjs exec list && node scripts/xllm.mjs exec cleanup <id>
 ```
 
-Advisors return unified diffs saved as `.patch` artifacts; nothing is applied.
-Validate with `git apply --check`, review, then apply yourself.
+exec invariants: your checkout/branches/index/config are never touched
+(separate-.git clone; fetch-only handback; tamper tripwire in evidence);
+merge/push/credentials stay host-side; capable sandboxed providers only
+(codex, claude) — others refused; fail-closed when the OS sandbox is broken
+(`--sandbox-mode bypass` = explicit informed opt-in to clone-level isolation);
+one bounded task per run — no loops/teams (compose with your host's agents).
+Executor-green is evidence, not trust: re-verify after merging.
 
-Artifacts: `<state>/artifacts/{ask,xllm,ralph,team,verify}/` (secret-redacted; see Safety model)
+Artifacts: `<state>/artifacts/{ask,xllm,ralph,team,verify,proposals,exec}/` (secret-redacted; see Safety model)
 
 ## Auto routing (/team)
 

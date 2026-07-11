@@ -552,6 +552,92 @@ test('extractProposalPatch pulls diff block, null when absent', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Exec primitive (isolated executor)
+// ---------------------------------------------------------------------------
+
+import {
+  EXEC_CAPABLE,
+  execCapableProviders,
+  resolveExecPlan,
+  buildExecInstructions,
+  execRootDir,
+  readRegistry,
+  writeRegistry,
+  cleanupRun,
+} from './xllm-exec.js';
+
+test('execCapableProviders: sandboxed CLIs only', () => {
+  const caps = execCapableProviders();
+  assert.ok(caps.includes('codex'));
+  assert.ok(caps.includes('claude'));
+  assert.ok(!caps.includes('gemini'));
+  assert.ok(!caps.includes('grok'));
+  assert.ok(!caps.includes('ollama'));
+  assert.strictEqual(EXEC_CAPABLE.codex.sandbox, 'os-workspace');
+});
+
+test('codex exec args: sandbox default, bypass only on explicit mode', () => {
+  const sandboxed = EXEC_CAPABLE.codex.args('/c', 'sandbox');
+  assert.ok(sandboxed.includes('--sandbox'));
+  assert.ok(sandboxed.includes('workspace-write'));
+  assert.ok(!sandboxed.includes('--dangerously-bypass-approvals-and-sandbox'));
+  const bypass = EXEC_CAPABLE.codex.args('/c', 'bypass');
+  assert.ok(bypass.includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.ok(bypass.includes('--cd'));
+});
+
+test('resolveExecPlan refuses unsandboxed and same-provider', () => {
+  const g = resolveExecPlan('gemini', { env: {} });
+  assert.ok(g.error && /refused for exec/.test(g.error));
+  const self = resolveExecPlan('codex', { env: { CODEX_THREAD_ID: 't' } });
+  assert.ok(self.error && /same-provider/.test(self.error));
+  const ok = resolveExecPlan('codex@high', { env: {} });
+  assert.ok(!ok.error);
+  assert.strictEqual(ok.parsed.provider, 'codex');
+  const override = resolveExecPlan('codex', {
+    env: { CODEX_THREAD_ID: 't' },
+    allowSelf: true,
+  });
+  assert.ok(!override.error);
+});
+
+test('buildExecInstructions embeds task, branch, no-push contract', () => {
+  const s = buildExecInstructions({
+    task: 'implement X',
+    branch: 'xllm/exec/abc',
+    testCmd: 'npm test',
+  });
+  assert.ok(s.includes('implement X'));
+  assert.ok(s.includes('xllm/exec/abc'));
+  assert.ok(s.includes('Do NOT push'));
+  assert.ok(s.includes('npm test'));
+});
+
+test('exec registry roundtrip and cleanup', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-exec-'));
+  try {
+    const fakeClone = path.join(tmp, 'clone');
+    fs.mkdirSync(fakeClone, { recursive: true });
+    const reg = readRegistry(tmp);
+    reg.runs['t1'] = { id: 't1', clone: fakeClone, status: 'green' };
+    writeRegistry(reg, tmp);
+    assert.ok(fs.existsSync(path.join(tmp, '.xllm', 'exec-registry.json')));
+    const r = cleanupRun('t1', { root: tmp, force: true });
+    assert.strictEqual(r.removed, true);
+    assert.ok(!fs.existsSync(fakeClone));
+    assert.strictEqual(Object.keys(readRegistry(tmp).runs).length, 0);
+    assert.strictEqual(cleanupRun('nope', { root: tmp }).removed, false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('execRootDir honors XLLM_EXEC_ROOT', () => {
+  assert.strictEqual(execRootDir({ XLLM_EXEC_ROOT: 'X:/er' }), 'X:/er');
+  assert.ok(execRootDir({}).includes('xllm-exec'));
+});
+
+// ---------------------------------------------------------------------------
 // Role / intensity routing
 // ---------------------------------------------------------------------------
 

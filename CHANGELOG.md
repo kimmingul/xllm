@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.6.0 — 2026-07-11
+
+### Added — isolated executor primitive (`exec`)
+Third rung of the escalation ladder: ask (opinion) → propose (static diff) →
+**exec (verified branch)**. Design adopted after a cross-vendor consultation
+(codex@high + grok@high independently converged on "single exec primitive
+under strict isolation; no loops/teams/pipelines").
+
+- `xllm exec <spec> "<task>" [--test-cmd …]`: the foreign-vendor CLI executes
+  in an **ephemeral local clone** (separate .git — it cannot pollute the main
+  repo's refs/config/hooks), on branch `xllm/exec/<id>`. The user's checkout,
+  branches, index, and config are never touched.
+- Deliverable: ref fetched back as `refs/xllm/exec/<id>` (fetch adds objects
+  only — working tree untouched) + `.patch` sidecar + evidence artifact with
+  deterministic post-run verification (`--test-cmd` run by xllm, not trusted
+  from the executor) and honest statuses: green / not-green / no-change /
+  timeout. Partial work is handed back with failing evidence, never silently.
+- Capable providers only: codex (`--sandbox workspace-write`), claude
+  (`--permission-mode acceptEdits`, documented weaker). Unsandboxed CLIs
+  (gemini/grok/cursor) and pure text models (ollama/lmstudio) are refused —
+  a cwd change plus a warning is not a sandbox.
+- **Fail-closed sandbox preflight** (token-free `codex sandbox` write probe):
+  on machines where codex's Windows workspace-write sandbox lacks capability
+  ACLs for the clone (observed on codex-cli 0.144.1 for arbitrary temp
+  dirs), exec refuses; `--sandbox-mode bypass` is an explicit informed
+  opt-in to clone-level (workflow) isolation only.
+- Main-repo tamper tripwire: HEAD + status snapshot before/after execution,
+  surfaced in the evidence artifact.
+- Same-vendor nesting refused; env sanitization reused; merge/push/creds
+  host-side; registry + `exec list` / `exec cleanup <id>|--all` GC.
+- New `skills/exec/SKILL.md` (Claude Code + Codex hosts); deliberately NOT
+  shipped: loops, teams, pipelines, auto-merge — composition belongs to
+  host-native agents.
+
 ## 0.5.0 — 2026-07-11
 
 Three improvements approved after a cross-vendor design review (codex@high +

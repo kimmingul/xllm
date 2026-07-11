@@ -1,6 +1,6 @@
 {
   "name": "grok-xllm",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "grok-xllm — multi-LLM orchestration for Grok Build (CLI advisors, ralph evidence loops, local+cloud).",
   "type": "module",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "advisor": "node scripts/grok-ask-advisor.js",
     "xllm": "node scripts/xllm.mjs",
     "test": "node scripts/test-advisor.mjs",
-    "check": "node --check scripts/grok-ask-advisor.js && node --check scripts/xllm-doctor.js && node --check scripts/xllm-routing.js && node --check scripts/test-advisor.mjs && node --check scripts/check-plugin.mjs && node --check scripts/smoke.mjs && node --check scripts/xllm.mjs && node scripts/check-plugin.mjs",
+    "check": "node --check scripts/xllm-exec.js && node --check scripts/grok-ask-advisor.js && node --check scripts/xllm-doctor.js && node --check scripts/xllm-routing.js && node --check scripts/test-advisor.mjs && node --check scripts/check-plugin.mjs && node --check scripts/smoke.mjs && node --check scripts/xllm.mjs && node scripts/check-plugin.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:live": "node scripts/smoke.mjs --live",
     "ci": "npm run check && npm test && npm run smoke"

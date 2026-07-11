@@ -22,6 +22,7 @@ It does **not** natively provide:
 | P0 | Reliable Windows quoting | `shell: false`, stdin, cmd-shim unwrap |
 | P1 | Evidence loop | `/ralph` + `/verify` |
 | P1 | Parallel playbook | `/team` |
+| P1 | Isolated executor (single task, ephemeral clone, evidence handback) | `xllm exec` |
 | P1 | Health | `/xllm-setup`, `--doctor` |
 | P2 | Thin agents/personas | critic, verifier, security-reviewer, … |
 

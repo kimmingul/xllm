@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 
@@ -991,7 +991,15 @@ export function redactSecrets(text) {
   return s;
 }
 
-export const ARTIFACT_SUBDIRS = ['ask', 'xllm', 'ralph', 'team', 'verify', 'proposals'];
+export const ARTIFACT_SUBDIRS = [
+  'ask',
+  'xllm',
+  'ralph',
+  'team',
+  'verify',
+  'proposals',
+  'exec',
+];
 
 /**
  * Proposal mode: the advisor must PROPOSE a change, never claim to apply one.

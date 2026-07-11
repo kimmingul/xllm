@@ -19,6 +19,7 @@ const advisor = path.join(__dirname, 'grok-ask-advisor.js');
 const doctor = path.join(__dirname, 'xllm-doctor.js');
 const smoke = path.join(__dirname, 'smoke.mjs');
 const routing = path.join(__dirname, 'xllm-routing.js');
+const exec = path.join(__dirname, 'xllm-exec.js');
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -42,6 +43,9 @@ Commands:
   ask <p> <prompt>   Single advisor call (read-only by default; --allow-write to opt in)
   multi p1,p2 <prompt>   Parallel multi-advisor run (index has consensus contract + JSON)
   propose <p> <change>   Read-only change proposal → artifact + .patch (host applies)
+  exec <p> <task>        Isolated executor: ephemeral clone → verified ref + evidence
+                         (capable providers only; user's checkout never touched)
+  exec list | exec cleanup <id>|--all
   inventory [--refresh]  Machine capability cache (installed CLIs, ollama models)
   profile show           Resolved provider profile + state dir
   profile set-role <role> <spec>     Pin a role for THIS project (e.g. analysis codex@high)
@@ -117,6 +121,17 @@ switch (cmd) {
       process.exit(1);
     }
     run(advisor, ['--propose', ...rest]);
+    break;
+  case 'exec':
+    if (rest[0] === 'list' || rest[0] === 'cleanup') {
+      run(exec, rest);
+    } else {
+      if (rest.length < 2) {
+        console.error('Usage: xllm exec <provider-spec> <task> [--test-cmd "npm test"]');
+        process.exit(1);
+      }
+      run(exec, ['run', ...rest]);
+    }
     break;
   case 'profile': {
     const [sub, ...pr] = rest;

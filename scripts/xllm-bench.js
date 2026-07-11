@@ -89,7 +89,7 @@ export function buildBenchPrompt(spec, task) {
   return `${spec.question}\n\n\`\`\`js\n${task.code}\n\`\`\``;
 }
 
-function askChild(providerSpec, prompt) {
+export function askChild(providerSpec, prompt) {
   const advisor = path.join(HERE, 'grok-ask-advisor.js');
   return new Promise((resolve) => {
     const started = Date.now();

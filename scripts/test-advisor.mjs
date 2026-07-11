@@ -638,6 +638,82 @@ test('execRootDir honors XLLM_EXEC_ROOT', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Contract floor (failure taxonomy, retry, capability probes)
+// ---------------------------------------------------------------------------
+
+import { classifyFailure, withRetry } from './grok-ask-advisor.js';
+import {
+  PROVIDER_CONTRACTS,
+  probeProviderContract,
+} from './xllm-contracts.js';
+
+test('classifyFailure: taxonomy over fixture results', () => {
+  assert.strictEqual(classifyFailure({ status: 0 }).kind, 'ok');
+  assert.strictEqual(
+    classifyFailure({ error: { code: 'ENOENT', message: 'spawn x ENOENT' } }).kind,
+    'missing-binary'
+  );
+  assert.strictEqual(classifyFailure({ status: 1, signal: 'SIGKILL' }).kind, 'timeout');
+  const auth = classifyFailure({ status: 1, stderr: 'Error: 401 Unauthorized — please log in' });
+  assert.strictEqual(auth.kind, 'auth');
+  assert.strictEqual(auth.retryable, false);
+  const transient = classifyFailure({ status: 1, stderr: 'HTTP 429 rate limit exceeded, try again' });
+  assert.strictEqual(transient.kind, 'transient');
+  assert.strictEqual(transient.retryable, true);
+  assert.strictEqual(classifyFailure({ status: 2, stderr: 'syntax error' }).kind, 'permanent');
+});
+
+test('withRetry: retries transient only, bounded, no sleep in tests', () => {
+  let calls = 0;
+  const transientThenOk = () => {
+    calls += 1;
+    return calls === 1 ? { status: 1, stderr: 'rate limit' } : { status: 0, stdout: 'fine' };
+  };
+  const r = withRetry(transientThenOk, { maxAttempts: 2, sleep: () => {} });
+  assert.strictEqual(r.attempts, 2);
+  assert.strictEqual(r.failure.kind, 'ok');
+
+  calls = 0;
+  const alwaysAuth = () => {
+    calls += 1;
+    return { status: 1, stderr: 'invalid api key' };
+  };
+  const a = withRetry(alwaysAuth, { maxAttempts: 3, sleep: () => {} });
+  assert.strictEqual(calls, 1); // auth is not retryable
+  assert.strictEqual(a.failure.kind, 'auth');
+
+  calls = 0;
+  const alwaysTransient = () => {
+    calls += 1;
+    return { status: 1, stderr: '503 overloaded' };
+  };
+  const t = withRetry(alwaysTransient, { maxAttempts: 2, sleep: () => {} });
+  assert.strictEqual(calls, 2); // bounded
+  assert.strictEqual(t.failure.kind, 'transient');
+});
+
+test('provider contracts: every provider has a contract; flags match spawn configs', () => {
+  for (const p of getSupportedProviders()) {
+    assert.ok(PROVIDER_CONTRACTS[p], `contract for ${p}`);
+  }
+  // The flags xllm actually spawns with must be in the probed contract.
+  assert.ok(PROVIDER_CONTRACTS.codex.probes[0].required.includes('--sandbox'));
+  assert.ok(PROVIDER_CONTRACTS.claude.probes[0].required.includes('--permission-mode'));
+  assert.ok(PROVIDER_CONTRACTS.grok.probes[0].required.includes('--reasoning-effort'));
+});
+
+test('probeProviderContract: live probe on installed ollama, missing lemonade', () => {
+  const ollama = probeProviderContract('ollama');
+  assert.strictEqual(ollama.ok, true);
+  assert.ok(ollama.version);
+  const env = { ...process.env };
+  delete env.LEMONADE_BIN;
+  const lemonade = probeProviderContract('lemonade', env);
+  assert.strictEqual(lemonade.ok, false);
+  assert.strictEqual(lemonade.failure.kind, 'missing-binary');
+});
+
+// ---------------------------------------------------------------------------
 // Scribe lane (cheap-prose chores)
 // ---------------------------------------------------------------------------
 

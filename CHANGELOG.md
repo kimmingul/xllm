@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.8.0 — 2026-07-11
+
+### Added — minimal executable provider contract floor
+First of three approved diversity-roadmap improvements
+(docs/diversity-roadmap.md): the hygiene layer that makes later diversity
+experiments trustworthy. Deliberately thin.
+
+- `xllm contracts [--live] [--json]` (scripts/xllm-contracts.js):
+  - **Token-free capability probes** — checks each installed CLI's `--help`
+    for the exact flags xllm spawns with (codex `--sandbox/--cd/-c`, claude
+    `-p/--model/--permission-mode`, grok `--reasoning-effort`, …) and records
+    the CLI version → **flag-drift detection** (exit 2 on drift). Live-tested
+    against the 5 installed CLIs on this machine.
+  - **Opt-in live auth mini-call** (`--live`) — one tiny prompt per healthy
+    cloud provider proves auth (READY only means "binary responds");
+    same-vendor host skipped; report cached at `~/.xllm/contracts.json`.
+- **Structured failure taxonomy** in the core (`classifyFailure`):
+  missing-binary / timeout / auth / transient / permanent / ok, from stderr
+  patterns — pure and fixture-tested. Advisor failures now print their class
+  and a hint.
+- **Bounded jittered retry** (`withRetry`): transient failures only
+  (429/5xx/network), max 2 attempts, wired into the real advisor spawn path.
+  Auth/timeout/permanent failures are never retried.
+
 ## 0.7.0 — 2026-07-11
 
 ### Added — scribe: cheap-prose lane for git chores

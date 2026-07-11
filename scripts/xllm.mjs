@@ -21,6 +21,7 @@ const smoke = path.join(__dirname, 'smoke.mjs');
 const routing = path.join(__dirname, 'xllm-routing.js');
 const exec = path.join(__dirname, 'xllm-exec.js');
 const scribe = path.join(__dirname, 'xllm-scribe.js');
+const contracts = path.join(__dirname, 'xllm-contracts.js');
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -50,6 +51,8 @@ Commands:
   scribe commit|pr|release|notes   Cheap-model prose for git chores → stdout
                                    (advisor writes text; YOU run git/gh)
   inventory [--refresh]  Machine capability cache (installed CLIs, ollama models)
+  contracts [--live]     Provider contract probes: flag drift, failure class,
+                         auth (--live sends one tiny call per cloud provider)
   profile show           Resolved provider profile + state dir
   profile set-role <role> <spec>     Pin a role for THIS project (e.g. analysis codex@high)
   profile set-default <key> <value>  Set a [defaults] key in the project profile
@@ -117,6 +120,9 @@ switch (cmd) {
     break;
   case 'inventory':
     run(advisor, ['--inventory', ...rest]);
+    break;
+  case 'contracts':
+    run(contracts, rest);
     break;
   case 'propose':
     if (rest.length < 2) {

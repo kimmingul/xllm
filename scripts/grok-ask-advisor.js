@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 
@@ -1404,6 +1404,89 @@ export function buildAdvisorEnv(provider, baseEnv = process.env) {
   return env;
 }
 
+// ---------------------------------------------------------------------------
+// Failure taxonomy + bounded retry (contract floor — see docs/diversity-roadmap.md)
+// ---------------------------------------------------------------------------
+
+const AUTH_RE =
+  /\b(401|403 forbidden|unauthorized|not logged in|login required|please (log ?in|sign ?in)|invalid api key|api key (missing|not set)|authentication (failed|required)|credential|token expired)\b/i;
+const TRANSIENT_RE =
+  /\b(429|rate limit|too many requests|overloaded|capacity|temporar(y|ily)|try again|502 bad gateway|503|504|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang ?up|network (error|failure))\b/i;
+
+/**
+ * Classify a spawnSync-like result into a structured failure:
+ * missing-binary / timeout / auth / transient / permanent / ok.
+ * Pure — safe to unit-test with fixture objects.
+ */
+export function classifyFailure(result = {}) {
+  const text = `${result.stdout || ''}\n${result.stderr || ''}\n${result.error?.message || ''}`;
+  if (
+    result.error?.code === 'ENOENT' ||
+    /not recognized as an internal or external command|command not found|No such file or directory/i.test(text)
+  ) {
+    return {
+      kind: 'missing-binary',
+      retryable: false,
+      hint: 'Install the CLI and ensure it is on PATH.',
+    };
+  }
+  if (result.timedOut || result.signal === 'SIGKILL' || result.error?.code === 'ETIMEDOUT') {
+    return {
+      kind: 'timeout',
+      retryable: false,
+      hint: 'Increase timeout or check for hangs; timeouts are usually systemic, not transient.',
+    };
+  }
+  if ((result.status ?? 0) !== 0 && AUTH_RE.test(text)) {
+    return {
+      kind: 'auth',
+      retryable: false,
+      hint: 'Run the provider CLI login flow, then verify with `contracts --live`.',
+    };
+  }
+  if ((result.status ?? 0) !== 0 && TRANSIENT_RE.test(text)) {
+    return {
+      kind: 'transient',
+      retryable: true,
+      hint: 'Retried automatically with jittered backoff.',
+    };
+  }
+  if ((result.status ?? 0) !== 0 || result.error) {
+    return {
+      kind: 'permanent',
+      retryable: false,
+      hint: 'Read the provider output; this is not a retry candidate.',
+    };
+  }
+  return { kind: 'ok', retryable: false, hint: null };
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Bounded jittered retry around a synchronous attempt. Retries ONLY when
+ * classifyFailure says transient. maxAttempts includes the first try.
+ */
+export function withRetry(
+  attemptFn,
+  { maxAttempts = 2, baseDelayMs = 600, sleep = sleepMs } = {}
+) {
+  let last = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    last = attemptFn(attempt);
+    const cls = classifyFailure(last);
+    last.failure = cls;
+    if (cls.kind === 'ok' || !cls.retryable) return { ...last, attempts: attempt };
+    if (attempt < maxAttempts) {
+      const delay = baseDelayMs * attempt + Math.floor(Math.random() * 400);
+      sleep(delay);
+    }
+  }
+  return { ...last, attempts: maxAttempts };
+}
+
 /** Detect which agentic CLI (if any) is hosting this process. */
 export function detectHostCli(env = process.env) {
   if (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT || env.CLAUDECODE_SESSION_ID) {
@@ -1799,8 +1882,14 @@ export function runAdvisor({
   };
 
   const started = Date.now();
-  const result = spawnSync(finalCommand, finalArgs, runOpts);
+  // Contract floor: bounded jittered retry, transient failures only.
+  const result = withRetry(() => spawnSync(finalCommand, finalArgs, runOpts));
   const durationMs = Date.now() - started;
+  if (result.attempts > 1) {
+    console.error(
+      `[${provider}] transient failure — retried (${result.attempts} attempts)`
+    );
+  }
 
   let stdout = result.stdout || '';
   const stderr = result.stderr || '';
@@ -1814,6 +1903,11 @@ export function runAdvisor({
   if (result.signal) {
     raw = `[killed by signal ${result.signal}]\n\n${raw}`;
     code = code || 1;
+  }
+  if (code !== 0 && result.failure && result.failure.kind !== 'ok') {
+    console.error(
+      `[${provider}] failure class: ${result.failure.kind}${result.failure.hint ? ` — ${result.failure.hint}` : ''}`
+    );
   }
 
   if (provider === 'lmstudio' && stdout) {

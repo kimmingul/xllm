@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.7.0** — [Grok Build](https://grok.x.ai), **Claude Code**, **Codex**를 위한 크로스-벤더 LLM 어드바이저 플러그인.
+**v0.8.0** — [Grok Build](https://grok.x.ai), **Claude Code**, **Codex**를 위한 크로스-벤더 LLM 어드바이저 플러그인.
 
 호스트 CLI가 **지휘자(conductor)**, 외부·로컬 모델이 **조언자(advisor)**입니다.
 

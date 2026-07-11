@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.10.0** — [Grok Build](https://grok.x.ai), **Claude Code**, **Codex**를 위한 크로스-벤더 LLM 어드바이저 플러그인.
+**v0.11.0** — [Grok Build](https://grok.x.ai), **Claude Code**, **Codex**를 위한 크로스-벤더 LLM 어드바이저 플러그인.
 
 호스트 CLI가 **지휘자(conductor)**, 외부·로컬 모델이 **조언자(advisor)**입니다.
 
@@ -21,13 +21,13 @@
 grok plugin install . --trust
 
 # GitHub에서
-grok plugin install kimmingul/grok-xllm --trust
+grok plugin install kimmingul/xllm --trust
 ```
 
 ### Claude Code
 
 ```text
-/plugin marketplace add kimmingul/grok-xllm
+/plugin marketplace add kimmingul/xllm
 /plugin install xllm@xllm
 ```
 
@@ -37,7 +37,7 @@ grok plugin install kimmingul/grok-xllm --trust
 ### Codex
 
 ```bash
-codex plugin marketplace add https://github.com/kimmingul/grok-xllm.git
+codex plugin marketplace add https://github.com/kimmingul/xllm.git
 codex plugin add xllm@xllm
 ```
 

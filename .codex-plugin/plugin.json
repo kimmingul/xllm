@@ -1,12 +1,12 @@
 {
   "name": "xllm",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Cross-vendor LLM advisors for Codex: ask claude, gemini, grok, cursor, or local ollama/lmstudio from inside a session and synthesize their independent opinions. Read-only by default.",
   "author": {
     "name": "grok-xllm contributors"
   },
-  "homepage": "https://github.com/kimmingul/grok-xllm",
-  "repository": "https://github.com/kimmingul/grok-xllm",
+  "homepage": "https://github.com/kimmingul/xllm",
+  "repository": "https://github.com/kimmingul/xllm",
   "license": "MIT",
   "keywords": [
     "codex",
@@ -33,7 +33,7 @@
       "Ask a local model to critique this API surface",
       "Run a cross-vendor security review of this change"
     ],
-    "websiteURL": "https://github.com/kimmingul/grok-xllm",
+    "websiteURL": "https://github.com/kimmingul/xllm",
     "screenshots": []
   }
 }

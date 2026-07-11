@@ -1,11 +1,11 @@
 {
   "name": "grok-xllm",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "grok-xllm — multi-LLM orchestration for Grok Build. CLI advisors (/ask, /xllm), ralph evidence loops, thin team playbooks, first-class local LLMs.",
   "author": {
     "name": "grok-xllm contributors"
   },
-  "repository": "https://github.com/kimmingul/grok-xllm",
+  "repository": "https://github.com/kimmingul/xllm",
   "license": "MIT",
   "keywords": [
     "grok",

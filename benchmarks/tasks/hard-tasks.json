@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "question": "Review this code for defects. List EVERY defect you find, one per line, and briefly say why each is a problem. Look beyond obvious issues — consider subtle logic errors, concurrency, numeric edge cases, and specification mismatches.",
+  "note": "Harder set: subtle/ambiguous defects where frontier models are expected to DIVERGE (decorrelated errors). Contrast with tasks.json (well-known defect classes, correlated errors).",
+  "tasks": [
+    {
+      "id": "h1-median",
+      "title": "Running median (subtle numeric + logic)",
+      "code": "function movingAverage(values, window) {\n  const out = [];\n  let sum = 0;\n  for (let i = 0; i < values.length; i++) {\n    sum += values[i];\n    if (i >= window) sum -= values[i - window];\n    if (i >= window - 1) out.push(sum / window);\n  }\n  return out;\n}",
+      "defects": [
+        { "id": "float-drift", "pattern": "float(ing)?[- ]point|precision|accumulat(e|ed|ing) (error|drift)|rounding error|catastrophic cancellation|numeric(al)? (drift|instab)", "description": "Running sum accumulates floating-point drift over long inputs" },
+        { "id": "window-zero", "pattern": "window (of |== ?|=)?0|division by zero|divide.*zero|zero window|window <= ?0|empty window|guard.*window", "description": "window=0 → divide by zero / wrong indexing, unguarded" },
+        { "id": "window-gt-len", "pattern": "window (>|greater|larger|exceed).*(length|len|size|array)|window bigger than|returns empty|no output when window", "description": "window > length silently returns [] with no signal" }
+      ]
+    },
+    {
+      "id": "h2-retry-jitter",
+      "title": "Exponential backoff (concurrency + correctness)",
+      "code": "async function withBackoff(fn, retries = 5) {\n  let delay = 100;\n  for (let i = 0; i < retries; i++) {\n    try {\n      return await fn();\n    } catch (e) {\n      await sleep(delay);\n      delay *= 2;\n    }\n  }\n}",
+      "defects": [
+        { "id": "swallow-last-error", "pattern": "swallow|last (error|exception)|returns undefined|final (attempt|retry).*(throw|error)|loses the error|no (re)?throw|silently", "description": "After all retries fail, returns undefined and swallows the last error" },
+        { "id": "no-jitter", "pattern": "jitter|thundering herd|synchroniz(e|ed) retr|all clients retry|random(ness|ized)? delay", "description": "No jitter → thundering-herd / synchronized retries" },
+        { "id": "unbounded-delay", "pattern": "unbounded|cap|max(imum)? delay|delay grows|no ceiling|clamp.*delay", "description": "delay doubles unbounded — no max ceiling" },
+        { "id": "non-retriable", "pattern": "retri(es|able|ed) (non|all)|4xx|400|non[- ]retriable|permanent (error|failure)|distinguish.*error|retries everything", "description": "Retries non-retriable errors (e.g. 400) the same as transient" }
+      ]
+    },
+    {
+      "id": "h3-cache-lru",
+      "title": "LRU cache (spec mismatch + subtle bug)",
+      "code": "class LRU {\n  constructor(max) { this.max = max; this.map = new Map(); }\n  get(k) { return this.map.get(k); }\n  set(k, v) {\n    if (this.map.size >= this.max) {\n      const oldest = this.map.keys().next().value;\n      this.map.delete(oldest);\n    }\n    this.map.set(k, v);\n  }\n}",
+      "defects": [
+        { "id": "get-no-touch", "pattern": "get (does not|doesn't|never) (update|touch|refresh|reorder|promote)|recency.*not|not (truly )?lru|access order|get should|reorder on (get|read|access)", "description": "get() doesn't refresh recency → not actually LRU (only insertion-order eviction)" },
+        { "id": "update-existing-size", "pattern": "existing key|re[- ]?set.*(same|existing)|update.*(size|evict)|already (present|exists).*(evict|delete)|overwrite.*evict|set.*existing", "description": "Re-setting an existing key can evict another before overwriting (size check wrong for updates)" },
+        { "id": "no-eviction-on-equal", "pattern": ">= ?this.max|off[- ]by[- ]one|evicts (too )?(early|soon)|max-1|holds max-1|capacity (off|wrong)", "description": ">= evicts when size equals max before insert → holds max-1 items" }
+      ]
+    },
+    {
+      "id": "h4-date-range",
+      "title": "Date-range overlap (boundary + tz)",
+      "code": "function overlaps(aStart, aEnd, bStart, bEnd) {\n  return aStart < bEnd && bStart < aEnd;\n}\nfunction bookRoom(existing, start, end) {\n  for (const b of existing) {\n    if (overlaps(b.start, b.end, start, end)) return false;\n  }\n  return true;\n}",
+      "defects": [
+        { "id": "touching-intervals", "pattern": "touch(ing)?|adjacent|boundary|back[- ]to[- ]back|end == ?start|inclusiv|exclusiv|<= ?vs ?<|checkout.*checkin|equal (end|start)", "description": "Strict < treats touching intervals (aEnd == bStart) as overlap or not — boundary semantics unspecified/likely wrong for bookings" },
+        { "id": "no-validation", "pattern": "start (>|after|>=) ?end|invalid (range|interval)|end before start|reversed|negative (duration|interval)|validate", "description": "No validation that start < end; reversed range breaks the check" },
+        { "id": "tz-comparison", "pattern": "time[- ]?zone|tz|utc|offset|Date object|string compar|comparable type|mixed (type|format)", "description": "Comparison assumes comparable, same-tz values; mixed Date/string/tz silently misbehaves" }
+      ]
+    },
+    {
+      "id": "h5-parse-int",
+      "title": "Quantity parser (coercion traps)",
+      "code": "function totalPrice(items) {\n  let total = 0;\n  for (const it of items) {\n    total += it.price * parseInt(it.qty);\n  }\n  return total;\n}",
+      "defects": [
+        { "id": "parseint-radix", "pattern": "radix|parseInt.*(10|base)|leading zero|octal|second argument|parseInt(\\('| \")0", "description": "parseInt without radix mis-parses some strings (leading-zero/octal legacy edge)" },
+        { "id": "nan-propagation", "pattern": "NaN|not a number|non[- ]?numeric|invalid qty|total becomes NaN|Number.isNaN|isNaN|contaminat", "description": "Non-numeric qty → NaN silently poisons the whole total" },
+        { "id": "float-money", "pattern": "float(ing)?[- ]point.*(money|price|currency)|money.*float|cents|integer (cents|arithmetic)|0\\.1 ?\\+|penny|rounding.*(price|money)", "description": "Floating-point arithmetic on money accumulates rounding errors" },
+        { "id": "fractional-qty", "pattern": "fractional|1\\.5|truncat(e|es|ion)|parseInt.*(drop|discard|floor)|decimal qty|loses (the )?fraction", "description": "parseInt truncates fractional quantities silently" }
+      ]
+    },
+    {
+      "id": "h6-event-emitter",
+      "title": "One-time event (listener leak + ordering)",
+      "code": "class Once {\n  constructor() { this.handlers = []; this.fired = false; }\n  on(fn) { this.handlers.push(fn); if (this.fired) fn(this.value); }\n  emit(v) { this.value = v; this.fired = true; this.handlers.forEach(h => h(v)); }\n}",
+      "defects": [
+        { "id": "double-fire", "pattern": "emit(ted)? (twice|again|multiple)|re[- ]?emit|fires? again|second emit|guard.*fired|idempotent|only once", "description": "emit can be called twice; handlers run again — not really once-semantics" },
+        { "id": "late-handler-and-live", "pattern": "both|adds (and|then) (calls|fires)|double (call|invoke)|late (handler|listener).*(also|and).*forEach|pushed.*and.*called|registered twice", "description": "A handler added after fire is both called immediately AND left in handlers for a future emit → double-invocation" },
+        { "id": "no-cleanup", "pattern": "leak|never (removed|cleared)|handlers (grow|retained|kept)|memory|off|removeListener|clear handlers|hold reference", "description": "handlers array is never cleared → listener/memory leak after fire" },
+        { "id": "throw-halts", "pattern": "throw(s|ing)?.*(halt|stop|skip|remaining)|one handler.*(breaks|stops)|forEach.*throw|try[/ ]?catch.*handler|isolate", "description": "A throwing handler halts the rest (forEach has no isolation)" }
+      ]
+    }
+  ]
+}

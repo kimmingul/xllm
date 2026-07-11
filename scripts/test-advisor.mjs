@@ -723,7 +723,7 @@ import {
   suggestTiebreaker,
   JUDGMENT_ROLES,
 } from './xllm-routing.js';
-import { gradeAnswer, errorCorrelation, loadTasks } from './xllm-bench.js';
+import { gradeAnswer, errorCorrelation, loadTasks, resolveTasksFile } from './xllm-bench.js';
 
 test('modelCapability parses size class and kind from model names', () => {
   assert.strictEqual(modelCapability('ollama:llama3.2').size_class, 'unknown'); // no B tag
@@ -769,6 +769,21 @@ test('bench grader: deterministic defect detection + selftest tasks valid', () =
   const partial = gradeAnswer(t1, 'looks fine to me');
   assert.strictEqual(partial.hits.length, 0);
   assert.strictEqual(partial.misses.length, 3);
+});
+
+test('bench --tasks-file resolves named sets; hard set regexes valid', () => {
+  const easy = resolveTasksFile(null);
+  assert.ok(easy.endsWith('tasks.json'));
+  const hard = resolveTasksFile('hard-tasks');
+  assert.ok(hard.endsWith('hard-tasks.json'));
+  const spec = loadTasks(hard); // also validates every regex compiles
+  assert.ok(spec.tasks.length >= 6);
+  assert.throws(() => resolveTasksFile('does-not-exist'));
+  // hard grader still deterministic
+  const h2 = spec.tasks.find((t) => t.id === 'h2-retry-jitter');
+  const g = gradeAnswer(h2, 'it swallows the last error and returns undefined; also no jitter causes thundering herd');
+  assert.ok(g.hits.includes('swallow-last-error'));
+  assert.ok(g.hits.includes('no-jitter'));
 });
 
 test('bench errorCorrelation flags shared blind spots', () => {

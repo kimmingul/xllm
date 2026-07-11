@@ -9,13 +9,13 @@
     {
       "name": "xllm",
       "description": "Cross-vendor LLM advisors: ask codex, gemini, grok, cursor, or local ollama/lmstudio from inside Claude Code and synthesize their independent opinions. Read-only by default; no hooks, no agents, no skill catalog.",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "author": {
         "name": "grok-xllm contributors"
       },
       "source": "./",
       "category": "development",
-      "homepage": "https://github.com/kimmingul/grok-xllm",
+      "homepage": "https://github.com/kimmingul/xllm",
       "tags": [
         "multi-llm",
         "advisors",
@@ -24,5 +24,5 @@
       ]
     }
   ],
-  "version": "0.10.0"
+  "version": "0.11.0"
 }

@@ -32,7 +32,17 @@ import {
 import { rawFromArtifact } from './xllm-panel.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const TASKS_PATH = path.join(HERE, '..', 'benchmarks', 'tasks', 'tasks.json');
+const TASKS_DIR = path.join(HERE, '..', 'benchmarks', 'tasks');
+const TASKS_PATH = path.join(TASKS_DIR, 'tasks.json');
+
+/** Resolve a task set: absolute/relative path, or a bare name in tasks dir. */
+export function resolveTasksFile(nameOrPath) {
+  if (!nameOrPath) return TASKS_PATH;
+  if (fs.existsSync(nameOrPath)) return nameOrPath;
+  const named = path.join(TASKS_DIR, nameOrPath.endsWith('.json') ? nameOrPath : `${nameOrPath}.json`);
+  if (fs.existsSync(named)) return named;
+  throw new Error(`task file not found: ${nameOrPath}`);
+}
 
 export function loadTasks(file = TASKS_PATH) {
   const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -102,8 +112,8 @@ function askChild(providerSpec, prompt) {
   });
 }
 
-export async function runBench({ providers, taskIds = null, modes = ['single', 'panel'] }) {
-  const spec = loadTasks();
+export async function runBench({ providers, taskIds = null, modes = ['single', 'panel'], tasksFile = null }) {
+  const spec = loadTasks(resolveTasksFile(tasksFile));
   const tasks = spec.tasks.filter((t) => !taskIds || taskIds.includes(t.id));
   if (!tasks.length) {
     console.error('[bench] no tasks selected');
@@ -270,11 +280,12 @@ async function main() {
     const providers = (get('--providers') || '').split(',').map((s) => s.trim()).filter(Boolean);
     const taskIds = get('--tasks') ? get('--tasks').split(',').map((s) => s.trim()) : null;
     const modes = get('--modes') ? get('--modes').split(',').map((s) => s.trim()) : ['single', 'panel'];
+    const tasksFile = get('--tasks-file');
     if (providers.length < 2) {
-      console.error('Usage: xllm-bench run --providers p1,p2[,p3] [--tasks t1,t2] [--modes single,panel]');
+      console.error('Usage: xllm-bench run --providers p1,p2[,p3] [--tasks-file NAME] [--tasks t1,t2] [--modes single,panel]');
       process.exit(1);
     }
-    const r = await runBench({ providers, taskIds, modes });
+    const r = await runBench({ providers, taskIds, modes, tasksFile });
     process.exit(r.exitCode);
   }
 

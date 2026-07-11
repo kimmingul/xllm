@@ -12,11 +12,11 @@ cd /path/to/grok-xllm
 grok plugin install . --trust
 
 # Or from GitHub
-grok plugin install kimmingul/grok-xllm --trust
+grok plugin install kimmingul/xllm --trust
 ```
 
 Confirm in TUI: `/plugins` → **grok-xllm** enabled.  
-Source: https://github.com/kimmingul/grok-xllm
+Source: https://github.com/kimmingul/xllm
 
 ## One-time path setup (per consumer project)
 

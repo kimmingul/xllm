@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.11.0 — 2026-07-11
+
+### Changed — canonical repository moved to github.com/kimmingul/xllm
+The project's home is now **github.com/kimmingul/xllm** (was grok-xllm).
+Install commands and manifest `repository`/`homepage` URLs updated
+accordingly. Plugin identities are unchanged: `grok-xllm` on Grok Build,
+`xllm` on Claude Code / Codex.
+
+### Added — harder/decorrelated benchmark task set
+Follow-up to v0.10.0's first finding (frontier models had correlated errors
+on well-known defects → no dividend). This adds a task set designed to make
+models DIVERGE, to locate where the diversity dividend actually appears.
+
+- `benchmarks/tasks/hard-tasks.json`: 6 tasks, 21 subtle/ambiguous defects
+  (floating-point drift, backoff jitter/ceiling, true-LRU recency, interval
+  boundary semantics, parseInt radix/NaN/money-float, once-emitter listener
+  leak + double-invoke) — the kind of bug where careful reasoning, not
+  pattern-matching, decides detection.
+- `xllm-bench run --tasks-file <name|path>`: run any task set (bare name
+  resolves under `benchmarks/tasks/`). Every defect regex is validated on
+  load.
+- Empirical finding on this set recorded separately in
+  `benchmarks/FINDINGS.md` once the live run completes.
+
 ## 0.10.0 — 2026-07-11
 
 ### Added — seeded-defect benchmark + evidence-driven routing

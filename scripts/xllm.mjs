@@ -22,6 +22,7 @@ const routing = path.join(__dirname, 'xllm-routing.js');
 const exec = path.join(__dirname, 'xllm-exec.js');
 const scribe = path.join(__dirname, 'xllm-scribe.js');
 const contracts = path.join(__dirname, 'xllm-contracts.js');
+const panel = path.join(__dirname, 'xllm-panel.js');
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -44,6 +45,9 @@ Commands:
   doctor             Provider + path health (human)
   ask <p> <prompt>   Single advisor call (read-only by default; --allow-write to opt in)
   multi p1,p2 <prompt>   Parallel multi-advisor run (index has consensus contract + JSON)
+  panel run p1,p2 <q>    BLIND same-prompt panel → verdict ledger + agreement
+  panel stats            Pairwise agreement matrix (measured decorrelation)
+  panel outcome <id> …   Record what the host adopted (decision-adoption loop)
   propose <p> <change>   Read-only change proposal → artifact + .patch (host applies)
   exec <p> <task>        Isolated executor: ephemeral clone → verified ref + evidence
                          (capable providers only; user's checkout never touched)
@@ -123,6 +127,9 @@ switch (cmd) {
     break;
   case 'contracts':
     run(contracts, rest);
+    break;
+  case 'panel':
+    run(panel, rest);
     break;
   case 'propose':
     if (rest.length < 2) {

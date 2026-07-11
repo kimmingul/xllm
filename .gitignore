@@ -35,3 +35,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Panel ledger (runtime measurement data, project-local)
+.grok/panel-ledger.jsonl
+.xllm/panel-ledger.jsonl

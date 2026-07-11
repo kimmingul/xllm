@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.9.0 — 2026-07-11
+
+### Added — blind same-prompt panel + claim/agreement ledger
+Second diversity-roadmap improvement: the measurement instrument that
+separates model-diversity from prompt-diversity.
+
+- `xllm panel run p1,p2[,p3] "<question>"` (scripts/xllm-panel.js): every
+  panelist gets the IDENTICAL prompt, blind, and must end with a structured
+  verdict json (approve/reject/mixed + confidence + key claims, own words).
+  Deterministic extraction; one corrective retry for protocol violations
+  (small local models need it — observed live).
+- **Record-before-narrative**: append-only ledger
+  (`<state>/panel-ledger.jsonl`) written before the human index; the index
+  presents the ledger table first (minority verdicts flagged) and instructs
+  the host that prose synthesis is UX and may not override the ledger.
+  Outcomes are separate records, never mutations.
+- **Abstentions never agree**: failed/invalid panelists yield null pairwise
+  entries; consensus labels (unanimous/majority/split/single-source/
+  no-verdicts) computed over valid verdicts only.
+- `xllm panel stats`: cumulative pairwise agreement matrix — the measured
+  decorrelation source for tiebreaker choice (never lineage metadata).
+- `xllm panel outcome <run-id> --adopted … --helpful yes|no`: the decision
+  adoption loop ("the missing dependent variable").
+- Local-runtime lane management: panelists sharing a local provider run
+  sequentially with `ollama stop` unloads in between (live-observed CUDA
+  OOM when two models load at once).
+
+### Fixed (found by live e2e)
+- `rawFromArtifact` truncated raw output at the first inner fenced block —
+  the verdict json never reached the extractor; now anchored on the trailing
+  Summary heading.
+- Verdict JSON with terminal-wrapped newlines inside string literals
+  (ollama TTY) is repaired before parsing.
+
+Live e2e: llama3.2 + gemma4 blind panel → both reject → unanimous; ledger,
+pairwise matrix, corrective retry, model unload, and outcome recording all
+exercised for real. Tests 77 → 83.
+
 ## 0.8.0 — 2026-07-11
 
 ### Added — minimal executable provider contract floor

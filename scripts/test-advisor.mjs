@@ -714,6 +714,138 @@ test('probeProviderContract: live probe on installed ollama, missing lemonade', 
 });
 
 // ---------------------------------------------------------------------------
+// Panel (blind same-prompt + ledger)
+// ---------------------------------------------------------------------------
+
+import {
+  buildPanelPrompt,
+  extractPanelVerdict,
+  computePairwise,
+  consensusLabel,
+  appendLedger,
+  readLedger,
+  ledgerStats,
+  ledgerPath,
+} from './xllm-panel.js';
+
+test('buildPanelPrompt appends the blind verdict protocol', () => {
+  const p = buildPanelPrompt('Is eval safe?');
+  assert.ok(p.startsWith('Is eval safe?'));
+  assert.ok(p.includes('PANEL PROTOCOL'));
+  assert.ok(p.includes('"verdict"'));
+});
+
+test('extractPanelVerdict repairs newline-wrapped JSON strings (ollama TTY)', () => {
+  const wrapped =
+    '```json\n{"verdict": "reject", "confidence": 0.5, "key_claims": ["Passing unsanitize\nunsanitized input is unsafe."]}\n```';
+  const v = extractPanelVerdict(wrapped);
+  assert.ok(v);
+  assert.strictEqual(v.verdict, 'reject');
+});
+
+test('rawFromArtifact survives inner fenced blocks (anchored on Summary)', async () => {
+  const { rawFromArtifact } = await import('./xllm-panel.js');
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-rawart-'));
+  const f = path.join(tmp, 'a.md');
+  try {
+    fs.writeFileSync(
+      f,
+      '# x\n\n## Raw output\n\n```text\nanswer\n\n```json\n{"verdict":"approve","key_claims":[]}\n```\n```\n\n## Summary\n\nok\n',
+      'utf8'
+    );
+    const raw = rawFromArtifact(f);
+    assert.ok(raw.includes('```json'));
+    assert.ok(extractPanelVerdict(raw));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('extractPanelVerdict: valid, clamped, invalid, missing', () => {
+  const ok = extractPanelVerdict(
+    'answer text\n```json\n{"verdict":"reject","confidence":0.9,"key_claims":["a","b"]}\n```\n'
+  );
+  assert.strictEqual(ok.verdict, 'reject');
+  assert.strictEqual(ok.confidence, 0.9);
+  assert.deepStrictEqual(ok.key_claims, ['a', 'b']);
+  const clamped = extractPanelVerdict('```json\n{"verdict":"approve","confidence":7}\n```');
+  assert.strictEqual(clamped.confidence, 1);
+  assert.strictEqual(extractPanelVerdict('no block here'), null);
+  assert.strictEqual(extractPanelVerdict('```json\n{"verdict":"maybe"}\n```'), null);
+  // last block wins
+  const last = extractPanelVerdict(
+    '```json\n{"verdict":"approve"}\n```\ntext\n```json\n{"verdict":"mixed","key_claims":[]}\n```'
+  );
+  assert.strictEqual(last.verdict, 'mixed');
+});
+
+test('computePairwise + consensusLabel: abstentions never agree', () => {
+  const v = (x) => ({ verdict: x, confidence: 1, key_claims: [] });
+  const unanimous = [
+    { spec: 'a', verdict: v('reject') },
+    { spec: 'b', verdict: v('reject') },
+  ];
+  assert.strictEqual(consensusLabel(unanimous), 'unanimous');
+  assert.strictEqual(computePairwise(unanimous)[0].agree, true);
+
+  const withAbstain = [
+    { spec: 'a', verdict: v('reject') },
+    { spec: 'b', verdict: null },
+  ];
+  assert.strictEqual(computePairwise(withAbstain)[0].agree, null);
+  assert.strictEqual(consensusLabel(withAbstain), 'single-source');
+
+  const split = [
+    { spec: 'a', verdict: v('approve') },
+    { spec: 'b', verdict: v('reject') },
+  ];
+  assert.strictEqual(consensusLabel(split), 'split');
+
+  const majority = [
+    { spec: 'a', verdict: v('approve') },
+    { spec: 'b', verdict: v('approve') },
+    { spec: 'c', verdict: v('reject') },
+  ];
+  assert.strictEqual(consensusLabel(majority), 'majority');
+  assert.strictEqual(consensusLabel([{ spec: 'a', verdict: null }]), 'no-verdicts');
+});
+
+test('ledger: append-only, outcome as separate record, stats matrix', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-panel-'));
+  try {
+    appendLedger(
+      {
+        type: 'panel',
+        run_id: 'r1',
+        pairwise: [
+          { a: 'x', b: 'y', agree: true },
+          { a: 'x', b: 'z', agree: null },
+        ],
+      },
+      tmp
+    );
+    appendLedger(
+      { type: 'panel', run_id: 'r2', pairwise: [{ a: 'x', b: 'y', agree: false }] },
+      tmp
+    );
+    appendLedger({ type: 'outcome', run_id: 'r1', adopted: 'majority', helpful: true }, tmp);
+    const records = readLedger(tmp);
+    assert.strictEqual(records.length, 3);
+    const stats = ledgerStats(records);
+    assert.strictEqual(stats.runs, 2);
+    assert.strictEqual(stats.outcomes_recorded, 1);
+    const xy = stats.matrix.find((m) => m.pair === 'x ↔ y');
+    assert.strictEqual(xy.comparable_runs, 2);
+    assert.strictEqual(xy.agreement_rate, 0.5);
+    // abstention pair never entered the matrix
+    assert.ok(!stats.matrix.find((m) => m.pair.includes('z')));
+    assert.ok(ledgerPath(tmp).endsWith('panel-ledger.jsonl'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Scribe lane (cheap-prose chores)
 // ---------------------------------------------------------------------------
 

@@ -20,6 +20,7 @@ const doctor = path.join(__dirname, 'xllm-doctor.js');
 const smoke = path.join(__dirname, 'smoke.mjs');
 const routing = path.join(__dirname, 'xllm-routing.js');
 const exec = path.join(__dirname, 'xllm-exec.js');
+const scribe = path.join(__dirname, 'xllm-scribe.js');
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -46,6 +47,8 @@ Commands:
   exec <p> <task>        Isolated executor: ephemeral clone → verified ref + evidence
                          (capable providers only; user's checkout never touched)
   exec list | exec cleanup <id>|--all
+  scribe commit|pr|release|notes   Cheap-model prose for git chores → stdout
+                                   (advisor writes text; YOU run git/gh)
   inventory [--refresh]  Machine capability cache (installed CLIs, ollama models)
   profile show           Resolved provider profile + state dir
   profile set-role <role> <spec>     Pin a role for THIS project (e.g. analysis codex@high)
@@ -121,6 +124,13 @@ switch (cmd) {
       process.exit(1);
     }
     run(advisor, ['--propose', ...rest]);
+    break;
+  case 'scribe':
+    if (rest.length < 1) {
+      console.error('Usage: xllm scribe commit|pr|release|notes [flags]');
+      process.exit(1);
+    }
+    run(scribe, rest);
     break;
   case 'exec':
     if (rest[0] === 'list' || rest[0] === 'cleanup') {

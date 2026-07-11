@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.6.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai), **Claude Code**, and **Codex**.
+**v0.7.0** — Cross-vendor LLM advisor plugin for [Grok Build](https://grok.x.ai), **Claude Code**, and **Codex**.
 
 The host CLI is the **conductor**. External and local models are **advisors**.
 
@@ -47,13 +47,13 @@ grok plugin install kimmingul/grok-xllm --trust
 ```
 
 Then in a session: `/xllm:setup`, `/xllm:ask codex@high "…"`,
-`/xllm:multi codex,gemini "…"`.
+`/xllm:multi codex,gemini "…"`, `/xllm:exec codex "…"`, `/xllm:scribe`.
 
 The Claude adapter ports **only** the cross-vendor core (`ask`, `multi`,
-`setup`). Teams, loops, planning, and verification are NOT ported — Claude
-Code's native agents, tasks, and verify/review skills already cover them.
-Note: `claude` as an advisor is refused inside Claude Code (same-provider
-nesting); use codex/gemini/grok/cursor or local models.
+`exec`, `scribe`, `setup`). Teams, loops, planning, and verification are NOT
+ported — Claude Code's native agents, tasks, and verify/review skills already
+cover them. Note: `claude` as an advisor is refused inside Claude Code
+(same-provider nesting); use codex/gemini/grok/cursor or local models.
 
 ### Codex
 
@@ -67,9 +67,10 @@ codex plugin marketplace add D:\repo\xllm
 codex plugin add xllm@xllm
 ```
 
-The same three skills (`ask`, `multi`, `setup`) load from `./skills/` via
-`.codex-plugin/plugin.json`. Inside Codex, `codex` as an advisor is refused
-(same-provider nesting); use claude/gemini/grok/cursor or local models.
+The same host-neutral skills (`ask`, `multi`, `exec`, `scribe`, `setup`)
+load from `./skills/` via `.codex-plugin/plugin.json`. Inside Codex, `codex`
+as an advisor/executor is refused (same-provider nesting); use
+claude/gemini/grok/cursor or local models.
 
 Repo: [github.com/kimmingul/grok-xllm](https://github.com/kimmingul/grok-xllm)
 
@@ -148,6 +149,20 @@ Providers carry coarse `tier` / `relative_cost` / `latency_class` metadata
 (TOML-overridable). Routing sends low-intensity work to the cheapest healthy
 model (local first) and high-intensity judgment roles to the strongest tier;
 `[roles]` pins override everything, effort included.
+
+## Scribe: stop paying SOTA prices for commit messages
+
+```bash
+MSG=$(node scripts/xllm.mjs scribe commit) && git commit -m "$MSG"
+node scripts/xllm.mjs scribe pr --base main
+node scripts/xllm.mjs scribe release --from v0.5.0
+```
+
+Deterministic collectors gather the diff/log; the cheapest healthy model
+(free local first; release notes escalate to cloud) writes only the prose;
+deterministic validators enforce Conventional Commits with one corrective
+retry; you run git. The diff is never persisted. push/tag are pure mechanics
+— no model call at all.
 
 ## Escalation ladder: ask → propose → exec
 

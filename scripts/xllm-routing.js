@@ -31,6 +31,7 @@ export const ROUTING_ROLES = [
   'analysis',
   'docs',
   'verify',
+  'scribe',
 ];
 
 /**
@@ -107,6 +108,13 @@ export const BUILTIN_ROLE_ROUTES = {
     native_agent: 'verifier',
     prefer_native: true,
     notes: 'Evidence first via native tools; CLI second opinion on high',
+  },
+  scribe: {
+    providers: ['ollama', 'lmstudio', 'gemini', 'grok'],
+    effort: 'low',
+    native_agent: null,
+    prefer_native: false,
+    notes: 'Mechanical prose (commit/PR/release text); cheapest healthy first',
   },
 };
 

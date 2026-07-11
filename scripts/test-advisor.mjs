@@ -638,6 +638,94 @@ test('execRootDir honors XLLM_EXEC_ROOT', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Scribe lane (cheap-prose chores)
+// ---------------------------------------------------------------------------
+
+import {
+  CONVENTIONAL_TYPES,
+  truncateContext,
+  collectChoreContext,
+  SCRIBE_TEMPLATES,
+  stripFences,
+  validateScribeOutput,
+  pickScribeProvider,
+} from './xllm-scribe.js';
+import { execSync } from 'child_process';
+
+test('truncateContext caps oversized input with marker', () => {
+  const small = truncateContext('abc', 100);
+  assert.strictEqual(small.truncated, false);
+  const big = truncateContext('x'.repeat(50000), 1000);
+  assert.strictEqual(big.truncated, true);
+  assert.ok(big.text.includes('TRUNCATED'));
+  assert.ok(Buffer.byteLength(big.text) < 5000);
+});
+
+test('collectChoreContext: commit needs staged changes; pr/release need range', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-scribe-'));
+  try {
+    execSync('git init -q -b main', { cwd: tmp });
+    execSync('git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init', { cwd: tmp });
+    const none = collectChoreContext('commit', {}, tmp);
+    assert.ok(/Nothing staged/.test(none.error));
+    fs.writeFileSync(path.join(tmp, 'a.txt'), 'hello scribe\n');
+    execSync('git add -A', { cwd: tmp });
+    const ctx = collectChoreContext('commit', {}, tmp);
+    assert.ok(!ctx.error);
+    assert.ok(ctx.body.includes('hello scribe'));
+    assert.ok(ctx.body.includes('Staged diffstat'));
+    const rel = collectChoreContext('release', {}, tmp);
+    assert.ok(/--from/.test(rel.error));
+    const bad = collectChoreContext('nope', {}, tmp);
+    assert.ok(bad.error);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('scribe templates embed context and hard rules', () => {
+  const p = SCRIBE_TEMPLATES.commit({ body: 'THE-DIFF' });
+  assert.ok(p.includes('THE-DIFF'));
+  assert.ok(p.includes('Conventional Commits'));
+  assert.ok(p.includes('Never invent'));
+  assert.ok(SCRIBE_TEMPLATES.pr({ body: 'X' }).includes('## Summary'));
+  assert.ok(SCRIBE_TEMPLATES.release({ body: 'X' }).includes('### Added'));
+});
+
+test('stripFences unwraps fenced output', () => {
+  assert.strictEqual(stripFences('```text\nfeat: x\n```'), 'feat: x');
+  assert.strictEqual(stripFences('feat: y'), 'feat: y');
+});
+
+test('validateScribeOutput enforces conventional commit contract', () => {
+  const ok = validateScribeOutput('commit', 'feat(core): add scribe lane\n\n- adds templates');
+  assert.strictEqual(ok.ok, true);
+  const badType = validateScribeOutput('commit', 'added some stuff');
+  assert.strictEqual(badType.ok, false);
+  const longSubj = validateScribeOutput('commit', 'feat: ' + 'x'.repeat(80));
+  assert.ok(longSubj.problems.some((p) => /72/.test(p)));
+  const period = validateScribeOutput('commit', 'fix: something.');
+  assert.ok(period.problems.some((p) => /period/.test(p)));
+  assert.strictEqual(validateScribeOutput('commit', '').ok, false);
+  const prBad = validateScribeOutput('pr', 'title only');
+  assert.ok(prBad.problems.some((p) => /Summary/.test(p)));
+  assert.ok(CONVENTIONAL_TYPES.includes('feat'));
+});
+
+test('pickScribeProvider: local-first for commit, escalates release off local', () => {
+  const commit = pickScribeProvider('commit', { ready: ['ollama', 'codex', 'grok'] });
+  assert.strictEqual(commit.parsed.provider, 'ollama'); // relative_cost 0
+  const rel = pickScribeProvider('release', { ready: ['ollama', 'grok'] });
+  assert.notStrictEqual(rel.parsed.provider, 'ollama');
+  assert.strictEqual(rel.source, 'escalated');
+  const relLocalOnly = pickScribeProvider('release', { ready: ['ollama'] });
+  assert.strictEqual(relLocalOnly.parsed.provider, 'ollama'); // nothing to escalate to
+  const explicit = pickScribeProvider('commit', { providerSpec: 'gemini@low' });
+  assert.strictEqual(explicit.parsed.provider, 'gemini');
+  assert.strictEqual(explicit.source, 'explicit');
+});
+
+// ---------------------------------------------------------------------------
 // Role / intensity routing
 // ---------------------------------------------------------------------------
 

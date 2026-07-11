@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 
@@ -1664,6 +1664,7 @@ export function runAdvisor({
   allowSelf = false,
   noArtifacts = false,
   propose = false,
+  quiet = false,
 }) {
   const profiles = loadProviderProfiles();
   let meta = {};
@@ -1832,7 +1833,7 @@ export function runAdvisor({
   let artifactPath = null;
   let patchPath = null;
   if (noArtifacts || process.env.XLLM_NO_ARTIFACTS === '1') {
-    console.log(raw || '(no output)');
+    if (!quiet) console.log(raw || '(no output)');
   } else {
     artifactPath = writeArtifact({
       provider,
@@ -1861,7 +1862,7 @@ export function runAdvisor({
         );
       }
     }
-    console.log(artifactPath);
+    if (!quiet) console.log(artifactPath);
   }
   if (result.error) {
     console.error(`[${provider}] ${result.error.message}`);

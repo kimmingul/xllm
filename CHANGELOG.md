@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.7.0 — 2026-07-11
+
+### Added — scribe: cheap-prose lane for git chores
+Mechanical git prose (commit messages, PR bodies, release notes, changelog
+entries) no longer burns expensive main-session tokens. Design adopted after
+cross-vendor consultation (codex@high + grok@high unanimous: prose to the
+cheapest model, execution stays deterministic/host-side; direct git
+delegation rejected).
+
+- `xllm scribe commit|pr|release|notes`: deterministic collectors gather
+  staged diff / commit ranges (24KB cap with truncation marker, no LLM),
+  strict prompt templates constrain the output (Conventional Commits, section
+  contracts, "only facts present in the input"), and deterministic validators
+  check the result (subject ≤72, type allowlist, no fences) with one
+  corrective retry; exit 3 hands back raw text for review.
+- New routing role `scribe`: local-first (free ollama/lmstudio), effort low;
+  `release`/`notes` auto-escalate off local models when a cloud advisor is
+  healthy. Pinnable per project (`--set-role scribe …`).
+- Privacy: the diff is sent only to the routed advisor and never persisted
+  (no artifact) — the git object itself is the record.
+- Message → stdout for direct piping (`git commit -m "$(xllm scribe commit)"`);
+  diagnostics → stderr. xllm never runs git/gh; push/tag need no model at all.
+- `runAdvisor` gains a `quiet` option (library callers keep stdout clean).
+- New `skills/scribe/SKILL.md`; live e2e: free llama3.2 drafted a commit
+  message for a real staged diff — first attempt rejected by the validator
+  (75-char subject), corrective retry passed, message used for an actual
+  commit.
+
 ## 0.6.0 — 2026-07-11
 
 ### Added — isolated executor primitive (`exec`)

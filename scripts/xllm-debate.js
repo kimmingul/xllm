@@ -259,8 +259,8 @@ function askOnce(advisor, spec, prompt) {
   });
 }
 
-export async function runDebate({ specs, question, root = process.cwd() }) {
-  const parsed = specs.map((s) => {
+export function parseDebaters(specs) {
+  return specs.map((s) => {
     const p = parseProviderSpec(s);
     if (!p) {
       console.error(`[debate] Unknown provider spec: ${s}`);
@@ -268,13 +268,31 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
     }
     return p;
   });
+}
+
+/**
+ * Round-robin cap of author-attributed claims at MAX_CLAIMS. Pure.
+ * claims: [{ id: 'C{pi}-{i}', author, authorSpec, text, evidence }]
+ */
+export function capClaims(claims, parsed) {
+  const capped = [];
+  let idx = 0;
+  const byAuthor = parsed.map((_, pi) => claims.filter((c) => c.id.startsWith(`C${pi}-`)));
+  while (capped.length < MAX_CLAIMS && byAuthor.some((a) => a.length)) {
+    const lane = byAuthor[idx % byAuthor.length];
+    if (lane.length) capped.push(lane.shift());
+    idx++;
+  }
+  return capped;
+}
+
+export async function runDebate({ specs, question, root = process.cwd() }) {
+  const parsed = parseDebaters(specs);
   if (parsed.length < 2) {
     console.error('[debate] Need at least 2 debaters.');
     return { exitCode: 1 };
   }
-  const N = parsed.length;
   const advisor = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grok-ask-advisor.js');
-  const id = debateId();
 
   // R0 — blind claims (sequential to avoid local/cloud contention).
   console.error('[debate] R0 blind claims…');
@@ -286,19 +304,24 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
     const cs = r.code === 0 ? extractClaims(r.raw) : [];
     cs.forEach((c, i) => claims.push({ id: `C${pi}-${i + 1}`, author: p.provider, authorSpec: p.spec, ...c }));
   }
-  // round-robin cap at MAX_CLAIMS
-  const capped = [];
-  let idx = 0;
-  const byAuthor = parsed.map((_, pi) => claims.filter((c) => c.id.startsWith(`C${pi}-`)));
-  while (capped.length < MAX_CLAIMS && byAuthor.some((a) => a.length)) {
-    const lane = byAuthor[idx % byAuthor.length];
-    if (lane.length) capped.push(lane.shift());
-    idx++;
-  }
+  const capped = capClaims(claims, parsed);
   if (!capped.length) {
     console.error('[debate] no claims extracted — advisors did not emit the claims block.');
     return { exitCode: 1 };
   }
+  return runDebateOnClaims({ question, parsed, capped, root });
+}
+
+/**
+ * The adversarial rounds (R1 refute → R2 defend → mechanical classify) over
+ * PRE-SUPPLIED claims. Reused by `debate` (claims from its own R0) and by
+ * `council` (claims surfaced by an independent panel). panelRunId links the
+ * ledger record back to the originating panel.
+ */
+export async function runDebateOnClaims({ question, parsed, capped, root = process.cwd(), panelRunId = null }) {
+  const N = parsed.length;
+  const advisor = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grok-ask-advisor.js');
+  const id = debateId();
 
   // R1 — refute (each provider attacks foreign claims only).
   console.error('[debate] R1 refute…');
@@ -338,6 +361,7 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
     {
       type: 'debate',
       run_id: id,
+      panel_run_id: panelRunId,
       created_at: new Date().toISOString(),
       question: redactSecrets(question),
       debaters: parsed.map((p) => p.spec),
@@ -391,7 +415,7 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
 
   console.error(`[debate] ${tally.SURVIVED} survived · ${tally.KILLED} killed · ${tally.UNRESOLVED} unresolved`);
   console.log(mdPath);
-  return { exitCode: 0, id, tally, mdPath };
+  return { exitCode: 0, id, tally, mdPath, results };
 }
 
 async function main() {

@@ -1011,6 +1011,46 @@ test('debate prompts force hostility + evidence typing', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Council (panel → debate pipeline) — the bridge is the testable crux
+// ---------------------------------------------------------------------------
+
+import { claimsFromPanel } from './xllm-council.js';
+
+test('council: claimsFromPanel maps panel key_claims → author-attributed claims', () => {
+  const parsed = [
+    { spec: 'codex@high', provider: 'codex' },
+    { spec: 'grok', provider: 'grok' },
+  ];
+  const panelists = [
+    { spec: 'codex@high', verdict: { verdict: 'reject', key_claims: ['A is unsafe', 'B leaks'] } },
+    { spec: 'grok', verdict: { verdict: 'reject', key_claims: ['C races'] } },
+  ];
+  const claims = claimsFromPanel(panelists, parsed);
+  assert.strictEqual(claims.length, 3);
+  assert.strictEqual(claims[0].id, 'C0-1');
+  assert.strictEqual(claims[0].author, 'codex');
+  assert.strictEqual(claims[0].text, 'A is unsafe');
+  // grok's single claim is attributed to author index 1
+  const grokClaim = claims.find((c) => c.author === 'grok');
+  assert.strictEqual(grokClaim.id, 'C1-1');
+  assert.strictEqual(grokClaim.text, 'C races');
+});
+
+test('council: abstained/invalid panelists contribute no claims', () => {
+  const parsed = [
+    { spec: 'codex', provider: 'codex' },
+    { spec: 'grok', provider: 'grok' },
+  ];
+  const panelists = [
+    { spec: 'codex', verdict: { verdict: 'approve', key_claims: ['ok'] } },
+    { spec: 'grok', verdict: null }, // abstained
+  ];
+  const claims = claimsFromPanel(panelists, parsed);
+  assert.strictEqual(claims.length, 1);
+  assert.strictEqual(claims[0].author, 'codex');
+});
+
+// ---------------------------------------------------------------------------
 // Scribe lane (cheap-prose chores)
 // ---------------------------------------------------------------------------
 

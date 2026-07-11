@@ -381,7 +381,7 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
 
   console.error(`[panel] consensus: ${label}`);
   console.log(mdPath);
-  return { exitCode: 0, id, label, mdPath };
+  return { exitCode: 0, id, label, mdPath, panelists, pairwise };
 }
 
 // ---------------------------------------------------------------------------

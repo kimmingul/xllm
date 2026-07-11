@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.13.0 — 2026-07-11
+
+### Added — `council`: the panel → debate pipeline
+Runs both phases of cross-vendor deliberation in one command:
+**independent divergence then adversarial convergence.**
+
+- `xllm council run p1,p2[,p3] "<question>"`:
+  - **Phase 1 — panel** (blind, independent): surfaces diverse claims and
+    measures their pairwise agreement (decorrelation).
+  - **Phase 2 — debate** (adversarial): the *independently-surfaced* claims
+    are put through hostile cross-refutation → SURVIVED / KILLED / UNRESOLVED.
+  - Panel-first is deliberate: refutation targets claims reached without
+    anchoring, and the diversity measurement is kept. A combined index links
+    both artifacts; the panel ledger run is linked to the debate.
+- Refactor for reuse: `panel` exposes its `panelists`/`pairwise`; `debate`
+  splits into `runDebate` (own R0) and `runDebateOnClaims` (R1→classify over
+  pre-supplied claims). `claimsFromPanel` (pure, unit-tested) bridges panel
+  key_claims → author-attributed debate claims.
+- Naming: `panel` (independent, measure diversity) / `debate` (adversarial,
+  maximize quality) / **`council`** (both). New `skills/council/SKILL.md` for
+  Claude Code + Codex.
+- Live e2e (codex + grok, "is Math.random() ok for security tokens?"):
+  phase 1 unanimous; phase 2 4 survived / 4 killed — every kill was an
+  `amend` (overstated claims like "must be ≥128 bits" narrowed under
+  refutation), while the core claims (use a CSPRNG; predictability enables
+  hijacking) survived. Tests 99 → 101.
+
 ## 0.12.0 — 2026-07-11
 
 ### Added — `debate`: adversarial multi-LLM review

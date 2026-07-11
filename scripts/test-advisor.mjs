@@ -936,6 +936,55 @@ test('ledger: append-only, outcome as separate record, stats matrix', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Structured-output layer (robust JSON extraction shared by the review family)
+// ---------------------------------------------------------------------------
+
+import { extractJson, lastBalanced, adherenceSummary } from './xllm-structured.js';
+
+test('extractJson: fenced, bare, last-valid, trailing-comma, newline-wrapped', () => {
+  assert.deepStrictEqual(extractJson('```json\n{"a":1}\n```'), { a: 1 });
+  // bare JSON without a fence
+  assert.deepStrictEqual(extractJson('here it is: {"a":2} done'), { a: 2 });
+  // last valid fenced block wins
+  assert.deepStrictEqual(extractJson('```json\n{"a":1}\n```\ntext\n```json\n{"a":3}\n```'), { a: 3 });
+  // trailing comma repair
+  assert.deepStrictEqual(extractJson('```json\n{"a":1,}\n```'), { a: 1 });
+  // newline-wrapped string literal (ollama TTY)
+  const wrapped = '```json\n{"v":"reject","c":["a long\nclaim here"]}\n```';
+  assert.strictEqual(extractJson(wrapped).v, 'reject');
+  // no json at all
+  assert.strictEqual(extractJson('just prose, no json'), null);
+});
+
+test('extractJson: array payloads and unlabeled fences', () => {
+  assert.deepStrictEqual(extractJson('```\n[1,2,3]\n```'), [1, 2, 3]);
+  assert.deepStrictEqual(extractJson('{"claims":[{"text":"x"}]}').claims[0].text, 'x');
+});
+
+test('lastBalanced finds the last balanced object/array', () => {
+  assert.strictEqual(lastBalanced('a {1} b {2}'), '{2}');
+  assert.strictEqual(lastBalanced('no braces'), null);
+});
+
+test('adherenceSummary tallies per-provider first/retry/failed', () => {
+  const s = adherenceSummary([
+    { spec: 'codex', adherence: 'first' },
+    { spec: 'codex', adherence: 'retry' },
+    { spec: 'ollama:x', adherence: 'failed' },
+  ]);
+  assert.strictEqual(s.codex.first, 1);
+  assert.strictEqual(s.codex.retry, 1);
+  assert.strictEqual(s['ollama:x'].failed, 1);
+});
+
+test('extractClaims/extractAttacks return null on non-compliance (drives retry)', () => {
+  assert.strictEqual(extractClaims('no json here'), null);
+  assert.strictEqual(extractAttacks('no json here'), null);
+  // valid-but-empty stays a (possibly empty) array, not null
+  assert.deepStrictEqual(extractClaims('```json\n{"claims":[]}\n```'), []);
+});
+
+// ---------------------------------------------------------------------------
 // Debate (adversarial review) — the mechanical resolution is the crux
 // ---------------------------------------------------------------------------
 

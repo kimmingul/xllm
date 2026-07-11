@@ -16,10 +16,9 @@
  *   node scripts/xllm-debate.js run p1,p2[,p3] "<question>"
  */
 
-import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
 import process from 'process';
 import {
   parseProviderSpec,
@@ -28,7 +27,8 @@ import {
   redactSecrets,
   slugify,
 } from './grok-ask-advisor.js';
-import { appendLedger, ledgerPath, rawFromArtifact } from './xllm-panel.js';
+import { appendLedger, ledgerPath } from './xllm-panel.js';
+import { extractJson, askStructured, adherenceSummary } from './xllm-structured.js';
 
 export const MAX_CLAIMS = 8;
 
@@ -103,24 +103,9 @@ result is "holds" (you defeated the attack) or "conceded" (the attack stands).`;
 // Deterministic parsers
 // ---------------------------------------------------------------------------
 
-function lastJson(raw) {
-  const blocks = [...String(raw || '').matchAll(/```json\r?\n([\s\S]*?)```/g)];
-  if (!blocks.length) return null;
-  const text = blocks[blocks.length - 1][1];
-  try {
-    return JSON.parse(text);
-  } catch {
-    try {
-      return JSON.parse(text.replace(/\r?\n/g, ' '));
-    } catch {
-      return null;
-    }
-  }
-}
-
 export function extractClaims(raw) {
-  const j = lastJson(raw);
-  if (!j || !Array.isArray(j.claims)) return [];
+  const j = extractJson(raw);
+  if (!j || !Array.isArray(j.claims)) return null; // non-compliant → retry
   return j.claims
     .filter((c) => c && typeof c.text === 'string' && c.text.trim())
     .slice(0, 5)
@@ -128,8 +113,8 @@ export function extractClaims(raw) {
 }
 
 export function extractAttacks(raw) {
-  const j = lastJson(raw);
-  if (!j || !Array.isArray(j.attacks)) return [];
+  const j = extractJson(raw);
+  if (!j || !Array.isArray(j.attacks)) return null; // non-compliant → retry
   return j.attacks
     .filter((a) => a && a.claim_id && (a.stance === 'refute' || a.stance === 'pass'))
     .map((a) => ({
@@ -144,7 +129,7 @@ export function extractAttacks(raw) {
 }
 
 export function extractDefense(raw) {
-  const j = lastJson(raw);
+  const j = extractJson(raw);
   if (!j || !['holds', 'amend', 'concede'].includes(j.response)) return null;
   return {
     response: j.response,
@@ -242,23 +227,6 @@ function debateId() {
   );
 }
 
-function askOnce(advisor, spec, prompt) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [advisor, spec, prompt], {
-      env: process.env,
-      windowsHide: true,
-    });
-    let out = '';
-    child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', (d) => process.stderr.write(d));
-    child.on('error', () => resolve({ code: 1, raw: '' }));
-    child.on('close', (code) => {
-      const artifact = code === 0 && out.trim() ? out.trim().split(/\r?\n/).pop() : null;
-      resolve({ code: code ?? 1, raw: artifact ? rawFromArtifact(artifact) : '' });
-    });
-  });
-}
-
 export function parseDebaters(specs) {
   return specs.map((s) => {
     const p = parseProviderSpec(s);
@@ -292,24 +260,32 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
     console.error('[debate] Need at least 2 debaters.');
     return { exitCode: 1 };
   }
-  const advisor = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grok-ask-advisor.js');
-
-  // R0 — blind claims (sequential to avoid local/cloud contention).
+  // R0 — blind claims (sequential to avoid local/cloud contention). One
+  // corrective retry per model via the shared structured layer.
   console.error('[debate] R0 blind claims…');
   const claims = [];
+  const adherence = [];
   for (let pi = 0; pi < parsed.length; pi++) {
     const p = parsed[pi];
     console.error(`[debate]   ${p.spec}`);
-    const r = await askOnce(advisor, p.spec, buildClaimsPrompt(question));
-    const cs = r.code === 0 ? extractClaims(r.raw) : [];
-    cs.forEach((c, i) => claims.push({ id: `C${pi}-${i + 1}`, author: p.provider, authorSpec: p.spec, ...c }));
+    const r = await askStructured({
+      spec: p.spec,
+      prompt: buildClaimsPrompt(question),
+      parse: (raw) => {
+        const c = extractClaims(raw);
+        return c && c.length ? c : null;
+      },
+      repairHint: 'end with exactly one fenced ```json block: {"claims":[{"text":"...","evidence":"..."}]}',
+    });
+    adherence.push({ spec: p.spec, phase: 'R0', adherence: r.adherence });
+    (r.value || []).forEach((c, i) => claims.push({ id: `C${pi}-${i + 1}`, author: p.provider, authorSpec: p.spec, ...c }));
   }
   const capped = capClaims(claims, parsed);
   if (!capped.length) {
     console.error('[debate] no claims extracted — advisors did not emit the claims block.');
     return { exitCode: 1 };
   }
-  return runDebateOnClaims({ question, parsed, capped, root });
+  return runDebateOnClaims({ question, parsed, capped, root, r0Adherence: adherence });
 }
 
 /**
@@ -318,34 +294,45 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
  * `council` (claims surfaced by an independent panel). panelRunId links the
  * ledger record back to the originating panel.
  */
-export async function runDebateOnClaims({ question, parsed, capped, root = process.cwd(), panelRunId = null }) {
+export async function runDebateOnClaims({ question, parsed, capped, root = process.cwd(), panelRunId = null, r0Adherence = [] }) {
   const N = parsed.length;
-  const advisor = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grok-ask-advisor.js');
   const id = debateId();
+  const adherence = [...r0Adherence];
 
-  // R1 — refute (each provider attacks foreign claims only).
+  // R1 — refute (each provider attacks foreign claims only), with retry.
   console.error('[debate] R1 refute…');
   const attacksByClaim = Object.fromEntries(capped.map((c) => [c.id, []]));
   for (const p of parsed) {
     const foreign = capped.filter((c) => c.author !== p.provider);
     if (!foreign.length) continue;
     console.error(`[debate]   ${p.spec} attacks ${foreign.length}`);
-    const r = await askOnce(advisor, p.spec, buildRefutePrompt(question, foreign));
-    if (r.code !== 0) continue;
-    for (const a of extractAttacks(r.raw)) {
+    const r = await askStructured({
+      spec: p.spec,
+      prompt: buildRefutePrompt(question, foreign),
+      parse: extractAttacks,
+      repairHint: 'end with exactly one fenced ```json block: {"attacks":[{"claim_id":"...","stance":"refute","mechanism":"...","falsifier":"...","tier":"decisive"}]}',
+    });
+    adherence.push({ spec: p.spec, phase: 'R1', adherence: r.adherence });
+    for (const a of r.value || []) {
       if (attacksByClaim[a.claim_id]) attacksByClaim[a.claim_id].push({ ...a, attackerVendor: p.provider });
     }
   }
 
-  // R2 — defend (authors only, challenged claims).
+  // R2 — defend (authors only, challenged claims), with retry.
   console.error('[debate] R2 defend…');
   const defenseByClaim = {};
   for (const c of capped) {
     const atk = attacksByClaim[c.id].filter((a) => a.stance === 'refute');
     if (!atk.length) continue;
     console.error(`[debate]   ${c.authorSpec} defends ${c.id}`);
-    const r = await askOnce(advisor, c.authorSpec, buildDefendPrompt(c, atk));
-    defenseByClaim[c.id] = r.code === 0 ? extractDefense(r.raw) : null;
+    const r = await askStructured({
+      spec: c.authorSpec,
+      prompt: buildDefendPrompt(c, atk),
+      parse: extractDefense,
+      repairHint: 'end with exactly one fenced ```json block: {"response":"holds|amend|concede","amended_claim":null,"rebuttals":[{"attacker":"...","result":"holds","counter":"..."}]}',
+    });
+    adherence.push({ spec: c.authorSpec, phase: 'R2', adherence: r.adherence });
+    defenseByClaim[c.id] = r.value;
   }
 
   // Resolve (mechanical).
@@ -376,6 +363,7 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
         amended: r.amended ? redactSecrets(r.amended) : null,
       })),
       tally,
+      adherence: adherenceSummary(adherence),
     },
     root
   );
@@ -409,6 +397,16 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
         'UNRESOLVED — needs human',
         results.filter((r) => r.status === 'UNRESOLVED').map((r) => `- **${r.id}** (${r.author}): ${redactSecrets(r.text)}\n  - ${r.reason}`)
       ),
+      ...(adherence.some((a) => a.adherence !== 'first')
+        ? [
+            '## Contract adherence (structured-output health)',
+            '',
+            ...Object.entries(adherenceSummary(adherence)).map(
+              ([spec, s]) => `- ${spec}: first ${s.first || 0} · retry ${s.retry || 0} · failed ${s.failed || 0}`
+            ),
+            '',
+          ]
+        : []),
     ].join('\n'),
     'utf8'
   );

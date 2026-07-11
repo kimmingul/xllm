@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.14.0 — 2026-07-11
+
+### Changed — shared structured-output layer (reliability across all providers)
+The review family (`panel` / `debate` / `council`) depends on advisors
+emitting JSON contracts; frontier models comply but weaker/local models often
+did not (observed: ollama omitting or mangling the block, TTY line-wrapping
+breaking string literals). Consolidated the previously-scattered parsing into
+one robust layer so every provider — not just the strong ones — participates.
+
+- `scripts/xllm-structured.js`:
+  - **`extractJson`** — one robust extractor replacing three ad-hoc impls:
+    handles fenced ```json blocks (last valid wins), **bare/unfenced JSON**,
+    unlabeled fences, **trailing commas**, and **newline-wrapped string
+    literals**. Pure, unit-tested.
+  - **`askStructured`** — uniform "ask → parse → one corrective retry"
+    wrapper. This **adds the missing retry to `debate`** (R0/R1/R2 previously
+    dropped a non-compliant model silently) and unifies it with `panel`'s.
+  - **contract adherence** tracking (`first` / `retry` / `failed`) surfaced
+    per provider in the panel/debate index and ledger — you can now see which
+    models are dependable for structured review.
+- `rawFromArtifact` moved to the shared layer (removes the panel→debate
+  coupling); `extractPanelVerdict` / `extractClaims` / `extractAttacks` /
+  `extractDefense` now delegate to `extractJson`; `extract{Claims,Attacks}`
+  return `null` on non-compliance to drive the retry.
+- Live e2e (codex + ollama:llama3.2, a model that previously abstained on the
+  verdict block): both complied first-try under the robust extractor;
+  consensus unanimous. Tests 101 → 106.
+
 ## 0.13.0 — 2026-07-11
 
 ### Added — `council`: the panel → debate pipeline

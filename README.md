@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.13.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.14.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -92,6 +92,7 @@ node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks   
 | **합의 깊이 종합** | 주장별로 만장일치/다수결/의견분열/단일출처 라벨. 실패 어드바이저는 기권. 합의는 신뢰도 메타데이터이지 진리가 아님. |
 | **비용 인지 라우팅** | 가벼운 일은 무료 로컬·low effort, 무거운 판단은 strong tier. 초소형 로컬 모델은 판단 역할 투표권 거부(능력 하한). |
 | **scribe** | 커밋 메시지·PR 본문·릴리스 노트를 가장 싼 healthy 모델이 작성, 결정적 검증. 기계적 작업에 SOTA 요금을 쓰지 않음. |
+| **구조화 출력 견고성** | 검토 계열(panel/debate/council)의 JSON 계약 파싱을 견고한 단일 추출기로 통합(맨 JSON·트레일링 콤마·줄바꿈 래핑 처리) + 비준수 시 1회 교정 재시도. 프로바이더별 **계약 준수도**(first/retry/failed) 리포트로 약한·로컬 모델도 안정 참여. |
 | **계약 플로어** | 설치된 CLI의 플래그를 프로브해 버전 드리프트 감지, 실패 분류, transient만 재시도. |
 | **read-only 안전 모델** | 샌드박스 탈출·승인 우회 없음. 동일 벤더 중첩 거부. 세션 env 스트리핑. 아티팩트 시크릿 마스킹. |
 
@@ -180,7 +181,7 @@ pick|pick-team|infer|roles   역할·강도·비용 라우팅
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 101개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 106개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)
@@ -193,7 +194,7 @@ npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바
 skills/                                    Claude Code + Codex 공유 스킬 7종
 scripts/  grok-ask-advisor.js  xllm-exec.js  xllm-scribe.js
           xllm-panel.js  xllm-debate.js  xllm-council.js  xllm-contracts.js  xllm-bench.js
-          xllm-routing.js  xllm.mjs
+          xllm-structured.js  xllm-routing.js  xllm.mjs
 benchmarks/  tasks/  FINDINGS.md            시딩 결함 벤치마크
 docs/  index.html  diversity-roadmap.md     소개 페이지 + 로드맵
 .grok/  skills/ agents/ personas/ docs/     Grok Build 어댑터

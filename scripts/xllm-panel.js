@@ -21,10 +21,9 @@
  *   node scripts/xllm-panel.js outcome <run-id> --adopted <spec|none|majority|minority> --helpful yes|no [--note "…"]
  */
 
-import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
 import process from 'process';
 import {
   parseProviderSpec,
@@ -34,6 +33,16 @@ import {
   slugify,
   getProviderCostMeta,
 } from './grok-ask-advisor.js';
+import {
+  extractJson,
+  askStructured,
+  adherenceSummary,
+  rawFromArtifact,
+} from './xllm-structured.js';
+
+// rawFromArtifact now lives in the shared structured layer; re-export for
+// callers (e.g. xllm-debate) that imported it from here.
+export { rawFromArtifact };
 
 export const PANEL_VERDICTS = ['approve', 'reject', 'mixed'];
 
@@ -54,36 +63,18 @@ export function buildPanelPrompt(question) {
   return `${question}${PANEL_VERDICT_INSTRUCTIONS}`;
 }
 
-/** Deterministically extract the final verdict json block, or null. */
+/** Deterministically extract + validate the verdict json block, or null. */
 export function extractPanelVerdict(raw) {
-  const blocks = [...String(raw || '').matchAll(/```json\r?\n([\s\S]*?)```/g)];
-  if (!blocks.length) return null;
-  const text = blocks[blocks.length - 1][1];
-  let v = null;
-  try {
-    v = JSON.parse(text);
-  } catch {
-    // Terminal line-wrapping (observed with ollama) injects raw newlines
-    // inside JSON string literals — flatten and retry before giving up.
-    try {
-      v = JSON.parse(text.replace(/\r?\n/g, ' '));
-    } catch {
-      return null;
-    }
-  }
-  try {
-    if (!PANEL_VERDICTS.includes(v.verdict)) return null;
-    const confidence = Number(v.confidence);
-    return {
-      verdict: v.verdict,
-      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null,
-      key_claims: Array.isArray(v.key_claims)
-        ? v.key_claims.map((c) => String(c)).slice(0, 5)
-        : [],
-    };
-  } catch {
-    return null;
-  }
+  const v = extractJson(raw);
+  if (!v || !PANEL_VERDICTS.includes(v.verdict)) return null;
+  const confidence = Number(v.confidence);
+  return {
+    verdict: v.verdict,
+    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null,
+    key_claims: Array.isArray(v.key_claims)
+      ? v.key_claims.map((c) => String(c)).slice(0, 5)
+      : [],
+  };
 }
 
 /**
@@ -190,24 +181,6 @@ function panelId() {
   );
 }
 
-/**
- * Read the raw output back out of an advisor artifact (format we own).
- * Anchored on the trailing "## Summary" heading — the raw text may itself
- * contain fenced blocks (e.g. the panel verdict json), so terminating at
- * the first closing fence would truncate it (live-observed bug).
- */
-export function rawFromArtifact(artifactPath) {
-  try {
-    const body = fs.readFileSync(artifactPath, 'utf8');
-    const m = body.match(
-      /## Raw output\r?\n\r?\n```text\r?\n([\s\S]*?)\r?\n```\r?\n\r?\n## Summary/
-    );
-    return m ? m[1] : '';
-  } catch {
-    return '';
-  }
-}
-
 export async function runPanel({ specs, question, root = process.cwd() }) {
   const parsed = specs.map((s) => {
     const p = parseProviderSpec(s);
@@ -222,48 +195,28 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
     return { exitCode: 1 };
   }
 
-  const advisor = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grok-ask-advisor.js');
   const prompt = buildPanelPrompt(question);
 
-  const spawnOnce = (p, extraReminder = '') =>
-    new Promise((resolve) => {
-      const child = spawn(
-        process.execPath,
-        [advisor, p.spec, prompt + extraReminder],
-        { env: process.env, windowsHide: true }
-      );
-      let out = '';
-      child.stdout.on('data', (d) => (out += d));
-      child.stderr.on('data', (d) => process.stderr.write(d));
-      child.on('error', () => resolve({ code: 1, artifact: null }));
-      child.on('close', (code) =>
-        resolve({
-          code: code ?? 1,
-          artifact: code === 0 && out.trim() ? out.trim().split(/\r?\n/).pop() : null,
-        })
-      );
-    });
-
-  // Small models often ignore the verdict protocol on the first try —
-  // one corrective retry before counting them as abstentions.
+  // Ask each panelist for a structured verdict via the shared layer: one
+  // corrective retry before counting a non-compliant model as an abstention.
   const runPanelist = async (p) => {
     console.error(`[panel] asking ${p.spec} (blind)…`);
-    let r = await spawnOnce(p);
-    let verdict = r.code === 0 ? extractPanelVerdict(rawFromArtifact(r.artifact)) : null;
-    if (r.code === 0 && !verdict) {
-      console.error(`[panel] ${p.spec}: missing/invalid verdict block — corrective retry`);
-      r = await spawnOnce(
-        p,
-        '\n\nREMINDER: your previous attempt omitted the mandatory verdict block. You MUST end with exactly one fenced ```json block matching the PANEL PROTOCOL above.'
-      );
-      verdict = r.code === 0 ? extractPanelVerdict(rawFromArtifact(r.artifact)) : null;
-    }
+    const r = await askStructured({
+      spec: p.spec,
+      prompt,
+      parse: extractPanelVerdict,
+      repairHint:
+        'your previous attempt omitted the mandatory verdict block. You MUST end with exactly one fenced ```json block matching the PANEL PROTOCOL above.',
+    });
+    if (r.adherence === 'retry') console.error(`[panel] ${p.spec}: verdict recovered on retry`);
+    if (r.adherence === 'failed') console.error(`[panel] ${p.spec}: no valid verdict — abstains`);
     return {
       spec: p.spec,
       provider: p.provider,
       exit_code: r.code,
       artifact: r.artifact,
-      verdict,
+      verdict: r.value,
+      adherence: r.adherence,
     };
   };
 
@@ -320,10 +273,12 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
       verdict: p.verdict?.verdict || null,
       confidence: p.verdict?.confidence ?? null,
       key_claims: p.verdict?.key_claims || [],
+      adherence: p.adherence,
       artifact: p.artifact,
     })),
     pairwise,
     consensus: label,
+    adherence: adherenceSummary(panelists.map((p) => ({ spec: p.spec, adherence: p.adherence }))),
   };
   appendLedger(record, root);
 
@@ -371,6 +326,10 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
       '  chosen by LOW measured agreement (see `panel stats`), never by lineage.',
       `- Afterwards record what you did: \`xllm panel outcome ${id} --adopted <spec|majority|minority|none> --helpful yes|no\``,
       '',
+      '## Contract adherence (structured-output health)',
+      '',
+      ...panelists.map((p) => `- ${p.spec}: ${p.adherence}${p.adherence === 'retry' ? ' (recovered on retry)' : p.adherence === 'failed' ? ' (abstained — no valid block)' : ''}`),
+      '',
       '## Full answers',
       '',
       ...panelists.filter((p) => p.artifact).map((p) => `- ${p.spec}: ${p.artifact}`),
@@ -379,7 +338,11 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
     'utf8'
   );
 
-  console.error(`[panel] consensus: ${label}`);
+  const recovered = panelists.filter((p) => p.adherence === 'retry').length;
+  const failed = panelists.filter((p) => p.adherence === 'failed').length;
+  console.error(
+    `[panel] consensus: ${label}${recovered ? ` · ${recovered} recovered on retry` : ''}${failed ? ` · ${failed} abstained` : ''}`
+  );
   console.log(mdPath);
   return { exitCode: 0, id, label, mdPath, panelists, pairwise };
 }

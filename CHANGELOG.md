@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.12.0 — 2026-07-11
+
+### Added — `debate`: adversarial multi-LLM review
+The quality-maximizing complement to the independent `panel`. Where panel
+MEASURES diversity (blind, independent), debate SPENDS it: cross-vendor models
+see and try to REFUTE each other's claims so plausible-but-wrong ones die and
+correct ones survive.
+
+**Designed via xllm's own adversarial method** — codex@high and grok@high each
+proposed a design, then rebutted each other over two rounds and converged
+(docs/debate-design.md). Notable concessions from that debate: codex dropped
+its independent-adjudicator layer (needs 5 distinct providers per claim,
+collapses at the realistic N=2–3); grok dropped mechanical vote-counting
+("a vote dressed as logic") and the 12-claim cap.
+
+- `xllm debate run p1,p2[,p3] "<question>"`: R0 blind claims → R1 refute
+  (foreign claims only, concrete mechanism + falsifier, tagged decisive/soft)
+  → R2 defend (holds/amend/concede) → **mechanical classification**
+  (SURVIVED / KILLED / UNRESOLVED), order-immune, no judge LLM.
+- **Kill power comes from evidence tier, not vendor count**: only a DECISIVE
+  falsifier the author can't defeat kills a claim; a SOFT/confabulated attack
+  can never kill alone; mere disagreement → UNRESOLVED. Works at N=2.
+- Status is a **protocol outcome, not truth** — SURVIVED ≠ proven; nothing is
+  auto-applied; ledger (`type: "debate"`) records everything before prose.
+- `classifyDebateClaim` is a pure, unit-tested function (the crux of the
+  design). New `skills/debate/SKILL.md` for Claude Code + Codex.
+- Live e2e (codex vs grok, "is Array.sort() without a comparator safe for
+  numbers?"): 6 claims survived, 1 killed — a grok claim overstated with
+  "only" was narrowed via `amend` under codex's attack. Tests 90 → 99.
+
 ## 0.11.0 — 2026-07-11
 
 ### Changed — canonical repository moved to github.com/kimmingul/xllm

@@ -936,6 +936,81 @@ test('ledger: append-only, outcome as separate record, stats matrix', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Debate (adversarial review) — the mechanical resolution is the crux
+// ---------------------------------------------------------------------------
+
+import {
+  classifyDebateClaim,
+  extractClaims,
+  extractAttacks,
+  extractDefense,
+  buildRefutePrompt,
+  buildDefendPrompt,
+} from './xllm-debate.js';
+
+const claim = { id: 'C0-1', author: 'claude', authorSpec: 'claude:opus', text: 'X is unsafe' };
+const atk = (o = {}) => ({ claim_id: 'C0-1', stance: 'refute', mechanism: 'm', falsifier: 'f', tier: 'soft', attackerVendor: 'grok', ...o });
+
+test('debate: no refutation → SURVIVED', () => {
+  assert.strictEqual(classifyDebateClaim(claim, [], null, 2).status, 'SURVIVED');
+});
+
+test('debate: author concede → KILLED; amend → KILLED with replacement', () => {
+  assert.strictEqual(classifyDebateClaim(claim, [atk()], { response: 'concede', rebuttals: [] }, 2).status, 'KILLED');
+  const am = classifyDebateClaim(claim, [atk()], { response: 'amend', amended_claim: 'X unsafe only if unset', rebuttals: [] }, 2);
+  assert.strictEqual(am.status, 'KILLED');
+  assert.strictEqual(am.amended, 'X unsafe only if unset');
+});
+
+test('debate N=2: decisive falsifier author does NOT defeat → KILLED', () => {
+  const r = classifyDebateClaim(claim, [atk({ tier: 'decisive' })], { response: 'holds', rebuttals: [] }, 2);
+  assert.strictEqual(r.status, 'KILLED');
+  assert.ok(/decisive/.test(r.reason));
+});
+
+test('debate N=2: decisive falsifier the author DOES defeat (holds) → not killed', () => {
+  const r = classifyDebateClaim(claim, [atk({ tier: 'decisive' })], { response: 'holds', rebuttals: [{ attacker: 'grok', result: 'holds', counter: 'c' }] }, 2);
+  assert.notStrictEqual(r.status, 'KILLED');
+  assert.strictEqual(r.status, 'SURVIVED'); // all standing attacks held
+});
+
+test('debate N=2: single SOFT attack + author holds → UNRESOLVED (mere disagreement never kills)', () => {
+  const r = classifyDebateClaim(claim, [atk({ tier: 'soft' })], { response: 'holds', rebuttals: [] }, 2);
+  assert.strictEqual(r.status, 'UNRESOLVED');
+});
+
+test('debate: soft attack alone can never KILL even without defense', () => {
+  const r = classifyDebateClaim(claim, [atk({ tier: 'soft' })], null, 2);
+  assert.notStrictEqual(r.status, 'KILLED'); // confabulated soft cannot kill
+  assert.strictEqual(r.status, 'UNRESOLVED');
+});
+
+test('debate N=3: two distinct vendors refute, author holds neither → KILLED; same-vendor double does not', () => {
+  const twoVendors = [atk({ attackerVendor: 'grok' }), atk({ attackerVendor: 'gemini' })];
+  assert.strictEqual(classifyDebateClaim(claim, twoVendors, { response: 'holds', rebuttals: [] }, 3).status, 'KILLED');
+  const sameVendor = [atk({ attackerVendor: 'grok' }), atk({ attackerVendor: 'grok' })];
+  assert.notStrictEqual(classifyDebateClaim(claim, sameVendor, { response: 'holds', rebuttals: [] }, 3).status, 'KILLED');
+});
+
+test('debate: extractors parse the JSON contracts + repair wrapped newlines', () => {
+  assert.strictEqual(extractClaims('```json\n{"claims":[{"text":"a","evidence":"e"}]}\n```')[0].text, 'a');
+  const a = extractAttacks('```json\n{"attacks":[{"claim_id":"C0-1","stance":"refute","mechanism":"m","tier":"decisive"}]}\n```');
+  assert.strictEqual(a[0].tier, 'decisive');
+  // a refute with empty mechanism is dropped as a freeloader
+  assert.strictEqual(extractAttacks('```json\n{"attacks":[{"claim_id":"C0-1","stance":"refute","mechanism":""}]}\n```').length, 0);
+  const d = extractDefense('```json\n{"response":"holds","rebuttals":[{"attacker":"grok","result":"holds"}]}\n```');
+  assert.strictEqual(d.response, 'holds');
+  assert.strictEqual(extractDefense('no block'), null);
+});
+
+test('debate prompts force hostility + evidence typing', () => {
+  const rp = buildRefutePrompt('Q', [{ id: 'C0-1', text: 'x' }]);
+  assert.ok(/HOSTILE/.test(rp) && /Default to REFUTE/.test(rp) && /decisive/.test(rp));
+  const dp = buildDefendPrompt({ text: 'x' }, [{ attacker: 'grok', tier: 'soft', mechanism: 'm' }]);
+  assert.ok(/concede/.test(dp) && /holds/.test(dp));
+});
+
+// ---------------------------------------------------------------------------
 // Scribe lane (cheap-prose chores)
 // ---------------------------------------------------------------------------
 

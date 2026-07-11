@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.11.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.12.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -86,7 +86,8 @@ node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks   
 
 | 기능 | 설명 |
 |------|------|
-| **블라인드 패널 + 원장** | 동일 프롬프트를 N개 모델에 블라인드로. 구조화 판정이 산문보다 먼저 append-only 원장에 기록되고, 누적 쌍별 일치 행렬을 제공. |
+| **블라인드 패널 (`panel`)** | 동일 프롬프트를 N개 모델에 블라인드로 보내 **다양성을 측정**. 구조화 판정이 산문보다 먼저 append-only 원장에 기록되고, 누적 쌍별 일치 행렬을 제공. |
+| **적대적 검토 (`debate`)** | 크로스-벤더 모델이 서로 **반박**해 틀린 주장을 죽이고 **품질로 수렴**. decisive falsifier만 KILL, 단순 이견은 UNRESOLVED. judge LLM 없는 기계적 판정. 이 기능 자체가 xllm 적대 방식으로 설계됨. |
 | **합의 깊이 종합** | 주장별로 만장일치/다수결/의견분열/단일출처 라벨. 실패 어드바이저는 기권. 합의는 신뢰도 메타데이터이지 진리가 아님. |
 | **비용 인지 라우팅** | 가벼운 일은 무료 로컬·low effort, 무거운 판단은 strong tier. 초소형 로컬 모델은 판단 역할 투표권 거부(능력 하한). |
 | **scribe** | 커밋 메시지·PR 본문·릴리스 노트를 가장 싼 healthy 모델이 작성, 결정적 검증. 기계적 작업에 SOTA 요금을 쓰지 않음. |
@@ -130,7 +131,7 @@ codex plugin add xllm@xllm
 grok plugin install kimmingul/xllm --trust
 ```
 
-Claude Code와 Codex는 동일한 호스트 중립 스킬 5종(`ask`, `multi`, `exec`, `scribe`, `setup`)을
+Claude Code와 Codex는 동일한 호스트 중립 스킬 6종(`ask`, `multi`, `debate`, `exec`, `scribe`, `setup`)을
 `./skills/`에서 공유합니다. 팀·루프·플래닝·검증은 **의도적으로 포팅하지 않았습니다** — 호스트
 네이티브 기능이 이미 담당합니다. 플러그인 이름: Grok Build에서 `grok-xllm`, Claude/Codex에서 `xllm`.
 
@@ -156,8 +157,9 @@ node scripts/xllm.mjs <command>
 
 ask <spec> "<prompt>"        단일 어드바이저 (read-only)
 multi p1,p2 "<prompt>"       병렬 다중 어드바이저 + 합의 계약 인덱스
-panel run p1,p2 "<q>"        블라인드 동일 프롬프트 패널 → 판정 원장
+panel run p1,p2 "<q>"        블라인드 독립 패널 → 판정 원장 (다양성 측정)
 panel stats | outcome <id>   쌍별 일치 행렬 / 결정 채택 기록
+debate run p1,p2 "<q>"       적대적 검토: 모델이 서로 반박 → survived/killed/unresolved (품질 극대화)
 propose <spec> "<change>"    diff 제안 → artifacts/proposals/*.patch
 exec <spec> "<task>"         격리 실행 → refs/xllm/exec/<id> + 증거
 scribe commit|pr|release|notes   저비용 산문 → stdout (git 실행은 사용자)
@@ -176,7 +178,7 @@ pick|pick-team|infer|roles   역할·강도·비용 라우팅
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 90개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 99개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)
@@ -186,9 +188,9 @@ npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바
 
 ```text
 .claude-plugin/ .codex-plugin/ .agents/   3개 호스트 매니페스트
-skills/                                    Claude Code + Codex 공유 스킬 5종
+skills/                                    Claude Code + Codex 공유 스킬 6종
 scripts/  grok-ask-advisor.js  xllm-exec.js  xllm-scribe.js
-          xllm-panel.js  xllm-contracts.js  xllm-bench.js
+          xllm-panel.js  xllm-debate.js  xllm-contracts.js  xllm-bench.js
           xllm-routing.js  xllm.mjs
 benchmarks/  tasks/  FINDINGS.md            시딩 결함 벤치마크
 docs/  index.html  diversity-roadmap.md     소개 페이지 + 로드맵

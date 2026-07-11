@@ -39,3 +39,9 @@ Thumbs.db
 # Panel ledger (runtime measurement data, project-local)
 .grok/panel-ledger.jsonl
 .xllm/panel-ledger.jsonl
+
+# Exec state + benchmark run outputs (keep seeded tasks; drop run results)
+.grok/exec-registry.json
+.xllm/exec-registry.json
+benchmarks/results/*
+!benchmarks/results/.gitkeep

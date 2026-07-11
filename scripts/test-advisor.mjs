@@ -714,6 +714,81 @@ test('probeProviderContract: live probe on installed ollama, missing lemonade', 
 });
 
 // ---------------------------------------------------------------------------
+// Capability floor + measured tiebreaker + benchmark grader
+// ---------------------------------------------------------------------------
+
+import {
+  modelCapability,
+  passesCapabilityFloor,
+  suggestTiebreaker,
+  JUDGMENT_ROLES,
+} from './xllm-routing.js';
+import { gradeAnswer, errorCorrelation, loadTasks } from './xllm-bench.js';
+
+test('modelCapability parses size class and kind from model names', () => {
+  assert.strictEqual(modelCapability('ollama:llama3.2').size_class, 'unknown'); // no B tag
+  assert.strictEqual(modelCapability('ollama:qwen2.5-coder:7b').size_class, 'small');
+  assert.strictEqual(modelCapability('ollama:qwen2.5-coder:7b').kind, 'code');
+  assert.strictEqual(modelCapability('ollama:phi:3b').size_class, 'tiny');
+  assert.strictEqual(modelCapability('ollama:llama3:70b').size_class, 'large');
+  assert.strictEqual(modelCapability('codex').size_class, 'unknown'); // cloud, no signal
+});
+
+test('capability floor blocks tiny locals on judgment roles only', () => {
+  assert.ok(JUDGMENT_ROLES.includes('security'));
+  const blocked = passesCapabilityFloor('security', 'ollama:phi:3b', { tier: 'local' });
+  assert.strictEqual(blocked.ok, false);
+  const docsOk = passesCapabilityFloor('docs', 'ollama:phi:3b', { tier: 'local' });
+  assert.strictEqual(docsOk.ok, true); // non-judgment role
+  const cloudOk = passesCapabilityFloor('security', 'codex', { tier: 'strong' });
+  assert.strictEqual(cloudOk.ok, true); // non-local
+  const override = passesCapabilityFloor('security', 'ollama:phi:3b', { tier: 'local', allowBelowFloor: true });
+  assert.strictEqual(override.ok, true);
+});
+
+test('suggestTiebreaker picks lowest measured agreement, else strong tier', () => {
+  const ready = ['codex', 'gemini', 'grok'];
+  const ledger = [
+    { pair: 'codex ↔ ollama:llama3.2', agreement_rate: 0.9 },
+    { pair: 'gemini ↔ ollama:llama3.2', agreement_rate: 0.3 },
+  ];
+  const t = suggestTiebreaker(['ollama:llama3.2'], ready, ledger);
+  assert.strictEqual(t.provider, 'gemini'); // 0.3 < 0.9
+  const noData = suggestTiebreaker(['ollama:llama3.2'], ['gemini', 'codex'], []);
+  assert.ok(['gemini', 'codex'].includes(noData.provider)); // strongest tier
+  const none = suggestTiebreaker(['codex', 'gemini', 'grok'], ['codex', 'grok'], []);
+  assert.strictEqual(none.provider, null);
+});
+
+test('bench grader: deterministic defect detection + selftest tasks valid', () => {
+  const spec = loadTasks();
+  assert.ok(spec.tasks.length >= 6);
+  const t1 = spec.tasks[0];
+  const good = gradeAnswer(t1, 'SQL injection through concatenation; also XSS since output not escaped; password stored plaintext not hashed');
+  assert.strictEqual(good.hits.length, 3);
+  const partial = gradeAnswer(t1, 'looks fine to me');
+  assert.strictEqual(partial.hits.length, 0);
+  assert.strictEqual(partial.misses.length, 3);
+});
+
+test('bench errorCorrelation flags shared blind spots', () => {
+  const a = { 'x:1': true, 'x:2': false, 'x:3': false };
+  const b = { 'x:1': true, 'x:2': false, 'x:3': true };
+  const c = errorCorrelation(a, b);
+  assert.strictEqual(c.cells, 3);
+  assert.strictEqual(c.shared_blind_spots, 1); // both miss x:2
+  assert.ok(c.agreement_rate > 0.6 && c.agreement_rate < 0.7);
+});
+
+test('bench errorCorrelation intersects keys — a crashed provider has no cells', () => {
+  // A provider that errored produces no cells; correlation must be over the
+  // intersection only, never inventing "both missed" from absent data.
+  const worked = { 'x:1': true, 'x:2': false };
+  const crashed = {}; // errored — contributed nothing
+  assert.strictEqual(errorCorrelation(worked, crashed), null);
+});
+
+// ---------------------------------------------------------------------------
 // Panel (blind same-prompt + ledger)
 // ---------------------------------------------------------------------------
 

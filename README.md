@@ -1,6 +1,6 @@
 # grok-xllm
 
-**v0.9.0** — [Grok Build](https://grok.x.ai), **Claude Code**, **Codex**를 위한 크로스-벤더 LLM 어드바이저 플러그인.
+**v0.10.0** — [Grok Build](https://grok.x.ai), **Claude Code**, **Codex**를 위한 크로스-벤더 LLM 어드바이저 플러그인.
 
 호스트 CLI가 **지휘자(conductor)**, 외부·로컬 모델이 **조언자(advisor)**입니다.
 
@@ -167,6 +167,44 @@ node scripts/xllm.mjs multi codex@high,gemini "보안 + 설계 리뷰"
 실패한 어드바이저는 기권으로 계산되며, **합의는 신뢰도 메타데이터이지 진리가
 아닙니다** — 만장일치도 틀릴 수 있습니다.
 
+## 다양성 계측: 블라인드 패널 + 원장
+
+역할을 나누는 `multi`와 달리, `panel`은 **동일 프롬프트**를 모든 패널리스트에게
+블라인드로 보내 모델-다양성 자체를 측정합니다.
+
+```bash
+node scripts/xllm.mjs panel run codex,gemini,ollama:qwen3.6:latest "이 접근이 안전한가?"
+node scripts/xllm.mjs panel stats          # 누적 쌍별 일치율 (측정된 탈상관)
+node scripts/xllm.mjs panel outcome <id> --adopted majority --helpful yes
+```
+
+각 패널리스트는 구조화 판정(approve/reject/mixed + 핵심 주장)을 반환합니다.
+**원장(`<state>/panel-ledger.jsonl`)이 산문보다 먼저 기록되며** — 요약은 UX일
+뿐 원장을 덮어쓸 수 없습니다. 소수 의견은 일급 아티팩트이고, 실패한
+패널리스트는 기권입니다. split에서는 `stats`의 **낮은 측정 일치율**로
+타이브레이커를 고릅니다 — 벤더 계보가 아니라 측정값으로.
+
+## 다양성 배당 벤치마크 + 증거 기반 라우팅
+
+```bash
+npm run bench:live      # 시딩 결함 과제로 single vs panel 검출 비교
+node scripts/xllm.mjs contracts --live         # 프로바이더 계약: 플래그 드리프트 + 인증
+node scripts/xllm.mjs pick security "auth token race" --json   # capability_floor 포함
+```
+
+- **벤치마크**: 알려진 결함을 심은 코드 리뷰 과제로 단일 프로바이더 vs
+  블라인드 패널의 검출률을 비교하고, 추가 검출 결함·소요·**쌍별 오류 상관**
+  (공유된 맹점)을 보고합니다. 결정적 정규식 채점, 라이브 전용(CI 제외).
+- **프로바이더 계약 플로어**: `contracts`가 설치된 CLI의 `--help`에서 xllm이
+  의존하는 플래그를 검사해 버전 간 **드리프트를 감지**하고, 실패를
+  missing-binary/auth/timeout/transient/permanent로 분류하며, transient에만
+  지터 재시도를 겁니다. `--live`는 프로바이더별 실제 인증을 증명합니다.
+- **능력 하한**: 초소형 로컬 모델(<4B)은 판단 역할(security/architecture/
+  verify/critic)에서 투표권이 거부됩니다("3B 산문 모델의 보안 투표는 노이즈").
+  `--allow-below-floor`로 오버라이드.
+- **측정 기반 타이브레이커**: split 시 원장의 측정 일치율이 가장 낮은
+  미참여 프로바이더를 제안 — 계보 점수 없음.
+
 ## 인벤토리·프로젝트 프로파일·비용 라우팅
 
 ```bash
@@ -213,8 +251,9 @@ node scripts/xllm.mjs infer "README 오타 수정"
 | `/team` | 병렬 워커 — 반드시 `pick-team` 선행 |
 | `/xllm-setup` | 인벤토리 + doctor + 프로젝트별 어드바이저 위저드 |
 
-**Claude Code / Codex** (`skills/` 공유): `ask`, `multi`, `exec`, `scribe`,
-`setup` — 크로스-벤더 코어만. 호스트 네이티브와 중복되는 기능은 없습니다.
+**Claude Code / Codex** (`skills/` 공유): `ask`, `multi`(패널 포함), `exec`,
+`scribe`, `setup` — 크로스-벤더 코어만. 호스트 네이티브와 중복되는 기능은
+없습니다.
 
 ## CLI 명령 요약
 
@@ -227,6 +266,9 @@ propose <spec> "<change>"    diff 제안 → artifacts/proposals/*.patch
 exec <spec> "<task>"         격리 실행 → refs/xllm/exec/<id> + 증거
 exec list | cleanup <id>     실행 목록 / 정리
 scribe commit|pr|release|notes   저비용 산문 → stdout (git 실행은 사용자)
+panel run p1,p2 "<q>"        블라인드 동일 프롬프트 패널 → 판정 원장
+panel stats | outcome <id>   쌍별 일치 행렬 / 결정 채택 기록
+contracts [--live]           프로바이더 계약 프로브(플래그 드리프트/실패분류/인증)
 inventory [--refresh]        머신 역량 캐시
 profile show|set-role|set-default   프로젝트 프로파일
 doctor | smoke [--live]      상태 진단 / 스모크

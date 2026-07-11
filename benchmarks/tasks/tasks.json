@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "question": "Review this code for defects. List EVERY defect you find, one per line, and briefly say why each is a problem.",
+  "tasks": [
+    {
+      "id": "t1-login",
+      "title": "Login handler",
+      "code": "async function login(req, res) {\n  const q = \"SELECT * FROM users WHERE name = '\" + req.body.user + \"' AND pw = '\" + req.body.pw + \"'\";\n  const rows = await db.query(q);\n  if (rows.length > 0) {\n    res.cookie('session', rows[0].id);\n    res.send('welcome ' + req.body.user);\n  } else res.status(401).send('no');\n}",
+      "defects": [
+        { "id": "sqli", "pattern": "sql\\s*injection|parameteri[sz]|prepared statement|string concat.*quer|quer.*concat", "description": "SQL injection via string-concatenated query" },
+        { "id": "xss", "pattern": "xss|cross-site scripting|escap(e|ing).*(output|user|html)|html.*escap", "description": "Reflected XSS via unescaped user in response" },
+        { "id": "plaintext-pw", "pattern": "plain\\s*text|hash(ed|ing)?\\b.*password|password.*hash|bcrypt|argon", "description": "Password compared/stored in plaintext" }
+      ]
+    },
+    {
+      "id": "t2-pagination",
+      "title": "Pagination slice",
+      "code": "function paginate(items, page, perPage) {\n  const start = page * perPage;\n  const out = [];\n  for (let i = start; i <= start + perPage; i++) {\n    out.push(items[i].name);\n  }\n  return out;\n}",
+      "defects": [
+        { "id": "off-by-one", "pattern": "off[- ]by[- ]one|<=|one too many|extra (element|item)|perPage \\+ 1", "description": "Loop <= yields perPage+1 items" },
+        { "id": "oob-deref", "pattern": "undefined|out of (bounds|range)|items\\[i\\] (may|might|could)|bounds check|length check|TypeError", "description": "items[i].name throws past array end" }
+      ]
+    },
+    {
+      "id": "t3-config-write",
+      "title": "Config updater",
+      "code": "function updateConfig(key, value) {\n  if (fs.existsSync(CONFIG_PATH)) {\n    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));\n    cfg[key] = value;\n    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg));\n  }\n}",
+      "defects": [
+        { "id": "toctou", "pattern": "toctou|time[- ]of[- ]check|race\\s*condition|between (the )?check and", "description": "TOCTOU race between existsSync and read" },
+        { "id": "silent-noop", "pattern": "silent(ly)?|no (error|warning|feedback)|does nothing|swallow|fails? quietly|missing else", "description": "Missing file → silent no-op, caller never knows" },
+        { "id": "parse-crash", "pattern": "JSON\\.parse.*(throw|crash|invalid|malformed)|malformed json|try[/ ]?catch", "description": "Malformed JSON crashes uncaught" }
+      ]
+    },
+    {
+      "id": "t4-discount",
+      "title": "Discount calculator",
+      "code": "function applyDiscount(order, coupon) {\n  if (coupon.rate = 0.5) {\n    order.total = order.total - order.total * coupon.rate;\n  }\n  return Math.round(order.total * 100) / 100;\n}",
+      "defects": [
+        { "id": "assign-in-cond", "pattern": "assignment|= instead of ==|single equals|===|comparison operator", "description": "Assignment (=) instead of comparison in condition" },
+        { "id": "mutate-param", "pattern": "mutat(e|es|ing)|side[- ]effect|modif(y|ies).*(order|argument|input|parameter)", "description": "Mutates caller's order object" }
+      ]
+    },
+    {
+      "id": "t5-fetch-retry",
+      "title": "Fetch with retry",
+      "code": "async function fetchData(url) {\n  for (let i = 0; i < 3; i++) {\n    const res = await fetch(url, { headers: { 'X-Api-Key': 'sk-live-9f8e7d6c5b4a' } });\n    if (res.ok) return res.json();\n  }\n}",
+      "defects": [
+        { "id": "hardcoded-secret", "pattern": "hard[- ]?cod(ed|ing).*(key|secret|credential)|secret|api key.*(source|code|expose)|env(ironment)? variable", "description": "Hardcoded API key in source" },
+        { "id": "no-fail-return", "pattern": "returns? undefined|no (error|throw) after|all retries fail|falls? through|missing (throw|error)", "description": "Returns undefined after 3 failures, silently" },
+        { "id": "no-backoff", "pattern": "back[- ]?off|delay between|immediate(ly)? retr|hammer|no wait", "description": "Retries immediately with no backoff" }
+      ]
+    },
+    {
+      "id": "t6-temp-token",
+      "title": "Token cache",
+      "code": "let cachedToken = null;\nasync function getToken() {\n  if (!cachedToken) {\n    cachedToken = await auth.fetchToken();\n  }\n  return cachedToken;\n}",
+      "defects": [
+        { "id": "no-expiry", "pattern": "expir(y|es|ation)|ttl|stale|refresh|never invalidat", "description": "Cached token never expires/refreshes" },
+        { "id": "concurrent-fetch", "pattern": "concurrent|race|multiple (calls|requests).*(same time|simultaneous|parallel)|twice|dedup|in[- ]flight", "description": "Concurrent first calls fetch multiple tokens" }
+      ]
+    }
+  ]
+}

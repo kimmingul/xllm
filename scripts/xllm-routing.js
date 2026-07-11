@@ -126,6 +126,54 @@ const LOW_SIGNALS =
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh'];
 
+// Judgment roles where a tiny local model shouldn't get a vote (diversity
+// theater guard from the debate). Capability floor applies here.
+export const JUDGMENT_ROLES = ['security', 'architecture', 'verify', 'critic'];
+
+/**
+ * Rough capability class of a model from its name — heuristic, not lineage
+ * scoring. Returns { size_class, kind }. Unknown → assume capable (cloud
+ * models have no local size signal).
+ */
+export function modelCapability(spec) {
+  const s = String(spec || '').toLowerCase();
+  const kind = /coder?|code|deepseek|qwen.*coder|starcoder/.test(s)
+    ? 'code'
+    : /embed/.test(s)
+      ? 'embed'
+      : 'general';
+  const bMatch = s.match(/[:\-](\d+(?:\.\d+)?)b\b/) || s.match(/\b(\d+(?:\.\d+)?)b\b/);
+  const billions = bMatch ? Number(bMatch[1]) : null;
+  let size_class = 'unknown';
+  if (billions != null) {
+    if (billions < 4) size_class = 'tiny';
+    else if (billions < 12) size_class = 'small';
+    else if (billions < 40) size_class = 'medium';
+    else size_class = 'large';
+  }
+  return { size_class, kind, billions };
+}
+
+/**
+ * Capability floor guard: is this model allowed to hold a vote on this role?
+ * Only local/tiny models on judgment roles are blocked (unless overridden).
+ * Cloud models and unknown sizes pass — we don't invent limits we can't see.
+ */
+export function passesCapabilityFloor(role, providerSpec, { tier = null, allowBelowFloor = false } = {}) {
+  if (allowBelowFloor) return { ok: true, reason: 'override' };
+  const normRole = normalizeRole(role) || role;
+  if (!JUDGMENT_ROLES.includes(normRole)) return { ok: true, reason: 'non-judgment role' };
+  if (tier && tier !== 'local') return { ok: true, reason: 'non-local tier' };
+  const cap = modelCapability(providerSpec);
+  if (cap.size_class === 'tiny') {
+    return {
+      ok: false,
+      reason: `local ${cap.billions}B model below capability floor for judgment role '${normRole}'`,
+    };
+  }
+  return { ok: true, reason: cap.size_class };
+}
+
 function normalizeRole(role) {
   const r = String(role || '')
     .trim()
@@ -438,6 +486,57 @@ export function pickAdvisorForRole(role, options = {}) {
     route_effort_base: route.effort,
     pinned: !!route.pinned,
     cost: getProviderCostMeta(chosen, profiles),
+    capability_floor: passesCapabilityFloor(normRole, spec, {
+      tier: getProviderCostMeta(chosen, profiles).tier,
+      allowBelowFloor: options.allowBelowFloor,
+    }),
+  };
+}
+
+/**
+ * Suggest a tiebreaker for a split panel: a not-yet-consulted provider,
+ * preferring the one with the LOWEST measured agreement to the panel (most
+ * decorrelated), falling back to a different-tier strong provider. Never
+ * uses lineage — only measured agreement from the ledger.
+ *
+ * @param onPanel  provider specs already on the panel
+ * @param ready    available provider names
+ * @param ledgerMatrix  [{pair:"a ↔ b", agreement_rate}] from `panel stats`
+ */
+export function suggestTiebreaker(onPanel, ready, ledgerMatrix = [], profiles = null) {
+  const prof = profiles || loadProviderProfiles();
+  const onSet = new Set(onPanel.map((s) => String(s).split(/[:@]/)[0].toLowerCase()));
+  const candidates = ready.filter((p) => !onSet.has(String(p).toLowerCase()));
+  if (!candidates.length) return { provider: null, reason: 'no unconsulted providers available' };
+
+  // Score candidates by lowest measured agreement against any panelist.
+  const agreementFor = (cand) => {
+    const rates = ledgerMatrix
+      .filter((m) => m.pair.toLowerCase().includes(String(cand).toLowerCase()))
+      .filter((m) => onPanel.some((p) => m.pair.toLowerCase().includes(String(p).split(/[:@]/)[0].toLowerCase())))
+      .map((m) => m.agreement_rate)
+      .filter((r) => r != null);
+    return rates.length ? Math.min(...rates) : null;
+  };
+
+  const scored = candidates
+    .map((c) => ({ provider: c, measured_agreement: agreementFor(c), tier_rank: getProviderCostMeta(c, prof).tier_rank }))
+    .sort((a, b) => {
+      const am = a.measured_agreement, bm = b.measured_agreement;
+      if (am != null && bm != null) return am - bm; // lowest agreement wins
+      if (am != null) return -1;
+      if (bm != null) return 1;
+      return a.tier_rank - b.tier_rank; // no data → strongest tier
+    });
+
+  const pick = scored[0];
+  return {
+    provider: pick.provider,
+    measured_agreement: pick.measured_agreement,
+    reason:
+      pick.measured_agreement != null
+        ? `lowest measured agreement (${pick.measured_agreement}) with the panel`
+        : 'no agreement data yet — strongest unconsulted tier',
   };
 }
 
@@ -555,7 +654,8 @@ function parseCli(argv) {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
-    } else if (a === '--json') flags.json = true;
+    } else if (a === '--allow-below-floor') flags.allowBelowFloor = true;
+    else if (a === '--json') flags.json = true;
     else if (a === '--help' || a === '-h') flags.help = true;
     else positional.push(a);
   }
@@ -590,11 +690,15 @@ function main() {
       intensity: flags.intensity,
       forceCli: flags.forceCli,
       forceNative: flags.forceNative,
+      allowBelowFloor: flags.allowBelowFloor,
       readyProviders: flags.readyProviders || detectAvailableProviders(),
     });
     if (flags.json) console.log(JSON.stringify(pick, null, 2));
     else {
       console.log(formatPickHuman(pick));
+      if (pick.capability_floor && !pick.capability_floor.ok) {
+        console.log(`floor:      ⚠ ${pick.capability_floor.reason} (--allow-below-floor to override)`);
+      }
       if (!pick.use_native) {
         console.log(`\n# CLI\nnode scripts/grok-ask-advisor.js ${pick.spec} "<prompt>"`);
       } else {

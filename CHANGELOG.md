@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.10.0 — 2026-07-11
+
+### Added — seeded-defect benchmark + evidence-driven routing
+Third and final diversity-roadmap improvement: the controlled experiment that
+proves or refutes the diversity dividend, plus the routing guards that spend
+diversity only where it has decision value.
+
+- `xllm-bench` (scripts/xllm-bench.js) + `benchmarks/tasks/tasks.json`: six
+  code-review tasks with KNOWN planted defects (SQLi, XSS, off-by-one, TOCTOU,
+  assignment-in-condition, hardcoded secret, missing token expiry, …).
+  Compares single-provider vs blind-panel-union detection and reports
+  incremental defects, misses, duration, and **pairwise error correlation**
+  (shared blind spots — the correlated-failure signal). Deterministic regex
+  grading; live providers required, so it runs as `npm run bench:live`, not
+  in CI (`bench:selftest` keeps the grader honest in CI).
+- Capability floor (`passesCapabilityFloor`, `modelCapability`): tiny local
+  models (<4B) are refused a vote on JUDGMENT roles (security/architecture/
+  verify/critic) — "a 3B prose model voting on security is noise." Non-judgment
+  roles, cloud models, and unknown sizes pass; `--allow-below-floor` overrides.
+  `pick` output now carries `capability_floor`.
+- Measured-agreement tiebreaker (`suggestTiebreaker`): on a split, suggest an
+  unconsulted provider with the LOWEST measured pairwise agreement (from the
+  panel ledger) — empirical decorrelation, never lineage. Falls back to the
+  strongest unconsulted tier when no agreement data exists.
+- Bench excludes crashed providers from the dividend and correlation
+  (`valid_comparison` flag) — a model that OOM'd is not a data point; grading
+  it as "found 0 defects" would confound the result (found by live e2e).
+
+### First empirical finding (docs/diversity-roadmap.md §7)
+The instrument's first valid run (codex vs grok, 11 seeded defects) measured
+**pairwise error correlation 1.0** — both frontier vendors caught the same 10
+defects and missed the identical one, so the panel added zero. On well-known
+defect classes, cross-vendor diversity was theater. This does not refute the
+mission; it sharpens it: spend diversity only where decorrelation is MEASURED
+(`panel stats`), not assumed. The honest, uncomfortable first measurement is
+itself the differentiator from "claims benefits without evidence."
+
 ## 0.9.0 — 2026-07-11
 
 ### Added — blind same-prompt panel + claim/agreement ledger

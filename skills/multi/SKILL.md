@@ -75,7 +75,7 @@ When the point is to MEASURE disagreement (not divide roles), use the blind
 same-prompt panel instead of role-decomposed multi:
 
 ```bash
-node <plugin-root>/scripts/xllm-panel.js run p1,p2[,p3] "<question>"
+node <plugin-root>/scripts/xllm-panel.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
 node <plugin-root>/scripts/xllm-panel.js stats          # pairwise agreement matrix
 ```
 
@@ -83,8 +83,10 @@ Every panelist gets the IDENTICAL prompt and returns a structured verdict
 (approve/reject/mixed + key claims). The ledger (`<state>/panel-ledger.jsonl`)
 is written before any prose — your summary is UX and may not contradict it;
 minority reports are findings, not noise; failed panelists are abstentions.
-On split, pick a tiebreaker by LOW measured agreement from `stats`, never by
-vendor pedigree. Afterwards record what you did:
+On split, the core now computes the tiebreaker pick itself (an unconsulted
+provider with the LOWEST measured agreement from the ledger — never vendor
+pedigree) and records it for free; pass `--tiebreak` to spend the one extra
+blind call. Don't hand-pick the vendor. Afterwards record what you did:
 `panel outcome <run-id> --adopted <spec|majority|minority|none> --helpful yes|no`.
 
 ## Proposal mode (file work, still read-only)

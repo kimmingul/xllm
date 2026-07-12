@@ -32,7 +32,9 @@ import {
   redactSecrets,
   slugify,
   getProviderCostMeta,
+  detectAvailableProviders,
 } from './grok-ask-advisor.js';
+import { suggestTiebreaker } from './xllm-routing.js';
 import {
   extractJson,
   askStructured,
@@ -98,6 +100,19 @@ export function computePairwise(panelists) {
   return pairs;
 }
 
+/**
+ * Pairwise rows between one tiebreaker and every ORIGINAL panelist (never
+ * original↔original — those are already on the panel record). Abstentions on
+ * either end yield null, same rule as computePairwise. Pure.
+ */
+export function tiebreakPairwise(panelists, tb) {
+  return panelists.map((p) => ({
+    a: p.spec,
+    b: tb.spec,
+    agree: p.verdict && tb.verdict ? p.verdict.verdict === tb.verdict.verdict : null,
+  }));
+}
+
 /** Consensus label over valid verdicts only (abstentions excluded). */
 export function consensusLabel(panelists) {
   const valid = panelists.filter((p) => p.verdict);
@@ -145,13 +160,20 @@ export function readLedger(root = process.cwd()) {
   }
 }
 
-/** Pairwise agreement-rate matrix across all panel runs in the ledger. */
+/**
+ * Pairwise agreement-rate matrix across all panel runs in the ledger.
+ * Tiebreak records also contribute pairwise rows (the tiebreaker is blind and
+ * prompt-identical → comparable) but never increment `runs` — that is how a
+ * tiebreak bought today becomes routing evidence tomorrow.
+ */
 export function ledgerStats(records) {
   const pairs = {};
   let runs = 0;
+  let tiebreaks = 0;
   for (const r of records) {
-    if (r.type !== 'panel') continue;
-    runs += 1;
+    if (r.type !== 'panel' && r.type !== 'tiebreak') continue;
+    if (r.type === 'panel') runs += 1;
+    else tiebreaks += 1;
     for (const p of r.pairwise || []) {
       if (p.agree === null) continue; // abstention — not comparable
       const key = [p.a, p.b].sort().join(' ↔ ');
@@ -166,7 +188,7 @@ export function ledgerStats(records) {
     agreement_rate: s.comparable ? +(s.agreements / s.comparable).toFixed(3) : null,
   }));
   const outcomes = records.filter((r) => r.type === 'outcome');
-  return { runs, matrix, outcomes_recorded: outcomes.length };
+  return { runs, tiebreaks, matrix, outcomes_recorded: outcomes.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +203,13 @@ function panelId() {
   );
 }
 
-export async function runPanel({ specs, question, root = process.cwd() }) {
+export async function runPanel({
+  specs,
+  question,
+  root = process.cwd(),
+  tiebreak = false,
+  readyProviders = null,
+}) {
   const parsed = specs.map((s) => {
     const p = parseProviderSpec(s);
     if (!p) {
@@ -282,6 +310,92 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
   };
   appendLedger(record, root);
 
+  // Measurement→routing loop (docs/tiebreak-design.md): on a SPLIT the ledger's
+  // measured agreement picks an unconsulted tiebreaker. Suggestion is always
+  // free (no LLM call); the one extra blind call is opt-in via --tiebreak.
+  let suggestion = null;
+  let tbResult = null;
+  let expandedLabel = null;
+  if (label === 'split') {
+    const override = Array.isArray(readyProviders) && readyProviders.length > 0;
+    const readyList = override ? readyProviders : detectAvailableProviders();
+    // Post-append matrix (record-before-narrative). Candidate scores are
+    // unaffected by the current run: candidates are unconsulted, so this
+    // run's pairwise rows (on-panel only) never mention them.
+    const matrix = ledgerStats(readLedger(root)).matrix;
+    const onPanel = parsed.map((p) => p.spec);
+    suggestion = suggestTiebreaker(onPanel, readyList, matrix);
+    const suggestId = panelId();
+    appendLedger(
+      {
+        type: 'tiebreak_suggest',
+        run_id: suggestId,
+        panel_run_id: id,
+        created_at: new Date().toISOString(),
+        provider: suggestion.provider,
+        measured_agreement: suggestion.measured_agreement ?? null,
+        reason: suggestion.reason,
+        selection_basis:
+          suggestion.measured_agreement != null ? 'lowest-measured-agreement' : 'strongest-tier-no-data',
+        ready: readyList,
+        ready_source: override ? 'override' : 'detect',
+        on_panel: onPanel,
+        requested: !!tiebreak,
+        status: suggestion.provider ? 'suggested' : 'unavailable',
+      },
+      root
+    );
+    console.error(
+      suggestion.provider
+        ? `[panel] tiebreak suggest: ${suggestion.provider} — ${suggestion.reason}${tiebreak ? '' : ' (add --tiebreak to run it)'}`
+        : `[panel] tiebreak suggest: (none) — ${suggestion.reason}`
+    );
+
+    if (tiebreak && suggestion.provider) {
+      const tbParsed = parseProviderSpec(suggestion.provider);
+      if (tbParsed) {
+        console.error(`[panel] tiebreak run: ${tbParsed.spec} (blind, identical prompt)…`);
+        const tb = await runPanelist(tbParsed);
+        const tbPairwise = tiebreakPairwise(panelists, tb);
+        // A failed tiebreaker abstains: consensusLabel ignores it and the
+        // expanded label stays 'split'; it never counts as agreement.
+        expandedLabel = consensusLabel([...panelists, tb]);
+        appendLedger(
+          {
+            type: 'tiebreak',
+            run_id: panelId(),
+            panel_run_id: id,
+            suggest_run_id: suggestId,
+            created_at: new Date().toISOString(),
+            selection: {
+              spec: tb.spec,
+              basis: suggestion.measured_agreement != null ? 'lowest-measured-agreement' : 'strongest-tier-no-data',
+              ready_source: override ? 'override' : 'detect',
+              measured_agreement: suggestion.measured_agreement ?? null,
+            },
+            blind_prompt: true,
+            panelist: {
+              spec: tb.spec,
+              provider: tb.provider,
+              exit_code: tb.exit_code,
+              verdict: tb.verdict?.verdict || null,
+              confidence: tb.verdict?.confidence ?? null,
+              key_claims: tb.verdict?.key_claims || [],
+              adherence: tb.adherence,
+              artifact: tb.artifact,
+            },
+            pairwise: tbPairwise,
+            consensus_before: label,
+            consensus_after: expandedLabel,
+          },
+          root
+        );
+        tbResult = { panelist: tb, pairwise: tbPairwise, consensus_after: expandedLabel };
+        console.error(`[panel] expanded consensus: ${expandedLabel} (initial: ${label})`);
+      }
+    }
+  }
+
   // Human index: ledger table first, prose contract second.
   const valid = panelists.filter((p) => p.verdict);
   const counts = {};
@@ -291,6 +405,30 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
 
   const dir = path.join(ensureArtifactDirs(root), 'xllm');
   const mdPath = path.join(dir, `panel-${slugify(question)}-${id}.md`);
+  const tiebreakMd = !suggestion
+    ? []
+    : [
+        '## Tiebreak (measured decorrelation)',
+        '',
+        '- Trigger: initial consensus was **split**',
+        suggestion.provider
+          ? `- Suggested: **${suggestion.provider}** — ${suggestion.reason}`
+          : `- Suggested: (none) — ${suggestion.reason}`,
+        ...(tbResult
+          ? [
+              `- Ran: **${tbResult.panelist.spec}** → ${
+                tbResult.panelist.verdict
+                  ? `**${tbResult.panelist.verdict.verdict}** (confidence ${tbResult.panelist.verdict.confidence ?? '-'})`
+                  : 'ABSTAIN (failed/invalid verdict — label unchanged)'
+              }`,
+              `- Pairwise vs panel: ${tbResult.pairwise
+                .map((p) => `${p.a} ${p.agree === null ? 'not comparable' : p.agree ? 'agree' : 'DISAGREE'}`)
+                .join(' · ')}`,
+              `- Expanded consensus: **${tbResult.consensus_after}** (original **${label}** unchanged in ledger)`,
+            ]
+          : ['- Ran: no — re-invoke with `--tiebreak` to spend one blind call']),
+        '',
+      ];
   fs.writeFileSync(
     mdPath,
     [
@@ -315,6 +453,7 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
         (p) => `- ${p.a} ↔ ${p.b}: ${p.agree === null ? 'not comparable (abstention)' : p.agree ? 'agree' : 'DISAGREE'}`
       ),
       '',
+      ...tiebreakMd,
       '## Synthesis contract (for the host)',
       '',
       '- The ledger above is the record; your prose summary is UX and must not',
@@ -322,8 +461,8 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
       '- Surface minority reports explicitly — they are findings, not noise.',
       `- Consensus label: **${label}** — confidence metadata, not truth;`,
       '  unanimous can still be wrong.',
-      '- On split: consider one tiebreaker from a vendor not on this panel,',
-      '  chosen by LOW measured agreement (see `panel stats`), never by lineage.',
+      '- On split: the Tiebreak section above names the measured-decorrelation',
+      '  pick — spend it with `--tiebreak`; never hand-pick by lineage.',
       `- Afterwards record what you did: \`xllm panel outcome ${id} --adopted <spec|majority|minority|none> --helpful yes|no\``,
       '',
       '## Contract adherence (structured-output health)',
@@ -333,6 +472,9 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
       '## Full answers',
       '',
       ...panelists.filter((p) => p.artifact).map((p) => `- ${p.spec}: ${p.artifact}`),
+      ...(tbResult && tbResult.panelist.artifact
+        ? [`- ${tbResult.panelist.spec} (tiebreaker): ${tbResult.panelist.artifact}`]
+        : []),
       '',
     ].join('\n'),
     'utf8'
@@ -344,7 +486,17 @@ export async function runPanel({ specs, question, root = process.cwd() }) {
     `[panel] consensus: ${label}${recovered ? ` · ${recovered} recovered on retry` : ''}${failed ? ` · ${failed} abstained` : ''}`
   );
   console.log(mdPath);
-  return { exitCode: 0, id, label, mdPath, panelists, pairwise };
+  return {
+    exitCode: 0,
+    id,
+    label,
+    expandedLabel,
+    mdPath,
+    panelists,
+    pairwise,
+    tiebreakSuggestion: suggestion,
+    tiebreakResult: tbResult,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +513,9 @@ async function main() {
       console.log(JSON.stringify(stats, null, 2));
       return;
     }
-    console.log(`panel runs: ${stats.runs}   outcomes recorded: ${stats.outcomes_recorded}`);
+    console.log(
+      `panel runs: ${stats.runs}   tiebreaks: ${stats.tiebreaks}   outcomes recorded: ${stats.outcomes_recorded}`
+    );
     if (!stats.matrix.length) {
       console.log('(no comparable pairs yet — run `panel run` with 2+ panelists)');
       return;
@@ -404,21 +558,32 @@ async function main() {
   }
 
   if (cmd === 'run') {
-    const specs = (argv[1] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const question = argv.slice(2).join(' ').trim();
+    const rest = argv.slice(1);
+    const tiebreak = rest.includes('--tiebreak');
+    const readyArg = rest.find((a) => a.startsWith('--ready='));
+    const readyProviders = readyArg
+      ? readyArg.slice('--ready='.length).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+      : null;
+    const positional = rest.filter((a) => a !== '--tiebreak' && !a.startsWith('--ready='));
+    const specs = (positional[0] || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const question = positional.slice(1).join(' ').trim();
     if (specs.length < 2 || !question) {
-      console.error('Usage: xllm-panel run p1,p2[,p3] "<question>"');
+      console.error('Usage: xllm-panel run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]');
       process.exit(1);
     }
-    const r = await runPanel({ specs, question });
+    const r = await runPanel({ specs, question, tiebreak, readyProviders });
     process.exit(r.exitCode);
   }
 
   console.error(`xllm panel — blind same-prompt panel + agreement ledger
 Usage:
-  node scripts/xllm-panel.js run p1,p2[,p3] "<question>"   # identical prompt, blind
+  node scripts/xllm-panel.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
   node scripts/xllm-panel.js stats [--json]                # pairwise agreement matrix
   node scripts/xllm-panel.js outcome <run-id> --adopted <…> --helpful yes|no
+
+On a SPLIT the ledger's measured agreement picks an unconsulted tiebreaker
+(suggestion is always free and recorded; the one extra blind call runs only
+with --tiebreak). --ready= overrides detected providers.
 
 Ledger: <state>/panel-ledger.jsonl (append-only; outcomes are new records,
 never mutations). The ledger is the record; prose synthesis is UX.`);

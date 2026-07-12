@@ -32,10 +32,21 @@ Other hosts: `<plugin-root>/scripts/xllm-council.js`.
 ## Run (Bash tool)
 
 ```bash
-node <xllm-council.js> run codex,grok,gemini "<consequential question or claim>"
+node <xllm-council.js> run codex,grok,gemini "<consequential question or claim>" [--tiebreak] [--ready=a,b,c]
 ```
 
 Use different vendors (same-vendor nesting is refused). Works at N=2 and up.
+
+## Tiebreak on a phase-1 split (measured decorrelation)
+
+If phase 1 ends **split**, the core computes the tiebreaker pick for free —
+an UNCONSULTED provider chosen by the LOWEST measured pairwise agreement in
+the ledger (never by lineage) — and records it. Pass `--tiebreak` to actually
+spend that one extra blind call. Its claims then join phase 2 **as an author
+only** (leftover claim slots, never displacing an original member's claims,
+never a debater), so the decorrelated payload gets stress-tested too. Do not
+hand-pick a tiebreaker vendor yourself; `--ready=` only constrains which
+providers are considered available.
 
 ## Read the result
 

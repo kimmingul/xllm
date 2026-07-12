@@ -812,6 +812,7 @@ import {
   extractPanelVerdict,
   computePairwise,
   consensusLabel,
+  tiebreakPairwise,
   appendLedger,
   readLedger,
   ledgerStats,
@@ -933,6 +934,77 @@ test('ledger: append-only, outcome as separate record, stats matrix', () => {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('tiebreakPairwise: rows vs each original panelist; abstention → null', () => {
+  const v = (x) => ({ verdict: x, confidence: 1, key_claims: [] });
+  const panelists = [
+    { spec: 'codex', verdict: v('approve') },
+    { spec: 'grok', verdict: v('reject') },
+    { spec: 'gemini', verdict: null }, // abstained
+  ];
+  const tb = { spec: 'claude', verdict: v('approve') };
+  const rows = tiebreakPairwise(panelists, tb);
+  assert.strictEqual(rows.length, 3);
+  assert.deepStrictEqual(rows[0], { a: 'codex', b: 'claude', agree: true });
+  assert.deepStrictEqual(rows[1], { a: 'grok', b: 'claude', agree: false });
+  assert.strictEqual(rows[2].agree, null);
+  // a failed tiebreaker abstains everywhere and never shifts the label
+  const failed = { spec: 'claude', verdict: null };
+  assert.ok(tiebreakPairwise(panelists, failed).every((r) => r.agree === null));
+  assert.strictEqual(consensusLabel([panelists[0], panelists[1], failed]), 'split');
+});
+
+test('ledgerStats: tiebreak pairwise feeds the matrix without counting as a run', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-tiebreak-'));
+  try {
+    appendLedger(
+      { type: 'panel', run_id: 'p1', pairwise: [{ a: 'codex', b: 'grok', agree: false }] },
+      tmp
+    );
+    appendLedger(
+      { type: 'tiebreak_suggest', run_id: 's1', panel_run_id: 'p1', provider: 'claude', status: 'suggested', requested: true },
+      tmp
+    );
+    appendLedger(
+      {
+        type: 'tiebreak',
+        run_id: 't1',
+        panel_run_id: 'p1',
+        suggest_run_id: 's1',
+        pairwise: [
+          { a: 'codex', b: 'claude', agree: true },
+          { a: 'grok', b: 'claude', agree: false },
+        ],
+        consensus_before: 'split',
+        consensus_after: 'majority',
+      },
+      tmp
+    );
+    const stats = ledgerStats(readLedger(tmp));
+    assert.strictEqual(stats.runs, 1); // neither suggest nor tiebreak counts as a run
+    assert.strictEqual(stats.tiebreaks, 1);
+    // tiebreak rows are in the matrix → tomorrow's suggestTiebreaker sees them
+    const cc = stats.matrix.find((m) => m.pair === 'claude ↔ codex');
+    assert.strictEqual(cc.agreement_rate, 1);
+    assert.ok(stats.matrix.find((m) => m.pair === 'claude ↔ grok'));
+    // suggest records contribute nothing to the matrix
+    assert.strictEqual(stats.matrix.length, 3);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('tiebreak loop closes: matrix from a past tiebreak steers the next pick', () => {
+  // yesterday: codex↔grok split; claude tiebroke — agreed with codex, not grok
+  const matrix = [
+    { pair: 'claude ↔ codex', agreement_rate: 1, comparable_runs: 1 },
+    { pair: 'claude ↔ grok', agreement_rate: 0, comparable_runs: 1 },
+  ];
+  // today: codex+claude panel splits; grok is the least-agreeing unconsulted
+  const t = suggestTiebreaker(['codex', 'claude'], ['grok', 'gemini'], matrix);
+  assert.strictEqual(t.provider, 'grok');
+  assert.strictEqual(t.measured_agreement, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -1063,7 +1135,7 @@ test('debate prompts force hostility + evidence typing', () => {
 // Council (panel → debate pipeline) — the bridge is the testable crux
 // ---------------------------------------------------------------------------
 
-import { claimsFromPanel } from './xllm-council.js';
+import { claimsFromPanel, appendTiebreakClaims } from './xllm-council.js';
 
 test('council: claimsFromPanel maps panel key_claims → author-attributed claims', () => {
   const parsed = [
@@ -1097,6 +1169,41 @@ test('council: abstained/invalid panelists contribute no claims', () => {
   const claims = claimsFromPanel(panelists, parsed);
   assert.strictEqual(claims.length, 1);
   assert.strictEqual(claims[0].author, 'codex');
+});
+
+test('council: tiebreak claims join as AUTHOR with a new index, never displacing originals', () => {
+  const capped = [
+    { id: 'C0-1', author: 'codex', authorSpec: 'codex', text: 'a', evidence: '' },
+    { id: 'C1-1', author: 'grok', authorSpec: 'grok', text: 'b', evidence: '' },
+  ];
+  const tb = {
+    spec: 'claude:opus',
+    provider: 'claude',
+    verdict: { verdict: 'reject', key_claims: ['tb claim 1', 'tb claim 2'] },
+  };
+  const out = appendTiebreakClaims(capped, tb, 2);
+  assert.strictEqual(out.length, 4);
+  assert.strictEqual(out[2].id, 'C2-1'); // author index after the originals
+  assert.strictEqual(out[2].author, 'claude');
+  assert.strictEqual(out[2].authorSpec, 'claude:opus');
+  // originals untouched, in place
+  assert.strictEqual(out[0].id, 'C0-1');
+  assert.strictEqual(out[1].id, 'C1-1');
+});
+
+test('council: tiebreak claims fill leftover cap slots only; abstainer adds none', () => {
+  const mk = (n) =>
+    Array.from({ length: n }, (_, i) => ({ id: `C0-${i + 1}`, author: 'codex', authorSpec: 'codex', text: `t${i}`, evidence: '' }));
+  const tb3 = { spec: 'claude', provider: 'claude', verdict: { verdict: 'approve', key_claims: ['x', 'y', 'z'] } };
+  // cap already full → unchanged
+  assert.strictEqual(appendTiebreakClaims(mk(8), tb3, 1).length, 8);
+  // one leftover slot → exactly one tiebreak claim enters
+  const out = appendTiebreakClaims(mk(7), tb3, 1);
+  assert.strictEqual(out.length, 8);
+  assert.strictEqual(out[7].text, 'x');
+  assert.strictEqual(out[7].id, 'C1-1');
+  // abstained tiebreaker (no verdict) adds nothing
+  assert.strictEqual(appendTiebreakClaims(mk(7), { spec: 'claude', provider: 'claude', verdict: null }, 1).length, 7);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.15.0 — 2026-07-12
+
+### Added — measured tiebreaker: the measurement→routing loop is closed
+`suggestTiebreaker` (measured-agreement picker, unit-tested since v0.10.0) was
+called zero times in live flow; routing read the panel ledger zero times. The
+mission thesis — *spend diversity only where decorrelation is MEASURED* — now
+executes end to end. Designed by a 3-round codex@high × grok@high adversarial
+review (`docs/tiebreak-design.md`).
+
+- `panel run … [--tiebreak] [--ready=a,b,c]` — on a **split**, the ledger's
+  cumulative pairwise-agreement matrix picks an UNCONSULTED tiebreaker
+  (lowest measured agreement; no data → strongest tier; never lineage):
+  - The **suggestion is always free** — computed, printed, and recorded as an
+    append-only `tiebreak_suggest` record even without the flag.
+  - `--tiebreak` spends ONE extra blind call (identical panel prompt, sees no
+    other answers) and appends a `tiebreak` record: pairwise vs each original
+    panelist, `consensus_before`/`consensus_after`. The original panel
+    record's consensus is immutable; the presence of the `tiebreak` record is
+    authoritative for whether it ran. A failed tiebreaker abstains and never
+    shifts the label.
+  - `ledgerStats` now aggregates tiebreak pairwise rows (blind + prompt-
+    identical → comparable) WITHOUT counting them as runs — today's tiebreak
+    becomes tomorrow's routing evidence. `panel stats` reports a `tiebreaks`
+    count.
+- `council run … [--tiebreak] [--ready=a,b,c]` — phase-1 split inherits the
+  same mechanics; the tiebreaker's key_claims join phase-2 debate **as a
+  claim author only** (R3 convergence): leftover claim-cap slots only (never
+  displacing an original member's claims), never in `parsed` (zero extra R1
+  refute lanes; R2 defend already routes by `claim.authorSpec`; the
+  classification quorum N is unchanged).
+- Live e2e (ollama:llama3.2 vs ollama:gemma4 split on Math.random session
+  tokens): no-data path picked grok (strongest unconsulted tier), blind
+  tiebreak ran, grok voted `mixed` → 1-1-1 stays `split` (mechanically
+  correct); second run then picked grok BY MEASURED agreement (0.0) from the
+  first run's tiebreak rows — the loop observably closed. Tests 106 → 111.
+
 ## 0.14.0 — 2026-07-11
 
 ### Changed — shared structured-output layer (reliability across all providers)

@@ -21,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import process from 'process';
 import { ensureArtifactDirs, redactSecrets, slugify } from './grok-ask-advisor.js';
 import { runPanel, ledgerPath } from './xllm-panel.js';
-import { parseDebaters, capClaims, runDebateOnClaims } from './xllm-debate.js';
+import { parseDebaters, capClaims, runDebateOnClaims, MAX_CLAIMS } from './xllm-debate.js';
 
 /**
  * Bridge panel output → debate claims. Each panelist's key_claims become
@@ -41,7 +41,42 @@ export function claimsFromPanel(panelists, parsed) {
   return capClaims(claims, parsed);
 }
 
-export async function runCouncil({ specs, question, root = process.cwd() }) {
+/**
+ * Tiebreaker claims join phase 2 as a claim AUTHOR only (docs/tiebreak-design.md):
+ * original members' claims are capped first (round-robin untouched); tiebreak
+ * claims fill only leftover MAX_CLAIMS capacity, so they can never displace an
+ * original member's claim. The tiebreaker is NEVER added to `parsed` — R1
+ * refute lanes stay one-per-member, and R2 defend already routes by
+ * claim.authorSpec. Pure.
+ */
+export function appendTiebreakClaims(capped, tbPanelist, originalAuthorCount) {
+  if (!tbPanelist || !tbPanelist.verdict) return capped;
+  const leftover = MAX_CLAIMS - capped.length;
+  if (leftover <= 0) return capped;
+  const pi = originalAuthorCount;
+  return [
+    ...capped,
+    ...(tbPanelist.verdict.key_claims || [])
+      .map((t) => String(t || '').trim())
+      .filter(Boolean)
+      .slice(0, leftover)
+      .map((text, i) => ({
+        id: `C${pi}-${i + 1}`,
+        author: tbPanelist.provider,
+        authorSpec: tbPanelist.spec,
+        text,
+        evidence: '',
+      })),
+  ];
+}
+
+export async function runCouncil({
+  specs,
+  question,
+  root = process.cwd(),
+  tiebreak = false,
+  readyProviders = null,
+}) {
   const parsed = parseDebaters(specs);
   if (parsed.length < 2) {
     console.error('[council] Need at least 2 members.');
@@ -50,14 +85,23 @@ export async function runCouncil({ specs, question, root = process.cwd() }) {
 
   // Phase 1 — independent panel (diversity measurement + blind claims).
   console.error('[council] phase 1/2 — panel (independent divergence)…');
-  const panel = await runPanel({ specs, question, root });
+  const panel = await runPanel({ specs, question, root, tiebreak, readyProviders });
   if (panel.exitCode !== 0) {
     console.error('[council] panel phase failed.');
     return { exitCode: 1 };
   }
 
   // Bridge → adversarial phase over the independently-surfaced claims.
-  const capped = claimsFromPanel(panel.panelists, parsed);
+  let capped = claimsFromPanel(panel.panelists, parsed);
+  if (panel.tiebreakResult) {
+    const before = capped.length;
+    capped = appendTiebreakClaims(capped, panel.tiebreakResult.panelist, parsed.length);
+    if (capped.length > before) {
+      console.error(
+        `[council] tiebreaker ${panel.tiebreakResult.panelist.spec} contributes ${capped.length - before} claim(s) as author (leftover slots only, not a debater)`
+      );
+    }
+  }
   if (!capped.length) {
     console.error('[council] panel surfaced no usable claims (all abstained/invalid) — cannot debate.');
     return { exitCode: 1, panel };
@@ -92,6 +136,13 @@ export async function runCouncil({ specs, question, root = process.cwd() }) {
       '## Phase 1 — panel (independent divergence)',
       '',
       `- Consensus: **${panel.label}**  (confidence metadata, not truth)`,
+      ...(panel.tiebreakSuggestion
+        ? [
+            panel.tiebreakResult
+              ? `- Tiebreak: **${panel.tiebreakResult.panelist.spec}** ran (blind) → expanded consensus **${panel.expandedLabel}** (original **${panel.label}** unchanged in ledger)`
+              : `- Tiebreak suggested: ${panel.tiebreakSuggestion.provider || '(none available)'} — not run${panel.tiebreakSuggestion.provider ? ' (pass `--tiebreak` to spend it)' : ''}`,
+          ]
+        : []),
       `- Detail: ${panel.mdPath}`,
       ...(agreeRows.length ? ['', '### Pairwise agreement', '', ...agreeRows] : []),
       '',
@@ -137,21 +188,31 @@ export async function runCouncil({ specs, question, root = process.cwd() }) {
 async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === 'run') {
-    const specs = (argv[1] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const question = argv.slice(2).join(' ').trim();
+    const rest = argv.slice(1);
+    const tiebreak = rest.includes('--tiebreak');
+    const readyArg = rest.find((a) => a.startsWith('--ready='));
+    const readyProviders = readyArg
+      ? readyArg.slice('--ready='.length).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+      : null;
+    const positional = rest.filter((a) => a !== '--tiebreak' && !a.startsWith('--ready='));
+    const specs = (positional[0] || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const question = positional.slice(1).join(' ').trim();
     if (specs.length < 2 || !question) {
-      console.error('Usage: xllm-council run p1,p2[,p3] "<question>"');
+      console.error('Usage: xllm-council run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]');
       process.exit(1);
     }
-    const r = await runCouncil({ specs, question });
+    const r = await runCouncil({ specs, question, tiebreak, readyProviders });
     process.exit(r.exitCode);
   }
   console.error(`xllm council — panel (independent) → debate (adversarial), one pipeline
 Usage:
-  node scripts/xllm-council.js run p1,p2[,p3] "<question>"
+  node scripts/xllm-council.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
 
 Phase 1 panel measures diversity + surfaces blind claims; phase 2 debate
-stress-tests those claims (SURVIVED/KILLED/UNRESOLVED). Both recorded to
+stress-tests those claims (SURVIVED/KILLED/UNRESOLVED). On a phase-1 SPLIT
+the measured-agreement tiebreaker applies (suggest always; run with
+--tiebreak) — its claims join phase 2 as an author (leftover claim slots
+only), never as a debater. Both phases recorded to
 <state>/panel-ledger.jsonl (panel run linked to debate). Protocol outcome,
 not truth; nothing auto-applied.`);
   process.exit(argv.length ? 1 : 0);

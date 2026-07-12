@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.14.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.15.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -87,6 +87,7 @@ node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks   
 | 기능 | 설명 |
 |------|------|
 | **블라인드 패널 (`panel`)** | 동일 프롬프트를 N개 모델에 블라인드로 보내 **다양성을 측정**. 구조화 판정이 산문보다 먼저 append-only 원장에 기록되고, 누적 쌍별 일치 행렬을 제공. |
+| **측정 타이브레이커** | 패널이 **split**이면 원장의 실측 일치율이 가장 낮은 **미참여** 프로바이더를 자동 선정(혈통 아님) — 제안은 항상 무료 기록, 실제 추가 호출은 `--tiebreak` 옵트인. 타이브레이크의 쌍별 행이 다시 원장에 쌓여 **다음 선정의 근거**가 됨(측정→라우팅 루프 폐쇄). |
 | **적대적 검토 (`debate`)** | 크로스-벤더 모델이 서로 **반박**해 틀린 주장을 죽이고 **품질로 수렴**. decisive falsifier만 KILL, 단순 이견은 UNRESOLVED. judge LLM 없는 기계적 판정. 이 기능 자체가 xllm 적대 방식으로 설계됨. |
 | **2단계 파이프라인 (`council`)** | `panel`(독립 발산) → `debate`(적대 수렴)을 한 명령으로. 독립적으로 도출된 주장을 반박 검증 → survived/killed/unresolved. 최고 중요도 결정용. |
 | **합의 깊이 종합** | 주장별로 만장일치/다수결/의견분열/단일출처 라벨. 실패 어드바이저는 기권. 합의는 신뢰도 메타데이터이지 진리가 아님. |
@@ -159,10 +160,15 @@ node scripts/xllm.mjs <command>
 
 ask <spec> "<prompt>"        단일 어드바이저 (read-only)
 multi p1,p2 "<prompt>"       병렬 다중 어드바이저 + 합의 계약 인덱스
-panel run p1,p2 "<q>"        블라인드 독립 패널 → 판정 원장 (다양성 측정)
-panel stats | outcome <id>   쌍별 일치 행렬 / 결정 채택 기록
+panel run p1,p2 "<q>" [--tiebreak] [--ready=a,b]
+                             블라인드 독립 패널 → 판정 원장 (다양성 측정);
+                             split이면 실측 일치율 최저 미참여 모델을 타이브레이커로
+                             제안(무료)·실행(--tiebreak 옵트인)
+panel stats | outcome <id>   쌍별 일치 행렬(+tiebreak 행 합산) / 결정 채택 기록
 debate run p1,p2 "<q>"       적대적 검토: 모델이 서로 반박 → survived/killed/unresolved (품질 극대화)
-council run p1,p2 "<q>"       2단계 파이프라인: panel(독립) → debate(적대) 한 번에
+council run p1,p2 "<q>" [--tiebreak] [--ready=a,b]
+                             2단계 파이프라인: panel(독립) → debate(적대) 한 번에;
+                             1단계 split 시 타이브레이커 주장이 2단계에 저자로만 참여
 propose <spec> "<change>"    diff 제안 → artifacts/proposals/*.patch
 exec <spec> "<task>"         격리 실행 → refs/xllm/exec/<id> + 증거
 scribe commit|pr|release|notes   저비용 산문 → stdout (git 실행은 사용자)

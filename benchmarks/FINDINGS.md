@@ -99,3 +99,45 @@ near-ceiling models; it grows when no single member dominates.
 "no dividend" but qwen OOM'd on load (CUDA) and never produced a review;
 the bench was fixed to exclude crashed providers (`valid_comparison`
 flag) rather than grade them as "found 0 defects".
+
+## 2026-07-12 — hard-set rerun (codex vs grok): the evidence now routes
+
+**Setup:** full hard set (6 tasks, 21 seeded defects), `codex` vs `grok`
+(default efforts), modes single+panel, run in 6 task-chunks (Windows argv
+limits + codex contention avoidance). Zero provider errors — every cell is a
+real judgment. Purpose: repopulate `benchmarks/results/` so the v0.16.0
+trait profiles have live evidence (the prior calibration's result files had
+been cleaned).
+
+**Single detection:**
+
+| provider | detected | notable misses |
+|----------|----------|----------------|
+| codex | 15/21 (71%) | h1 window edge cases (×2), h4 tz-comparison, h6 double-fire + late-handler (×2) |
+| grok | 20/21 (95%) | h3 no-eviction-on-equal only |
+| panel (union) | 20/21 | h3 no-eviction-on-equal |
+
+**Pairwise error correlation: 0.762 over 21 shared cells, 1 shared blind
+spot** — consistent with the 2026-07-11 five-model finding (0.746): hard
+problems decorrelate this pair too (easy set was 1.0).
+
+**Dividend on THIS pair: 0 over best single** (union 20 = grok 20) — but
+**+5 over codex**. When one panelist strictly dominates, the union adds
+nothing over the dominant member; the shared blind spot survives the union
+(no-eviction-on-equal — both miss, so diversity cannot buy it). The dividend
+is not a property of "diversity" in the abstract; it is a property of WHO
+your best single is — which is precisely a routing question.
+
+**The loop, closed end-to-end (first live occurrence):** these results flow
+into `xllm traits` (bench 21 cells each; grok Wilson-LCB 0.7733, codex
+0.5004) and the very next routed pick consumed them:
+
+```text
+pick verify / pick security (high intensity, legacy baseline = codex):
+  → grok@xhigh · measured bench: grok LCB 0.7733 vs codex 0.5004
+    over 21 shared opportunities (6 tasks, via lcb-margin)
+```
+
+Measurement → ledger/results → traits → routing decision, with the sample
+sizes cited in the reason string. What the benchmark measured is now what
+the router does.

@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.16.0';
+const VERSION = '0.17.0';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 

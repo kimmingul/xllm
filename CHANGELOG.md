@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.17.0 — 2026-07-12
+
+### Changed — deployment hygiene: CI parity, release tags, contributor docs
+Hosts install this plugin straight from git — the commit master points at IS
+the release artifact. This release makes that artifact trustworthy.
+
+- **CI ≡ local `npm run ci`**: GitHub Actions now also runs `npm run smoke`
+  (dry-run only — verified safe on bare runners: `--dry-run` returns exit 0
+  with an `unavailable` flag before any binary hard-fail) and
+  `npm run bench:selftest` (deterministic grader check). Previously Actions
+  green did not imply local ci green.
+- **Release tags**: annotated `vX.Y.Z` tags backfilled for every version in
+  the changelog (v0.2.0 → v0.17.0), each pointing at the commit that
+  introduced that version — installers can pin, rollback points have names.
+  Tagging is now part of the release checklist.
+- **`CONTRIBUTING.md` rewritten** for the xllm era (the old file still
+  described grok-xllm's ralph/verify scope): current in/out scope, the
+  adversarial design-review convention, evidence discipline (append-only
+  ledger, no lore, visible n), CRLF + Windows-argv constraints, the
+  version-bump/tag release checklist, and an updated PR checklist.
+
 ## 0.16.0 — 2026-07-12
 
 ### Added — evidence-based trait profiles: measured routing for the general pick

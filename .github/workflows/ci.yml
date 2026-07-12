@@ -29,6 +29,12 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Smoke (dry-run only — no live LLMs; safe on bare runners)
+        run: npm run smoke
+
+      - name: Bench grader selftest (deterministic, no LLMs)
+        run: npm run bench:selftest
+
       - name: Doctor (no live LLMs required)
         run: node scripts/grok-ask-advisor.js --doctor
         continue-on-error: true

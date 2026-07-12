@@ -28,7 +28,7 @@ import {
   ensureArtifactDirs,
   getProviderCostMeta,
   slugify,
-} from './grok-ask-advisor.js';
+} from './xllm-advisor.js';
 import { rawFromArtifact } from './xllm-panel.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -90,7 +90,7 @@ export function buildBenchPrompt(spec, task) {
 }
 
 export function askChild(providerSpec, prompt) {
-  const advisor = path.join(HERE, 'grok-ask-advisor.js');
+  const advisor = path.join(HERE, 'xllm-advisor.js');
   return new Promise((resolve) => {
     const started = Date.now();
     const child = spawn(process.execPath, [advisor, providerSpec, prompt], {

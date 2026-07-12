@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Role + intensity based advisor routing for grok-xllm (/team, /ralph, /xllm helpers).
+ * Role + intensity based advisor routing for xllm (/team, /ralph, /xllm helpers).
  *
  *   node scripts/xllm-routing.js pick security "auth token refresh"
  *   node scripts/xllm-routing.js pick-team "refactor payment webhooks" --roles implement,security,critic
  *   node scripts/xllm-routing.js infer "typo in README"
  *
- * Importable from grok-ask-advisor / tests.
+ * Importable from xllm-advisor / tests.
  */
 
 import {
@@ -16,7 +16,7 @@ import {
   getSupportedProviders,
   detectAvailableProviders,
   getProviderCostMeta,
-} from './grok-ask-advisor.js';
+} from './xllm-advisor.js';
 import {
   healthDecision,
   adherenceVeto,
@@ -847,7 +847,7 @@ function main() {
         console.log(`floor:      ⚠ ${pick.capability_floor.reason} (--allow-below-floor to override)`);
       }
       if (!pick.use_native) {
-        console.log(`\n# CLI\nnode scripts/grok-ask-advisor.js ${pick.spec} "<prompt>"`);
+        console.log(`\n# CLI\nnode scripts/xllm-advisor.js ${pick.spec} "<prompt>"`);
       } else {
         console.log(`\n# Native\nspawn_subagent type=${pick.native_agent || 'general-purpose'}`);
       }

@@ -26,7 +26,7 @@ import {
   ensureArtifactDirs,
   redactSecrets,
   slugify,
-} from './grok-ask-advisor.js';
+} from './xllm-advisor.js';
 import { appendLedger, ledgerPath } from './xllm-panel.js';
 import { extractJson, askStructured, adherenceSummary } from './xllm-structured.js';
 import { canonicalSpecKey } from './xllm-traits.js';

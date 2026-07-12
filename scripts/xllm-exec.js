@@ -31,7 +31,7 @@ import {
   redactSecrets,
   resolveSpawnTarget,
   slugify,
-} from './grok-ask-advisor.js';
+} from './xllm-advisor.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_TIMEOUT_MS = 900000; // 15 min — executors iterate

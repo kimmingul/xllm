@@ -31,7 +31,7 @@ import {
   detectHostCli,
   classifyFailure,
   withRetry,
-} from './grok-ask-advisor.js';
+} from './xllm-advisor.js';
 
 export { classifyFailure, withRetry };
 

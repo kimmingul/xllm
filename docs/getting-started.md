@@ -1,9 +1,9 @@
-# Getting started — grok-xllm
+# Getting started — xllm
 
 ## 1. Install the plugin
 
 ```bash
-cd /path/to/grok-xllm
+cd /path/to/xllm
 grok plugin install . --trust
 ```
 
@@ -23,7 +23,7 @@ node scripts/xllm.mjs remember
 From another project:
 
 ```bash
-node /path/to/grok-xllm/scripts/xllm.mjs remember
+node /path/to/xllm/scripts/xllm.mjs remember
 ```
 
 You want at least **one** READY advisor. See [install.md](./install.md).
@@ -31,7 +31,7 @@ You want at least **one** READY advisor. See [install.md](./install.md).
 ## 3. Core loop
 
 ```text
-/ask grok "Summarize scripts/grok-ask-advisor.js in 5 bullets"
+/ask grok "Summarize scripts/xllm-advisor.js in 5 bullets"
 /xllm ollama:qwen3.6:latest,codex "Review the advisor script for security"
 ```
 

@@ -1,11 +1,11 @@
-# Architecture — grok-xllm
+# Architecture — xllm
 
 > `<state>` = project state dir: `.xllm/` (default) or legacy `.grok/` when the project already uses it.
 
 ## Principles
 
 1. **Grok-native first** — prefer `spawn_subagent`, `todo_write`, plan mode, skills.  
-2. **One multi-LLM door** — all external models go through `scripts/grok-ask-advisor.js`.  
+2. **One multi-LLM door** — all external models go through `scripts/xllm-advisor.js`.  
 3. **Artifacts over chat memory** — durable paths under `<state>/artifacts/`.  
 4. **Evidence over claims** — `/ralph` and `/verify` refuse vibes-based completion.  
 5. **Thin over clever** — skills are playbooks; no second agent OS.
@@ -21,7 +21,7 @@
                 │                     │
                 ▼                     ▼
         spawn_subagent         run_terminal_command
-        (native workers)       node scripts/grok-ask-advisor.js
+        (native workers)       node scripts/xllm-advisor.js
                                       │
                     ┌─────────────────┼─────────────────┐
                     ▼                 ▼                 ▼

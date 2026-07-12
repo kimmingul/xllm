@@ -23,7 +23,7 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import process from 'process';
-import { resolveStateDir } from './grok-ask-advisor.js';
+import { resolveStateDir } from './xllm-advisor.js';
 import { contractsCachePath } from './xllm-contracts.js';
 
 // Own minimal ledger reader instead of importing xllm-panel.js: panel imports

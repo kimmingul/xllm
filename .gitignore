@@ -4,15 +4,12 @@ dist/
 *.log
 *.bak
 
-# Runtime artifacts (keep directory via .gitkeep)
-.grok/artifacts/ask/*
-.grok/artifacts/xllm/*
-.grok/artifacts/ralph/*
-.grok/artifacts/team/*
-.grok/artifacts/verify/*
-!.grok/artifacts/**/.gitkeep
+# Runtime artifacts (recreated by ensureArtifactDirs; self-ignored inside too)
+.xllm/artifacts/
+.grok/artifacts/
 
-# Machine-local path marker
+# Machine-local path markers
+.xllm/xllm-advisor-path
 .grok/xllm-advisor-path
 .grok/omg-advisor-path
 .grok/notepad.md

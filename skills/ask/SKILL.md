@@ -19,9 +19,9 @@ cannot edit files.
 
 Pick the first that works, then run it with your shell/Bash tool:
 
-1. **Claude Code**: `"${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js"`
+1. **Claude Code**: `"${CLAUDE_PLUGIN_ROOT}/scripts/xllm-advisor.js"`
 2. **Codex / other hosts**: the plugin root is two directories above this
-   SKILL.md — run `<plugin-root>/scripts/grok-ask-advisor.js`
+   SKILL.md — run `<plugin-root>/scripts/xllm-advisor.js`
 3. **Any host**: the project marker `.xllm/xllm-advisor-path` (legacy
    `.grok/xllm-advisor-path`) contains the absolute script path
 4. None of the above → run the `setup` skill first

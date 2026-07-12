@@ -1,11 +1,11 @@
 ---
 name: ask
 description: >
-  Headless CLI orchestration for multi-LLM advisors (grok-xllm).
+  Headless CLI orchestration for multi-LLM advisors (xllm).
   Use when you want authentic responses from external CLIs: claude, codex, gemini,
   antigravity (agy), grok, cursor, or local ollama/lmstudio/lemonade.
   Routes a task through the chosen provider's headless mode and saves a structured artifact.
-  Primary building block for /xllm, /ralph, and /team.
+  Primary building block for /xllm.
 argument-hint: "<provider[:model]> <task or question>"
 user-invocable: true
 ---
@@ -20,8 +20,8 @@ Pick the first that exists:
 
 1. Contents of `.xllm/xllm-advisor-path` (legacy: `.grok/xllm-advisor-path`)
 2. `$XLLM_ADVISOR_PATH` (legacy `$XLLM_ADVISOR_PATH`)
-3. `$GROK_PLUGIN_ROOT/scripts/grok-ask-advisor.js` or `$XLLM_PLUGIN_ROOT/scripts/…`
-4. `./scripts/grok-ask-advisor.js` (plugin repo or vendored copy)
+3. `$GROK_PLUGIN_ROOT/scripts/xllm-advisor.js` or `$XLLM_PLUGIN_ROOT/scripts/…`
+4. `./scripts/xllm-advisor.js` (plugin repo or vendored copy)
 
 If none exist: tell the user to run `/xllm-setup` or  
 `node <plugin-checkout>/scripts/xllm.mjs remember` from this project. **Do not invent CLI flags.**

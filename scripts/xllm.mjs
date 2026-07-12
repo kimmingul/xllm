@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Unified CLI for grok-xllm.
+ * Unified CLI for xllm.
  *
  *   node scripts/xllm.mjs which
  *   node scripts/xllm.mjs remember
@@ -15,7 +15,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const advisor = path.join(__dirname, 'grok-ask-advisor.js');
+const advisor = path.join(__dirname, 'xllm-advisor.js');
 const doctor = path.join(__dirname, 'xllm-doctor.js');
 const smoke = path.join(__dirname, 'smoke.mjs');
 const routing = path.join(__dirname, 'xllm-routing.js');
@@ -40,7 +40,7 @@ function run(script, args) {
 }
 
 function help() {
-  console.log(`grok-xllm CLI — multi-LLM orchestration for Grok Build
+  console.log(`xllm CLI — multi-LLM orchestration for Grok Build
 
 Commands:
   which              Print resolved advisor script path

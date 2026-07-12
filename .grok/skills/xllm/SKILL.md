@@ -1,7 +1,7 @@
 ---
 name: xllm
 description: >
-  Multi-LLM review and synthesis for grok-xllm (headless). Decomposes the task,
+  Multi-LLM review and synthesis for xllm (headless). Decomposes the task,
   runs 2+ external CLIs (codex, antigravity, grok, claude, ollama, lmstudio, …)
   via the advisor script, captures artifacts, then synthesizes agreements and
   disagreements. Primary multi-advisor skill (replaces the former OMC-style /ccg name).
@@ -97,16 +97,13 @@ Same as `/ask`: `codex`, `codex@high`, `claude:opus@medium`, `antigravity`, `oll
 |-------|------|
 | `/ask` | Single advisor primitive |
 | `/xllm` | Multi advisor + synthesis (this skill) |
-| `/ralph` | Uses advisors as critics inside an evidence loop |
-| `/team` | Parallel workers with role routing |
-| `/verify` | Evidence table against acceptance criteria |
 
 ## Implementation note
 
 Prefer:
 
 ```bash
-node scripts/grok-ask-advisor.js <spec> "<prompt>"
+node scripts/xllm-advisor.js <spec> "<prompt>"
 # or
 node scripts/xllm.mjs multi p1,p2 "<prompt>"
 ```

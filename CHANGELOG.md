@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.20.0 — 2026-07-12
+
+### Changed — the grok-xllm era is over: names, adapter, and state now say xllm
+Everything below was residue from this project's origin as the grok-xllm
+Grok Build plugin.
+
+- **`scripts/grok-ask-advisor.js` → `scripts/xllm-advisor.js`** — the one
+  script that still carried the grok- prefix (every sibling is xllm-*). All
+  ~35 referencing files updated; a deprecation shim at the old path forwards
+  argv for one or two releases (stale `XLLM_ADVISOR_PATH`/marker values keep
+  working; `xllm remember` regenerates markers).
+- **Product name is `xllm` everywhere**: package.json, the Grok Build
+  manifest (name, author, stale "ralph evidence loops" description), PRODUCT
+  string, smoke/doctor output. Historical files (CHANGELOG, FINDINGS) keep
+  their history.
+- **Grok Build adapter aligned to the current feature set**: removed the
+  never-ported grok-xllm-era skills (`ralph`, `team`, `verify`), all 9
+  `.grok/agents/`, and `.grok/personas/` (the persona approach was later
+  rejected 3-way as hand-authored lore). General project docs (SCOPE.md,
+  architecture, getting-started, install, local-llms) moved out of the grok
+  adapter into `docs/` and SCOPE.md rewritten for the current product.
+- **State/adapter separation**: this repo's runtime state (panel ledger,
+  artifacts, provider profile) moved from `.grok/` to the neutral `.xllm/`;
+  a committed machine-local absolute-path marker was removed and both marker
+  paths are gitignored. `OMG_*` legacy env aliases removed.
+
+### Changed — ollama rides the HTTP API, not the TTY CLI
+`ollama run` renders TTY-style even through a pipe — the root cause of the
+v0.19.0 wrap-duplication corruption — and argv delivery capped prompts at
+~32KB on Windows. The advisor now POSTs to `/api/generate` (curl, payload
+via stdin `-d @-`): clean JSON responses, unbounded prompt size, server
+errors surfaced as real messages (`{"error": …}` → exit 1). `OLLAMA_HOST`
+honored (scheme-less values normalized). `ollama list`/`stop`/health checks
+stay on the CLI. The v0.19.0 repair parser remains as a defense layer.
+Tests 126 → 129.
+
 ## 0.19.0 — 2026-07-12
 
 ### Fixed — ollama TTY wrap-duplication repair (structured-output robustness)

@@ -1,21 +1,21 @@
 {
-  "name": "grok-xllm",
-  "version": "0.19.0",
-  "description": "grok-xllm — multi-LLM orchestration for Grok Build (CLI advisors, ralph evidence loops, local+cloud).",
+  "name": "xllm",
+  "version": "0.20.0",
+  "description": "xllm — multi-LLM orchestration for Grok Build (CLI advisors, ralph evidence loops, local+cloud).",
   "type": "module",
   "license": "MIT",
   "private": true,
   "bin": {
     "xllm": "./scripts/xllm.mjs",
-    "xllm-advisor": "./scripts/grok-ask-advisor.js",
+    "xllm-advisor": "./scripts/xllm-advisor.js",
     "xllm-doctor": "./scripts/xllm-doctor.js"
   },
   "scripts": {
     "doctor": "node scripts/xllm-doctor.js",
-    "advisor": "node scripts/grok-ask-advisor.js",
+    "advisor": "node scripts/xllm-advisor.js",
     "xllm": "node scripts/xllm.mjs",
     "test": "node scripts/test-advisor.mjs",
-    "check": "node --check scripts/xllm-traits.js && node --check scripts/xllm-structured.js && node --check scripts/xllm-council.js && node --check scripts/xllm-debate.js && node --check scripts/xllm-bench.js && node --check scripts/xllm-panel.js && node --check scripts/xllm-contracts.js && node --check scripts/xllm-scribe.js && node --check scripts/xllm-exec.js && node --check scripts/grok-ask-advisor.js && node --check scripts/xllm-doctor.js && node --check scripts/xllm-routing.js && node --check scripts/test-advisor.mjs && node --check scripts/check-plugin.mjs && node --check scripts/smoke.mjs && node --check scripts/xllm.mjs && node scripts/check-plugin.mjs",
+    "check": "node --check scripts/xllm-traits.js && node --check scripts/xllm-structured.js && node --check scripts/xllm-council.js && node --check scripts/xllm-debate.js && node --check scripts/xllm-bench.js && node --check scripts/xllm-panel.js && node --check scripts/xllm-contracts.js && node --check scripts/xllm-scribe.js && node --check scripts/xllm-exec.js && node --check scripts/xllm-advisor.js && node --check scripts/xllm-doctor.js && node --check scripts/xllm-routing.js && node --check scripts/test-advisor.mjs && node --check scripts/check-plugin.mjs && node --check scripts/smoke.mjs && node --check scripts/xllm.mjs && node scripts/check-plugin.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:live": "node scripts/smoke.mjs --live",
     "bench:selftest": "node scripts/xllm-bench.js grade-selftest",

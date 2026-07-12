@@ -20,7 +20,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import process from 'process';
 
-const ADVISOR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grok-ask-advisor.js');
+const ADVISOR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'xllm-advisor.js');
 
 /**
  * Prompts longer than this are handed to the advisor via --prompt-file

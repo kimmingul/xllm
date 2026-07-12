@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.19.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.20.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -137,7 +137,7 @@ grok plugin install kimmingul/xllm --trust
 
 Claude Code와 Codex는 동일한 호스트 중립 스킬 7종(`ask`, `multi`, `debate`, `council`, `exec`, `scribe`, `setup`)을
 `./skills/`에서 공유합니다. 팀·루프·플래닝·검증은 **의도적으로 포팅하지 않았습니다** — 호스트
-네이티브 기능이 이미 담당합니다. 플러그인 이름: Grok Build에서 `grok-xllm`, Claude/Codex에서 `xllm`.
+네이티브 기능이 이미 담당합니다. 플러그인 이름: Grok Build에서 `xllm`, Claude/Codex에서 `xllm`.
 
 ---
 
@@ -190,7 +190,7 @@ pick|pick-team|infer|roles   역할·강도·비용 라우팅 (+실측 특성; -
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 126개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 129개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)
@@ -201,12 +201,12 @@ npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바
 ```text
 .claude-plugin/ .codex-plugin/ .agents/   3개 호스트 매니페스트
 skills/                                    Claude Code + Codex 공유 스킬 7종
-scripts/  grok-ask-advisor.js  xllm-exec.js  xllm-scribe.js
+scripts/  xllm-advisor.js  xllm-exec.js  xllm-scribe.js
           xllm-panel.js  xllm-debate.js  xllm-council.js  xllm-contracts.js  xllm-bench.js
           xllm-structured.js  xllm-routing.js  xllm-traits.js  xllm.mjs
 benchmarks/  tasks/  FINDINGS.md            시딩 결함 벤치마크
-docs/  index.html  diversity-roadmap.md     소개 페이지 + 로드맵
-.grok/  skills/ agents/ personas/ docs/     Grok Build 어댑터
+docs/  index.html SCOPE.md *-design.md …   소개 페이지 + 스코프/설계/로드맵 문서
+.grok/  skills/                             Grok Build 어댑터 (ask/xllm/xllm-setup)
 ```
 
 ---

@@ -1,7 +1,7 @@
 ---
 name: xllm-setup
 description: >
-  Setup and doctor for grok-xllm. Creates artifact dirs, remembers advisor script
+  Setup and doctor for xllm. Creates artifact dirs, remembers advisor script
   path for this project, checks cloud/local providers, and prints recommended commands.
 user-invocable: true
 ---
@@ -14,11 +14,11 @@ Run these steps (do not only describe them).
 
 ## 1. Resolve + remember advisor path
 
-Find `grok-ask-advisor.js` via (first hit):
+Find `xllm-advisor.js` via (first hit):
 
 - `.grok/xllm-advisor-path` (legacy: `.grok/xllm-advisor-path`)
 - `XLLM_ADVISOR_PATH` / `GROK_PLUGIN_ROOT` / `XLLM_PLUGIN_ROOT`
-- `./scripts/grok-ask-advisor.js`
+- `./scripts/xllm-advisor.js`
 - plugin checkout path the user has open
 
 Then run:
@@ -35,7 +35,7 @@ Confirm `.grok/xllm-advisor-path` exists and points at a real file.
 Ensure:
 
 ```text
-<state>/artifacts/ask|xllm|ralph|team|verify|proposals/
+<state>/artifacts/ask|xllm|proposals|exec/
 ```
 
 (`--remember` / `--doctor` also create these.)
@@ -77,7 +77,7 @@ node <advisor.js> ollama:… "Reply with exactly: xllm-setup-ok"
 
 ## 5. Inventory
 
-Skills: ask, xllm, ralph, team, verify, xllm-setup  
+Skills: ask, xllm, xllm-setup  
 Agents: critic, executor, verifier, security-reviewer (and friends)
 
 ## 6. User summary
@@ -90,12 +90,11 @@ Print:
 
 ```text
 /xllm <local>,<cloud> "…"
-/ralph --critic=<local>,<cloud> "…"
 /ask <provider> "…"
 ```
 
 - Windows: avoid antigravity headless
-- Docs: `.grok/docs/install.md`
+- Docs: `docs/install.md`
 
 ## Usage
 

@@ -1,9 +1,9 @@
 {
   "name": "xllm",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Cross-vendor LLM advisors for Codex: ask claude, gemini, grok, cursor, or local ollama/lmstudio from inside a session and synthesize their independent opinions. Read-only by default.",
   "author": {
-    "name": "grok-xllm contributors"
+    "name": "xllm contributors"
   },
   "homepage": "https://github.com/kimmingul/xllm",
   "repository": "https://github.com/kimmingul/xllm",
@@ -23,7 +23,7 @@
     "displayName": "xllm",
     "shortDescription": "Cross-vendor LLM second opinions, read-only by default",
     "longDescription": "Ask other vendors' CLIs (claude, gemini, grok, cursor) or local models (ollama, lmstudio) for independent opinions without leaving your session, then synthesize agreements and disagreements. Advisors run read-only by default and same-vendor nesting is refused.",
-    "developerName": "grok-xllm contributors",
+    "developerName": "xllm contributors",
     "category": "Developer Tools",
     "capabilities": [
       "Read"

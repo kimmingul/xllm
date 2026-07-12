@@ -36,7 +36,7 @@ jobs:
         run: npm run bench:selftest
 
       - name: Doctor (no live LLMs required)
-        run: node scripts/grok-ask-advisor.js --doctor
+        run: node scripts/xllm-advisor.js --doctor
         continue-on-error: true
 
       - name: Plugin manifest sanity

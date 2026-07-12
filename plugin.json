@@ -1,9 +1,9 @@
 {
-  "name": "grok-xllm",
-  "version": "0.19.0",
-  "description": "grok-xllm — multi-LLM orchestration for Grok Build. CLI advisors (/ask, /xllm), ralph evidence loops, thin team playbooks, first-class local LLMs.",
+  "name": "xllm",
+  "version": "0.20.0",
+  "description": "xllm — cross-vendor LLM advisors for Grok Build. ask/multi opinions, blind panel + measured tiebreaker, adversarial debate/council, trait-profile routing, isolated exec, scribe, first-class local LLMs. Read-only by default.",
   "author": {
-    "name": "grok-xllm contributors"
+    "name": "xllm contributors"
   },
   "repository": "https://github.com/kimmingul/xllm",
   "license": "MIT",
@@ -16,17 +16,11 @@
     "xllm",
     "headless-cli",
     "local-llm",
-    "ollama",
-    "ralph"
+    "ollama"
   ],
   "skills": [
     "./.grok/skills/ask/",
     "./.grok/skills/xllm/",
-    "./.grok/skills/ralph/",
-    "./.grok/skills/team/",
-    "./.grok/skills/verify/",
     "./.grok/skills/xllm-setup/"
-  ],
-  "agents": "./.grok/agents/",
-  "personas": "./.grok/personas/"
+  ]
 }

@@ -12,9 +12,9 @@ description: >
 
 ## Resolve the advisor script
 
-Claude Code: `"${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js"`.
+Claude Code: `"${CLAUDE_PLUGIN_ROOT}/scripts/xllm-advisor.js"`.
 Codex / other hosts: the plugin root is two directories above this SKILL.md —
-use `<plugin-root>/scripts/grok-ask-advisor.js`.
+use `<plugin-root>/scripts/xllm-advisor.js`.
 
 ## Step 1 — Machine inventory (what CAN run here)
 

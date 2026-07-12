@@ -1,12 +1,12 @@
-# Minimal multi-LLM review (grok-xllm)
+# Minimal multi-LLM review (xllm)
 
 ## Shell
 
 ```bash
 node scripts/xllm.mjs doctor
 
-node scripts/grok-ask-advisor.js ollama:qwen3.6:latest "Review scripts/grok-ask-advisor.js for security risks. Bullet list only."
-node scripts/grok-ask-advisor.js codex "Review scripts/grok-ask-advisor.js for security risks and quoting bugs. Bullet list only."
+node scripts/xllm-advisor.js ollama:qwen3.6:latest "Review scripts/xllm-advisor.js for security risks. Bullet list only."
+node scripts/xllm-advisor.js codex "Review scripts/xllm-advisor.js for security risks and quoting bugs. Bullet list only."
 
 node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "Security review of the advisor script; bullets only."
 ```
@@ -15,7 +15,7 @@ node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "Security review of the 
 
 ```text
 /xllm-setup
-/xllm ollama:qwen3.6:latest,codex Review scripts/grok-ask-advisor.js for security and simplicity
+/xllm ollama:qwen3.6:latest,codex Review scripts/xllm-advisor.js for security and simplicity
 ```
 
 ## Ralph micro-task

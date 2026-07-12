@@ -1,4 +1,4 @@
-# Local LLM support — grok-xllm
+# Local LLM support — xllm
 
 Local models are first-class advisors — same artifact contract as cloud CLIs.
 
@@ -13,7 +13,7 @@ Local models are first-class advisors — same artifact contract as cloud CLIs.
 ## Examples
 
 ```bash
-node scripts/grok-ask-advisor.js ollama:qwen3.6:latest "Review this function"
+node scripts/xllm-advisor.js ollama:qwen3.6:latest "Review this function"
 /xllm ollama:qwen3.6:latest,codex "Analyze authentication changes"
 /ralph --critic=ollama:qwen3.6:latest,grok "Build feature X"
 ```

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Unit tests for grok-ask-advisor pure helpers (no live LLM required).
+ * Unit tests for xllm-advisor pure helpers (no live LLM required).
  */
 
 import assert from 'assert';
@@ -38,7 +38,9 @@ import {
   buildProposalPrompt,
   extractProposalPatch,
   writeMultiIndex,
-} from './grok-ask-advisor.js';
+  ollamaBaseUrl,
+  parseOllamaHttpResponse,
+} from './xllm-advisor.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -211,10 +213,31 @@ test('resolveSpawnConfig antigravity model', () => {
   assert.ok(c.args.includes('-p'));
 });
 
-test('resolveSpawnConfig ollama model', () => {
+test('resolveSpawnConfig ollama uses the HTTP API with a stdin payload (v0.20.0)', () => {
+  // No more `ollama run`: the CLI's TTY renderer corrupted long JSON through
+  // pipes and argv delivery hit Windows' 32KB limit. The API returns clean
+  // JSON and the payload rides stdin — unbounded prompt size.
   const c = resolveSpawnConfig('ollama', 'codellama', 'review this');
-  assert.strictEqual(c.binary, 'ollama');
-  assert.deepStrictEqual(c.args.slice(0, 3), ['run', 'codellama', 'review this']);
+  assert.ok(/curl/.test(c.binary));
+  assert.ok(c.args.includes('@-'));
+  assert.ok(c.args.some((a) => /\/api\/generate$/.test(a)));
+  assert.strictEqual(c.usesStdin, true);
+  const payload = JSON.parse(c.stdinPayload);
+  assert.strictEqual(payload.model, 'codellama');
+  assert.strictEqual(payload.prompt, 'review this');
+  assert.strictEqual(payload.stream, false);
+});
+
+test('ollamaBaseUrl normalizes scheme-less OLLAMA_HOST', () => {
+  assert.strictEqual(ollamaBaseUrl({}), 'http://localhost:11434');
+  assert.strictEqual(ollamaBaseUrl({ OLLAMA_HOST: '127.0.0.1:11434' }), 'http://127.0.0.1:11434');
+  assert.strictEqual(ollamaBaseUrl({ OLLAMA_HOST: 'https://gpu-box:11434/' }), 'https://gpu-box:11434');
+});
+
+test('parseOllamaHttpResponse: response, server error, non-JSON', () => {
+  assert.strictEqual(parseOllamaHttpResponse('{"response":"Pong.","done":true}').response, 'Pong.');
+  assert.strictEqual(parseOllamaHttpResponse('{"error":"model not found"}').error, 'model not found');
+  assert.deepStrictEqual(parseOllamaHttpResponse('curl: (7) connection refused'), { error: null, response: null });
 });
 
 test('resolveSpawnConfig codex stdin on long prompt', () => {
@@ -653,7 +676,7 @@ test('execRootDir honors XLLM_EXEC_ROOT', () => {
 // Contract floor (failure taxonomy, retry, capability probes)
 // ---------------------------------------------------------------------------
 
-import { classifyFailure, withRetry } from './grok-ask-advisor.js';
+import { classifyFailure, withRetry } from './xllm-advisor.js';
 import {
   PROVIDER_CONTRACTS,
   probeProviderContract,
@@ -1733,7 +1756,7 @@ test('suggestTiebreaker: trait vetoes exclude candidates; all vetoed → provide
 // Long prompts (Windows argv limit) — --prompt-file + delivery guards
 // ---------------------------------------------------------------------------
 
-import { promptTooLongForArgv, WIN_ARGV_SAFE_CHARS } from './grok-ask-advisor.js';
+import { promptTooLongForArgv, WIN_ARGV_SAFE_CHARS } from './xllm-advisor.js';
 import { PROMPT_FILE_THRESHOLD } from './xllm-structured.js';
 import { spawnSync } from 'child_process';
 
@@ -1752,7 +1775,7 @@ test('--prompt-file: a 40KB prompt round-trips through the advisor (dry-run)', (
     fs.writeFileSync(f, `reply with OK\n${'x'.repeat(40000)}`, 'utf8');
     const r = spawnSync(
       process.execPath,
-      [path.join(root, 'scripts', 'grok-ask-advisor.js'), '--dry-run', 'grok', '--prompt-file', f],
+      [path.join(root, 'scripts', 'xllm-advisor.js'), '--dry-run', 'grok', '--prompt-file', f],
       { encoding: 'utf8', shell: false, timeout: 30000 }
     );
     assert.strictEqual(r.status, 0); // argv delivery of the same prompt could not even spawn
@@ -1761,7 +1784,7 @@ test('--prompt-file: a 40KB prompt round-trips through the advisor (dry-run)', (
     // missing file fails loudly, not silently
     const bad = spawnSync(
       process.execPath,
-      [path.join(root, 'scripts', 'grok-ask-advisor.js'), '--dry-run', 'grok', '--prompt-file', path.join(tmp, 'nope.txt')],
+      [path.join(root, 'scripts', 'xllm-advisor.js'), '--dry-run', 'grok', '--prompt-file', path.join(tmp, 'nope.txt')],
       { encoding: 'utf8', shell: false, timeout: 30000 }
     );
     assert.notStrictEqual(bad.status, 0);
@@ -1769,6 +1792,16 @@ test('--prompt-file: a 40KB prompt round-trips through the advisor (dry-run)', (
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('legacy grok-ask-advisor.js path forwards to xllm-advisor.js (deprecation shim)', () => {
+  const r = spawnSync(
+    process.execPath,
+    [path.join(root, 'scripts', 'grok-ask-advisor.js'), '--list-providers'],
+    { encoding: 'utf8', shell: false, timeout: 30000 }
+  );
+  assert.strictEqual(r.status, 0);
+  assert.ok(r.stdout.includes('ollama'));
 });
 
 console.log(`\n${passed} tests passed`);

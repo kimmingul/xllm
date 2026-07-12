@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Optional live smoke for READY providers.
- * Safe defaults: only runs if XLLM_SMOKE=1 / OMG_SMOKE=1 or --live is passed.
+ * Safe defaults: only runs if XLLM_SMOKE=1 or --live is passed.
  * Without --live: dry-run + unit checks only.
  *
  *   node scripts/smoke.mjs
@@ -15,11 +15,10 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const advisor = path.join(root, 'scripts', 'grok-ask-advisor.js');
+const advisor = path.join(root, 'scripts', 'xllm-advisor.js');
 const live =
   process.argv.includes('--live') ||
-  process.env.XLLM_SMOKE === '1' ||
-  process.env.OMG_SMOKE === '1';
+  process.env.XLLM_SMOKE === '1';
 const providerFilter = (() => {
   const i = process.argv.indexOf('--provider');
   return i >= 0 ? process.argv[i + 1] : null;
@@ -35,7 +34,7 @@ function run(args, opts = {}) {
   });
 }
 
-console.log(`grok-xllm smoke (live=${live})`);
+console.log(`xllm smoke (live=${live})`);
 
 const doc = run(['--doctor']);
 if (doc.status !== 0 && doc.status !== 2) {
@@ -102,7 +101,7 @@ console.log('exit:', liveRes.status);
 if (artifactLine && fs.existsSync(artifactLine)) {
   console.log('artifact:', artifactLine);
   const body = fs.readFileSync(artifactLine, 'utf8');
-  const hasToken = /XLLM_SMOKE_OK|OMG_SMOKE_OK/i.test(body);
+  const hasToken = /XLLM_SMOKE_OK/i.test(body);
   console.log('token in artifact:', hasToken ? 'yes' : 'no (model may have paraphrased)');
 } else {
   console.log('stdout/stderr tail:\n', out.slice(-1500));

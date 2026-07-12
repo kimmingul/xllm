@@ -16,8 +16,8 @@ Providers run concurrently (one child process each).
 ## Run
 
 Resolve the advisor script exactly as in the `ask` skill (Claude Code:
-`${CLAUDE_PLUGIN_ROOT}/scripts/grok-ask-advisor.js`; Codex/other hosts:
-`<plugin-root>/scripts/grok-ask-advisor.js` two directories above this
+`${CLAUDE_PLUGIN_ROOT}/scripts/xllm-advisor.js`; Codex/other hosts:
+`<plugin-root>/scripts/xllm-advisor.js` two directories above this
 SKILL.md; any host: the `.xllm/xllm-advisor-path` marker), then:
 
 ```bash

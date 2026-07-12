@@ -33,7 +33,7 @@ import {
   slugify,
   getProviderCostMeta,
   detectAvailableProviders,
-} from './grok-ask-advisor.js';
+} from './xllm-advisor.js';
 import { suggestTiebreaker } from './xllm-routing.js';
 import { loadTraits } from './xllm-traits.js';
 import {

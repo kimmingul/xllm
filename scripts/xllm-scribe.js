@@ -28,7 +28,7 @@ import {
   getProviderCostMeta,
   loadProviderProfiles,
   cleanModelText,
-} from './grok-ask-advisor.js';
+} from './xllm-advisor.js';
 import { pickAdvisorForRole } from './xllm-routing.js';
 
 const MAX_CONTEXT_BYTES = 24 * 1024;

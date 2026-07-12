@@ -1,4 +1,4 @@
-# grok-xllm provider profiles
+# xllm provider profiles
 # Copy/override per project. Search order:
 #   1. $XLLM_PROVIDERS_PATH
 #   2. ./.grok/xllm-providers.toml  (this file when in project)

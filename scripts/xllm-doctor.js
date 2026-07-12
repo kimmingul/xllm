@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Thin wrapper: node scripts/xllm-doctor.js
- * Delegates to grok-ask-advisor --doctor and prints a human summary.
+ * Delegates to xllm-advisor --doctor and prints a human summary.
  */
 
 import { spawnSync } from 'child_process';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const advisor = path.join(__dirname, 'grok-ask-advisor.js');
+const advisor = path.join(__dirname, 'xllm-advisor.js');
 
 const res = spawnSync(process.execPath, [advisor, '--doctor'], {
   encoding: 'utf8',
@@ -32,7 +32,7 @@ try {
   process.exit(res.status || 0);
 }
 
-console.log(`grok-xllm doctor v${report.version}`);
+console.log(`xllm doctor v${report.version}`);
 console.log(`platform: ${report.platform}`);
 console.log(`cwd: ${report.cwd}`);
 if (report.advisorPath) {

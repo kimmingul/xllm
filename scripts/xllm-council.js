@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import process from 'process';
-import { ensureArtifactDirs, redactSecrets, slugify } from './grok-ask-advisor.js';
+import { ensureArtifactDirs, redactSecrets, slugify } from './xllm-advisor.js';
 import { runPanel, ledgerPath } from './xllm-panel.js';
 import { parseDebaters, capClaims, runDebateOnClaims, MAX_CLAIMS } from './xllm-debate.js';
 import { canonicalSpecKey } from './xllm-traits.js';

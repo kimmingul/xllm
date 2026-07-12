@@ -53,7 +53,8 @@ until `npm run ci` is green locally.
 1. Bump the version in ALL of: `package.json`, `plugin.json`,
    `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` (two
    fields), `.codex-plugin/plugin.json`, and `VERSION` in
-   `scripts/xllm-advisor.js`; update the badge in `README.md`.
+   `scripts/xllm-advisor.js`; update the badge + test count in `README.md`
+   and the test-count stat in `docs/index.html` (GitHub Pages).
 2. Add a `CHANGELOG.md` entry (what + why + live-verification evidence).
 3. `npm run ci` green; live e2e for behavior that has a runtime surface.
 4. Commit, then tag: `git tag -a vX.Y.Z -m "xllm vX.Y.Z"` and push the tag.

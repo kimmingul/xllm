@@ -1426,4 +1426,235 @@ test('pickTeamAdvisors returns multiple picks', () => {
   assert.ok(plan.picks.implement || plan.picks.security);
 });
 
+// ---------------------------------------------------------------------------
+// Traits (evidence-based provider profiles → measured routing)
+// ---------------------------------------------------------------------------
+
+import {
+  canonicalSpecKey,
+  wilson95Lower,
+  deriveTraitProfiles,
+  healthDecision,
+  adherenceVeto,
+  sharedBenchComparison,
+  TRAIT_GATES,
+} from './xllm-traits.js';
+
+test('canonicalSpecKey strips effort, keeps model identity', () => {
+  assert.strictEqual(canonicalSpecKey('codex:gpt-5.5@high'), 'codex:gpt-5.5');
+  assert.strictEqual(canonicalSpecKey('Codex@xhigh'), 'codex');
+  assert.strictEqual(canonicalSpecKey('ollama:qwen3.6:latest'), 'ollama:qwen3.6:latest');
+});
+
+test('wilson95Lower exposes small-n uncertainty (6/6 raw=1.0 → LCB≈0.61)', () => {
+  assert.ok(Math.abs(wilson95Lower(6, 6) - 0.6097) < 0.001);
+  assert.ok(wilson95Lower(12, 12) > wilson95Lower(6, 6)); // more evidence → tighter bound
+  assert.strictEqual(wilson95Lower(0, 0), null);
+});
+
+const T_NOW = Date.parse('2026-07-12T00:00:00Z');
+const tIso = (msAgo) => new Date(T_NOW - msAgo).toISOString();
+
+test('deriveTraitProfiles: adherence, survival, bench dedup, exclusions', () => {
+  const t = deriveTraitProfiles({
+    now: T_NOW,
+    ledgerRecords: [
+      // no created_at → excluded from all routing aggregates
+      { type: 'panel', run_id: 'old', adherence: { codex: { first: 5, retry: 0, failed: 0 } } },
+      {
+        type: 'panel',
+        run_id: 'p1',
+        created_at: tIso(1000),
+        adherence: { codex: { first: 2, retry: 1, failed: 1 } },
+        panelists: [{ spec: 'codex' }, { spec: 'grok' }],
+      },
+      { type: 'tiebreak', created_at: tIso(900), panelist: { spec: 'claude', adherence: 'first' } },
+      {
+        type: 'debate',
+        created_at: tIso(800),
+        adherence: { grok: { first: 3, retry: 0, failed: 0 } },
+        claims: [
+          { author: 'grok', status: 'KILLED', attacks: [{ by: 'codex', stance: 'refute', tier: 'decisive' }] },
+          { author: 'codex', status: 'SURVIVED', attacks: [] },
+        ],
+      },
+      { type: 'outcome', run_id: 'p1', created_at: tIso(700), adopted: 'codex', helpful: true },
+    ],
+    benchReports: [
+      {
+        created_at: tIso(5000),
+        single: { codex: { per_task: { t1: { hits: ['d1'], misses: ['d2'] } }, duration_ms: 1000, graded_tasks: 1 } },
+      },
+      {
+        // newer observation of the SAME {spec, task} replaces the older one —
+        // reruns must not manufacture n
+        created_at: tIso(1000),
+        single: { codex: { per_task: { t1: { hits: ['d1', 'd2'], misses: [] } }, duration_ms: 900, graded_tasks: 1 } },
+      },
+    ],
+    contracts: {
+      probed_at: tIso(3600 * 1000),
+      providers: {
+        codex: { ok: true, failure: null },
+        gemini: { ok: false, failure: { kind: 'auth', retryable: false } },
+      },
+    },
+  });
+  const cx = t.specs.codex;
+  assert.strictEqual(cx.structured_output.n, 4); // timestamp-less record excluded
+  assert.strictEqual(cx.structured_output.success_rate, 0.75);
+  assert.strictEqual(t.excluded.no_timestamp, 1);
+  assert.strictEqual(t.specs.claude.structured_output.first, 1);
+  assert.strictEqual(t.specs.grok.claim_survival.killed, 1);
+  assert.strictEqual(t.specs.grok.claim_survival.rate, 0);
+  assert.strictEqual(t.providers.codex.decisive_refutation.decisive_attacks, 1);
+  assert.strictEqual(t.providers.codex.decisive_refutation.associated_kills, 1);
+  // outcomes joined via the panel roster
+  assert.strictEqual(cx.outcome_useful_adoption.adopted_helpful, 1);
+  assert.strictEqual(t.specs.grok.outcome_useful_adoption.n, 1);
+  assert.strictEqual(t.specs.grok.outcome_useful_adoption.adopted_helpful, 0);
+  // bench dedup: newest t1 wins → 2 cells, both hits, below the n≥6 gate
+  assert.strictEqual(cx.bench_defect_detection.n, 2);
+  assert.strictEqual(cx.bench_defect_detection.detected, 2);
+  assert.strictEqual(cx.bench_defect_detection.gated, false);
+  assert.strictEqual(cx.latency_ms.mean_ms_per_task, 950);
+  assert.strictEqual(t.health.gemini.kind, 'auth');
+  assert.strictEqual(t.health.gemini.fresh, true);
+});
+
+test('healthDecision: explicit authority, stale ignored, detection contradiction ignored', () => {
+  const health = {
+    gemini: { kind: 'auth', retryable: false, fresh: true },
+    cursor: { kind: 'missing-binary', retryable: false, fresh: true },
+    codex: { kind: 'transient', retryable: true, fresh: true },
+    grok: { kind: 'auth', retryable: false, fresh: false }, // stale
+  };
+  assert.strictEqual(healthDecision('gemini', health, { readySource: 'explicit' }), 'ignore');
+  assert.strictEqual(healthDecision('gemini', health, { readySource: 'detected' }), 'veto');
+  assert.strictEqual(
+    healthDecision('cursor', health, { readySource: 'detected', detectedReady: ['cursor'] }),
+    'ignore'
+  );
+  assert.strictEqual(healthDecision('cursor', health, { readySource: 'detected', detectedReady: [] }), 'veto');
+  assert.strictEqual(healthDecision('codex', health, { readySource: 'detected' }), 'demote');
+  assert.strictEqual(healthDecision('grok', health, { readySource: 'detected' }), 'ignore');
+  assert.strictEqual(healthDecision('claude', health, { readySource: 'detected' }), 'ignore');
+});
+
+test('adherenceVeto fires only at n≥10 && failed rate ≥ 0.25', () => {
+  const mk = (first, failed) => ({
+    specs: { claude: { structured_output: { first, retry: 0, failed, n: first + failed } } },
+  });
+  assert.strictEqual(adherenceVeto('claude', mk(8, 4)), true); // 4/12 = 0.33
+  assert.strictEqual(adherenceVeto('claude@high', mk(8, 4)), true); // canonical key
+  assert.strictEqual(adherenceVeto('claude', mk(9, 1)), false); // rate below threshold
+  assert.strictEqual(adherenceVeto('claude', mk(3, 3)), false); // n below gate
+  assert.strictEqual(adherenceVeto('grok', mk(8, 4)), false); // no evidence
+});
+
+/** Bench trait over taskCount tasks × 3 defects, hitsPerTask of them detected. */
+function benchFixture(taskCount, hitsPerTask) {
+  const cells = {};
+  let detected = 0;
+  let n = 0;
+  for (let ti = 1; ti <= taskCount; ti++) {
+    for (let d = 1; d <= 3; d++) {
+      const hit = d <= hitsPerTask;
+      cells[`t${ti}::d${d}`] = hit;
+      if (hit) detected += 1;
+      n += 1;
+    }
+  }
+  return {
+    cells,
+    detected,
+    n,
+    tasks: taskCount,
+    rate: +(detected / n).toFixed(3),
+    wilson95_lower: wilson95Lower(detected, n),
+    gated: n >= TRAIT_GATES.bench_min_cells,
+  };
+}
+
+test('sharedBenchComparison uses exact shared {task, defect} opportunities', () => {
+  const a = benchFixture(4, 3); // 12/12
+  const b = benchFixture(5, 1); // 5/15 — extra task t5 is NOT shared
+  const cmp = sharedBenchComparison(a, b);
+  assert.strictEqual(cmp.shared_opportunities, 12);
+  assert.strictEqual(cmp.shared_tasks, 4);
+  assert.ok(cmp.candidate_lcb > cmp.baseline_lcb);
+  assert.strictEqual(sharedBenchComparison(a, null), null);
+});
+
+test('pickAdvisorForRole: cold-start identity — empty traits change nothing', () => {
+  const opts = { taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
+  const before = pickAdvisorForRole('critic', opts);
+  const after = pickAdvisorForRole('critic', {
+    ...opts,
+    readySource: 'detected',
+    traits: { version: 1, specs: {}, health: {} },
+  });
+  assert.strictEqual(after.provider, before.provider);
+  assert.strictEqual(after.spec, before.spec);
+  assert.strictEqual(after.trait_decisions, undefined);
+});
+
+test('pickAdvisorForRole: measured bench LCB can cross the legacy order under gates', () => {
+  const opts = { taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
+  const baseline = pickAdvisorForRole('critic', opts).provider;
+  const other = baseline === 'grok' ? 'codex' : 'grok';
+  const traits = {
+    version: 1,
+    health: {},
+    specs: {
+      [baseline]: { bench_defect_detection: benchFixture(4, 1) }, // 4/12 → LCB≈0.14
+      [other]: { bench_defect_detection: benchFixture(4, 3) }, // 12/12 → LCB≈0.76
+    },
+  };
+  const pick = pickAdvisorForRole('critic', { ...opts, readySource: 'detected', traits });
+  assert.strictEqual(pick.provider, other);
+  assert.ok(pick.reason.includes('measured bench'));
+  assert.strictEqual(pick.trait_decisions[0].via, 'lcb-margin');
+  assert.ok(pick.trait_decisions[0].shared_opportunities >= TRAIT_GATES.bench_min_shared_opportunities);
+});
+
+test('pickAdvisorForRole: below shared-opportunity gates the measured layer is silent', () => {
+  const opts = { taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
+  const baseline = pickAdvisorForRole('critic', opts).provider;
+  const other = baseline === 'grok' ? 'codex' : 'grok';
+  const traits = {
+    version: 1,
+    health: {},
+    specs: {
+      [baseline]: { bench_defect_detection: benchFixture(3, 1) }, // only 9 shared opportunities
+      [other]: { bench_defect_detection: benchFixture(3, 3) },
+    },
+  };
+  const pick = pickAdvisorForRole('critic', { ...opts, readySource: 'detected', traits });
+  assert.strictEqual(pick.provider, baseline);
+  assert.strictEqual(pick.trait_decisions, undefined);
+});
+
+test('suggestTiebreaker: trait vetoes exclude candidates; all vetoed → provider null', () => {
+  const traits = {
+    version: 1,
+    health: { gemini: { kind: 'auth', retryable: false, fresh: true } },
+    specs: { claude: { structured_output: { first: 8, retry: 0, failed: 4, n: 12 } } },
+  };
+  // adherence veto on claude, health veto on gemini → codex remains
+  const t = suggestTiebreaker(['ollama:llama3.2'], ['claude', 'gemini', 'codex'], [], null, traits);
+  assert.strictEqual(t.provider, 'codex');
+  const none = suggestTiebreaker(['ollama:llama3.2'], ['claude', 'gemini'], [], null, traits);
+  assert.strictEqual(none.provider, null);
+  assert.ok(/vetoed/.test(none.reason));
+  // the measured selection itself is untouched (v0.15.0): agreement wins at n=1
+  const matrix = [{ pair: 'claude ↔ ollama:llama3.2', agreement_rate: 0, comparable_runs: 1 }];
+  const noVeto = suggestTiebreaker(['ollama:llama3.2'], ['claude', 'codex'], matrix, null, {
+    version: 1,
+    specs: {},
+    health: {},
+  });
+  assert.strictEqual(noVeto.provider, 'claude');
+});
+
 console.log(`\n${passed} tests passed`);

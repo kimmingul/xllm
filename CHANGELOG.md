@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.16.0 — 2026-07-12
+
+### Added — evidence-based trait profiles: measured routing for the general pick
+v0.15.0 let measurement pick the tiebreaker; v0.16.0 lets measurement pick
+the PROVIDER. Designed by a 3-round codex@high × grok@high adversarial review
+(`docs/traits-design.md`; six of seven issues converged on code facts, the
+seventh — whether measurement may move spend across tiers — was adjudicated
+by the user for the cross-tier position).
+
+- `scripts/xllm-traits.js` — pure, on-demand derivation over evidence that
+  already exists (no cache, no daemon, no hand-authored lore):
+  - ledger → structured-output **adherence** per spec (first/retry/failed),
+    debate **claim survival** per author, **outcomes** (both inspect-only for
+    routing), decisive-refutation diagnostics (inspect-only: the ledger does
+    not persist which attack the classifier selected).
+  - `benchmarks/results/*.json` → **seeded-defect detection cells**,
+    deduplicated to the newest observation per `{canonical_spec, task_id}`
+    (reruns cannot manufacture n), summarized as a **Wilson 95% lower bound**
+    (6/6 raw = 1.0 but LCB ≈ 0.61 — small-n theater dies here).
+  - `~/.xllm/contracts.json` → current health, consumed kind-aware.
+  - Canonical spec keys (effort stripped); NO sibling-model rollup — a routed
+    pick spawns its resolved model, so sibling evidence is about an
+    executable that won't run. 180-day horizon; per-stream caps; records
+    without `created_at` never route.
+- `pickAdvisorForRole` — for judgment roles (`critic|verify|tests|security`)
+  measured bench quality may now cross tier/cost boundaries, but only under
+  ALL gates: capability floor passes, ≥2 measured candidates, baseline
+  measured, ≥4 shared task_ids, ≥12 exact shared `{task_id, defect_id}`
+  opportunities, and candidate LCB ≥ baseline LCB + 0.10 (or cheaper within
+  −0.03 — measured parity buys the discount). Health: explicit `--ready=` is
+  authoritative; with detected ready sets only FRESH (≤24h) `auth`/
+  `contract-drift` failures veto (the kinds detection can't see), and a
+  `missing-binary` verdict contradicted by live detection is ignored as
+  stale. Reasons cite trait, LCB, n, and shared-opportunity counts.
+- `suggestTiebreaker` — health + adherence VETOES only (n≥10 && failed≥25%
+  never buys the one blind call; all-vetoed → the existing `unavailable`
+  path). The v0.15.0 lowest-measured-agreement selection at
+  `comparable_runs ≥ 1` is untouched.
+- `xllm traits [--json]` CLI (sample sizes always visible); `--no-traits` on
+  pick/pick-team. **Cold start is bit-identical to pre-traits routing** —
+  library callers that pass no traits get exactly the old ordering.
+- Live e2e: with an empty `benchmarks/results/` the pick is byte-identical
+  with and without traits; with a fixture bench file `pick critic` moved
+  grok→codex citing `LCB 0.7018 vs 0.1518 over 15 shared opportunities`,
+  and reverted on fixture removal. Tests 111 → 121.
+
 ## 0.15.0 — 2026-07-12
 
 ### Added — measured tiebreaker: the measurement→routing loop is closed

@@ -17,6 +17,15 @@ import {
   detectAvailableProviders,
   getProviderCostMeta,
 } from './grok-ask-advisor.js';
+import {
+  healthDecision,
+  adherenceVeto,
+  sharedBenchComparison,
+  resolveCandidateKey,
+  loadTraits,
+  TRAIT_GATES,
+  ROUTABLE_BENCH_ROLES,
+} from './xllm-traits.js';
 import process from 'process';
 
 /** Canonical roles used by /team and routing table */
@@ -401,6 +410,100 @@ export function pickAdvisorForRole(role, options = {}) {
     ? new Set(options.readyProviders.map((p) => String(p).toLowerCase()))
     : null;
 
+  // Measured routing layer (docs/traits-design.md). With no traits object
+  // this whole block is inert — ordering stays bit-identical to pre-traits
+  // behavior (cold-start identity). Role pins bypass it entirely.
+  const traits = options.useTraits === false ? null : options.traits || null;
+  const readySource = options.readySource || (options.readyProviders ? 'detected' : 'absent');
+  const traitDecisions = [];
+  let healthOverride = null;
+  let benchDecision = null;
+  if (traits && traits.health && !route.pinned) {
+    const keep = [];
+    const demoted = [];
+    const vetoed = [];
+    for (const raw of providerOrder) {
+      const p = resolvePreferredProvider(raw, profiles).provider;
+      const d = healthDecision(p, traits.health, {
+        readySource,
+        detectedReady: options.readyProviders || null,
+      });
+      if (d === 'veto') {
+        vetoed.push(raw);
+        traitDecisions.push({ trait: 'health', provider: p, action: 'veto', kind: traits.health[p]?.kind });
+      } else if (d === 'demote') {
+        demoted.push(raw);
+        traitDecisions.push({ trait: 'health', provider: p, action: 'demote', kind: traits.health[p]?.kind });
+      } else {
+        keep.push(raw);
+      }
+    }
+    if (!keep.length && !demoted.length && vetoed.length) {
+      // Never invent availability: keep the legacy order but say so loudly.
+      healthOverride = 'all-candidates-blocked';
+    } else {
+      providerOrder = [...keep, ...demoted];
+    }
+  }
+  if (traits && traits.specs && !route.pinned && ROUTABLE_BENCH_ROLES.includes(normRole)) {
+    const cands = providerOrder
+      .map((raw) => ({ raw, p: resolvePreferredProvider(raw, profiles).provider }))
+      .filter((c) => !ready || ready.has(c.p))
+      .map((c) => {
+        const key = resolveCandidateKey(c.p, route, profiles);
+        const b = traits.specs[key]?.bench_defect_detection;
+        const meta = getProviderCostMeta(c.p, profiles);
+        return {
+          ...c,
+          key,
+          bench: b && b.gated ? b : null,
+          floorOk: passesCapabilityFloor(normRole, key, { tier: meta.tier }).ok,
+          cost: meta.relative_cost,
+        };
+      });
+    const baseline = cands[0];
+    const measured = cands.filter((c) => c.bench && c.floorOk);
+    // Preconditions: baseline itself measured; ≥2 measured floor-passing
+    // candidates. A measured candidate never overrides an unmeasured baseline.
+    if (baseline && baseline.bench && baseline.floorOk && measured.length >= 2) {
+      const qualifying = [];
+      for (const c of measured) {
+        if (c.p === baseline.p) continue;
+        const cmp = sharedBenchComparison(c.bench, baseline.bench);
+        if (
+          !cmp ||
+          cmp.shared_tasks < TRAIT_GATES.bench_min_shared_tasks ||
+          cmp.shared_opportunities < TRAIT_GATES.bench_min_shared_opportunities
+        )
+          continue;
+        const jump = cmp.candidate_lcb >= cmp.baseline_lcb + TRAIT_GATES.bench_lcb_margin;
+        const cheaperParity =
+          c.cost < baseline.cost && cmp.candidate_lcb >= cmp.baseline_lcb - TRAIT_GATES.bench_lcb_parity;
+        if (jump || cheaperParity) qualifying.push({ ...c, cmp, via: jump ? 'lcb-margin' : 'cheaper-parity' });
+      }
+      if (qualifying.length) {
+        qualifying.sort((a, b) => b.cmp.candidate_lcb - a.cmp.candidate_lcb || a.cost - b.cost);
+        const bestLcb = qualifying[0].cmp.candidate_lcb;
+        const near = qualifying
+          .filter((q) => bestLcb - q.cmp.candidate_lcb <= TRAIT_GATES.bench_lcb_parity)
+          .sort((a, b) => a.cost - b.cost);
+        const winner = near[0];
+        providerOrder = [winner.raw, ...providerOrder.filter((r) => r !== winner.raw)];
+        benchDecision = {
+          trait: 'bench_defect_detection',
+          selected: winner.key,
+          baseline: baseline.key,
+          via: winner.via,
+          candidate_lcb: winner.cmp.candidate_lcb,
+          baseline_lcb: winner.cmp.baseline_lcb,
+          shared_tasks: winner.cmp.shared_tasks,
+          shared_opportunities: winner.cmp.shared_opportunities,
+        };
+        traitDecisions.push(benchDecision);
+      }
+    }
+  }
+
   const tried = [];
   let chosen = null;
   let substituted = null;
@@ -480,11 +583,20 @@ export function pickAdvisorForRole(role, options = {}) {
     native_agent: route.native_agent || null,
     prefer_native: preferNative,
     use_native: useNative,
-    reason: route.notes || '',
+    reason: [
+      route.notes || '',
+      benchDecision
+        ? `measured bench: ${benchDecision.selected} LCB ${benchDecision.candidate_lcb} vs ${benchDecision.baseline} ${benchDecision.baseline_lcb} over ${benchDecision.shared_opportunities} shared opportunities (${benchDecision.shared_tasks} tasks, via ${benchDecision.via})`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
     fallbacks: tried.filter((p) => p !== chosen),
     substituted,
     route_effort_base: route.effort,
     pinned: !!route.pinned,
+    ...(traitDecisions.length ? { trait_decisions: traitDecisions } : {}),
+    ...(healthOverride ? { health_override: healthOverride } : {}),
     cost: getProviderCostMeta(chosen, profiles),
     capability_floor: passesCapabilityFloor(normRole, spec, {
       tier: getProviderCostMeta(chosen, profiles).tier,
@@ -503,11 +615,41 @@ export function pickAdvisorForRole(role, options = {}) {
  * @param ready    available provider names
  * @param ledgerMatrix  [{pair:"a ↔ b", agreement_rate}] from `panel stats`
  */
-export function suggestTiebreaker(onPanel, ready, ledgerMatrix = [], profiles = null) {
+export function suggestTiebreaker(onPanel, ready, ledgerMatrix = [], profiles = null, traits = null, opts = {}) {
   const prof = profiles || loadProviderProfiles();
   const onSet = new Set(onPanel.map((s) => String(s).split(/[:@]/)[0].toLowerCase()));
-  const candidates = ready.filter((p) => !onSet.has(String(p).toLowerCase()));
+  let candidates = ready.filter((p) => !onSet.has(String(p).toLowerCase()));
   if (!candidates.length) return { provider: null, reason: 'no unconsulted providers available' };
+
+  // Trait vetoes (docs/traits-design.md D′): never spend the one blind call on
+  // a provider whose contracts freshly fail in ways detection can't see, or a
+  // known ≥25% structured-output abstainer (n≥10). Transient/demote-class
+  // health is ignored here — measurement dominates and retry is runtime's job.
+  // Selection itself is untouched: lowest measured agreement at any
+  // comparable_runs ≥ 1 (the v0.15.0 loop stays exactly as shipped).
+  if (traits) {
+    const vetoes = [];
+    candidates = candidates.filter((p) => {
+      const hd = healthDecision(p, traits.health || {}, {
+        readySource: opts.readySource || 'detected',
+        detectedReady: ready,
+      });
+      if (hd === 'veto') {
+        vetoes.push(`${p}: health ${traits.health[p]?.kind}`);
+        return false;
+      }
+      if (adherenceVeto(resolveCandidateKey(p, null, prof), traits)) {
+        vetoes.push(
+          `${p}: structured-output failed rate ≥${TRAIT_GATES.adherence_veto_failed_rate} at n≥${TRAIT_GATES.adherence_veto_n}`
+        );
+        return false;
+      }
+      return true;
+    });
+    if (!candidates.length) {
+      return { provider: null, reason: `all unconsulted candidates vetoed (${vetoes.join('; ')})` };
+    }
+  }
 
   // Score candidates by lowest measured agreement against any panelist.
   const agreementFor = (cand) => {
@@ -628,7 +770,9 @@ Options:
   --intensity=low|medium|high
   --force-cli          Prefer CLI even if role prefers native
   --force-native       Prefer native agent
-  --ready=codex,ollama Comma list of READY providers (else detect installed binaries)
+  --ready=codex,ollama Comma list of READY providers (else detect installed binaries);
+                       an explicit list is authoritative (contracts health ignored)
+  --no-traits          Disable measured trait routing (legacy/debug path)
   --json               JSON output
 `);
   process.exit(1);
@@ -655,6 +799,7 @@ function parseCli(argv) {
         .map((s) => s.trim())
         .filter(Boolean);
     } else if (a === '--allow-below-floor') flags.allowBelowFloor = true;
+    else if (a === '--no-traits') flags.noTraits = true;
     else if (a === '--json') flags.json = true;
     else if (a === '--help' || a === '-h') flags.help = true;
     else positional.push(a);
@@ -692,6 +837,8 @@ function main() {
       forceNative: flags.forceNative,
       allowBelowFloor: flags.allowBelowFloor,
       readyProviders: flags.readyProviders || detectAvailableProviders(),
+      readySource: flags.readyProviders ? 'explicit' : 'detected',
+      traits: flags.noTraits ? null : loadTraits(process.cwd()),
     });
     if (flags.json) console.log(JSON.stringify(pick, null, 2));
     else {
@@ -715,6 +862,8 @@ function main() {
       forceCli: flags.forceCli,
       forceNative: flags.forceNative,
       readyProviders: flags.readyProviders || detectAvailableProviders(),
+      readySource: flags.readyProviders ? 'explicit' : 'detected',
+      traits: flags.noTraits ? null : loadTraits(process.cwd()),
     });
     if (flags.json) {
       console.log(JSON.stringify(plan, null, 2));

@@ -35,6 +35,7 @@ import {
   detectAvailableProviders,
 } from './grok-ask-advisor.js';
 import { suggestTiebreaker } from './xllm-routing.js';
+import { loadTraits } from './xllm-traits.js';
 import {
   extractJson,
   askStructured,
@@ -324,7 +325,11 @@ export async function runPanel({
     // run's pairwise rows (on-panel only) never mention them.
     const matrix = ledgerStats(readLedger(root)).matrix;
     const onPanel = parsed.map((p) => p.spec);
-    suggestion = suggestTiebreaker(onPanel, readyList, matrix);
+    // Traits add health/adherence VETOES only (docs/traits-design.md D′);
+    // the lowest-measured-agreement selection itself is untouched.
+    suggestion = suggestTiebreaker(onPanel, readyList, matrix, null, loadTraits(root), {
+      readySource: override ? 'explicit' : 'detected',
+    });
     const suggestId = panelId();
     appendLedger(
       {

@@ -25,6 +25,7 @@ const contracts = path.join(__dirname, 'xllm-contracts.js');
 const panel = path.join(__dirname, 'xllm-panel.js');
 const debate = path.join(__dirname, 'xllm-debate.js');
 const council = path.join(__dirname, 'xllm-council.js');
+const traits = path.join(__dirname, 'xllm-traits.js');
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -52,6 +53,7 @@ Commands:
   panel outcome <id> …   Record what the host adopted (decision-adoption loop)
   debate run p1,p2 <q>   ADVERSARIAL: models refute each other → survived/killed/unresolved (maximize quality)
   council run p1,p2 <q>  PIPELINE: panel (independent) → debate (adversarial), one command
+  traits [--json]        Evidence-based provider trait profiles (measured, gated, never lore)
   propose <p> <change>   Read-only change proposal → artifact + .patch (host applies)
   exec <p> <task>        Isolated executor: ephemeral clone → verified ref + evidence
                          (capable providers only; user's checkout never touched)
@@ -140,6 +142,9 @@ switch (cmd) {
     break;
   case 'council':
     run(council, rest);
+    break;
+  case 'traits':
+    run(traits, rest);
     break;
   case 'propose':
     if (rest.length < 2) {

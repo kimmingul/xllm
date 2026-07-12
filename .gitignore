@@ -42,3 +42,6 @@ Thumbs.db
 .xllm/exec-registry.json
 benchmarks/results/*
 !benchmarks/results/.gitkeep
+
+# Machine-local Claude notes
+CLAUDE.local.md

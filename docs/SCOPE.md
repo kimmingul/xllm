@@ -49,5 +49,4 @@ provide:
 
 Product name: **xllm** (cross-vendor multi-LLM). One repo, three host
 adapters (`.claude-plugin/`, `.codex-plugin/` + `.agents/`, `.grok/`).
-The advisor core is `scripts/xllm-advisor.js` (the legacy
-`grok-ask-advisor.js` path forwards for one or two releases).
+The advisor core is `scripts/xllm-advisor.js`.

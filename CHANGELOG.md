@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.21.0 — 2026-07-12
+
+### Removed — the grok-ask-advisor.js deprecation shim
+The forwarding shim shipped in v0.20.0 is gone; `scripts/xllm-advisor.js`
+is the only advisor entry point. Removal was preceded by a marker audit
+(twice): zero references to the old path remained — this repo's
+`xllm-advisor-path` marker had already regenerated to the new name, the
+legacy grok-xllm checkout resolves to its own self-contained copy, and no
+`XLLM_ADVISOR_PATH` env overrides exist. Anyone landing here from a stale
+reference: run `node scripts/xllm.mjs remember` to regenerate the marker.
+Tests 129 → 128 (the shim forwarding test went with it).
+
 ## 0.20.0 — 2026-07-12
 
 ### Changed — the grok-xllm era is over: names, adapter, and state now say xllm

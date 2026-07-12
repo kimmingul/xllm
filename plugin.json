@@ -1,6 +1,6 @@
 {
   "name": "xllm",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "xllm — cross-vendor LLM advisors for Grok Build. ask/multi opinions, blind panel + measured tiebreaker, adversarial debate/council, trait-profile routing, isolated exec, scribe, first-class local LLMs. Read-only by default.",
   "author": {
     "name": "xllm contributors"

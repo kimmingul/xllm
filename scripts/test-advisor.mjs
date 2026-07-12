@@ -1794,14 +1794,4 @@ test('--prompt-file: a 40KB prompt round-trips through the advisor (dry-run)', (
   }
 });
 
-test('legacy grok-ask-advisor.js path forwards to xllm-advisor.js (deprecation shim)', () => {
-  const r = spawnSync(
-    process.execPath,
-    [path.join(root, 'scripts', 'grok-ask-advisor.js'), '--list-providers'],
-    { encoding: 'utf8', shell: false, timeout: 30000 }
-  );
-  assert.strictEqual(r.status, 0);
-  assert.ok(r.stdout.includes('ollama'));
-});
-
 console.log(`\n${passed} tests passed`);

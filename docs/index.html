@@ -254,7 +254,22 @@
       <div class="card">
         <div class="ico">🧭</div>
         <h3>Blind panel + ledger</h3>
-        <p>Send the identical prompt to N models, blind. Structured verdicts land in an append-only ledger before any prose — with a pairwise agreement matrix.</p>
+        <p>Send the identical prompt to N models, blind. Structured verdicts land in an append-only ledger before any prose — with a pairwise agreement matrix. On a split, the tiebreaker is the unconsulted model with the <em>lowest</em> measured agreement — never a prettier pedigree.</p>
+      </div>
+      <div class="card">
+        <div class="ico">⚔️</div>
+        <h3>Adversarial debate</h3>
+        <p>Models attack each other's claims; only a decisive, checkable falsifier can kill — mere disagreement never does, and no judge LLM decides. Identity is the model, not the provider: two models on one local runtime refute each other too.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🏛️</div>
+        <h3>Council pipeline</h3>
+        <p>Independent panel first (no anchoring, diversity measured), then hostile debate over the surfaced claims — survived / killed / unresolved. For the calls where being wrong is expensive.</p>
+      </div>
+      <div class="card">
+        <div class="ico">📊</div>
+        <h3>Trait profiles</h3>
+        <p>Provider traits derived only from recorded evidence — seeded-defect detection as a Wilson 95% lower bound, contract adherence, live health — sample sizes always visible. No hand-written model lore. No evidence, no change.</p>
       </div>
       <div class="card">
         <div class="ico">⚖️</div>
@@ -263,8 +278,8 @@
       </div>
       <div class="card">
         <div class="ico">💸</div>
-        <h3>Cost-aware routing</h3>
-        <p>Light work goes to free local models at low effort; hard judgment goes to the strong tier. Tiny local models are barred from voting on security calls.</p>
+        <h3>Measured routing</h3>
+        <p>Light work goes to free local models; hard judgment goes to the strong tier — and measured bench quality may cross the tier line, under strict shared-opportunity gates. Tiny local models are barred from voting on security calls.</p>
       </div>
       <div class="card">
         <div class="ico">✍️</div>
@@ -297,7 +312,7 @@
       <div class="stat"><div class="big">1.0</div><div class="lbl">measured pairwise<br>error correlation</div></div>
       <div class="stat"><div class="big">0</div><div class="lbl">incremental defects<br>from the second model</div></div>
       <div class="stat"><div class="big">9</div><div class="lbl">providers, incl.<br>3 local runtimes</div></div>
-      <div class="stat"><div class="big">90</div><div class="lbl">unit tests<br>green</div></div>
+      <div class="stat"><div class="big">124</div><div class="lbl">unit tests<br>green</div></div>
     </div>
 
     <div class="finding">
@@ -319,6 +334,27 @@
          the panel ledger tracks pairwise agreement, and tiebreakers go to the model with the
          <em>lowest</em> measured agreement — never to a prettier pedigree. An instrument that can
          prove its own product wrong is the honest difference from "claims benefits without evidence."</p>
+    </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act two: on hard problems the errors decorrelate — and the evidence routes</h3>
+      <p>On a harder set (21 subtle defects — boundary windows, retry jitter, LRU eviction,
+         timezone edges) the same pair stopped agreeing: pairwise error correlation fell from
+         <b>1.0 to 0.762</b>, with exactly one shared blind spot.</p>
+      <table class="bt">
+        <tr><th>Reviewer</th><th>Detected (hard set)</th></tr>
+        <tr><td>codex (alone)</td><td>15 / 21</td></tr>
+        <tr><td>grok (alone)</td><td>20 / 21</td></tr>
+        <tr><td>panel (union)</td><td>20 / 21</td></tr>
+      </table>
+      <p class="quote">The union added nothing over the dominant single — the dividend isn't a
+         property of "diversity" in the abstract. It depends on who your best single is.
+         Which is a routing question.</p>
+      <p style="margin-top:18px">So that is what happens now: those detection cells become
+         <b>trait profiles</b> (Wilson 95% lower bounds, sample sizes attached), and the very
+         next judgment-role pick consumed them — <code>pick verify</code> moved to grok citing
+         <code>LCB 0.7733 vs 0.5004 over 21 shared opportunities</code>. What the benchmark
+         measured is what the router does.</p>
     </div>
   </div>
 </section>

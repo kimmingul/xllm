@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.17.0';
+const VERSION = '0.18.0';
 const PRODUCT = 'grok-xllm';
 const PLUGIN_NAMES = ['grok-xllm', 'oh-my-grok'];
 
@@ -1247,6 +1247,8 @@ Usage:
   node scripts/grok-ask-advisor.js --which | --remember
   node scripts/grok-ask-advisor.js --dry-run <spec> "<prompt>"
   node scripts/grok-ask-advisor.js --multi p1,p2[,p3] "<prompt>"   (runs in parallel)
+  node scripts/grok-ask-advisor.js <spec> --prompt-file <path>     (prompt from file —
+                       escapes Windows' ~32KB argv limit; works with --multi/--dry-run too)
   node scripts/grok-ask-advisor.js --propose <spec> "<change request>"   (diff proposal)
   node scripts/grok-ask-advisor.js --inventory [--refresh]   (machine capability cache)
   node scripts/grok-ask-advisor.js --profile-show
@@ -1590,6 +1592,17 @@ export function buildInventory({
  * Cheap availability probe for routing: binary present (plus server health
  * for local providers). Does NOT verify cloud auth — see doctor/smoke --live.
  */
+/** Safe margin under Windows' 32,767-char CreateProcess command-line cap. */
+export const WIN_ARGV_SAFE_CHARS = 30000;
+
+/**
+ * Whether a prompt of this composed argv length can be delivered via
+ * command-line arguments on this platform. Pure; only Windows has the cap.
+ */
+export function promptTooLongForArgv(argvChars, platform = process.platform) {
+  return platform === 'win32' && argvChars > WIN_ARGV_SAFE_CHARS;
+}
+
 export function detectAvailableProviders(env = process.env) {
   const out = [];
   for (const p of getSupportedProviders()) {
@@ -1831,6 +1844,18 @@ export function runAdvisor({
     const msg = `[${provider}] ${cfg.unavailable}`;
     console.error(msg);
     return { artifactPath: null, exitCode: 1, raw: msg, durationMs: 0 };
+  }
+
+  // Windows caps the whole CreateProcess command line at ~32K chars. For
+  // providers that receive the prompt via argv (usesStdin:false) an oversize
+  // prompt cannot be delivered at all — fail fast with a real message instead
+  // of a cryptic spawn error. codex/claude (stdin delivery) are unaffected.
+  if (!cfg.usesStdin && promptTooLongForArgv([cfg.binary, ...cfg.args].join(' ').length)) {
+    const msg =
+      `[${provider}] prompt too long for argv delivery on Windows (~32KB CreateProcess limit). ` +
+      `Use a stdin-based provider (codex, claude) or shorten the prompt.`;
+    console.error(msg);
+    return { artifactPath: null, exitCode: 1, raw: msg, durationMs: 0, error: 'prompt-too-long' };
   }
 
   // Same-provider advising from inside that provider's own CLI nests
@@ -2096,9 +2121,16 @@ function parseArgs(argv) {
     refresh: false,
   };
   let olderThan = null;
+  let promptFilePath = null;
+  let expectPromptFile = false;
   const args = [];
   for (const a of argv.slice(2)) {
-    if (a === '--allow-write') {
+    if (expectPromptFile) {
+      promptFilePath = a;
+      expectPromptFile = false;
+    } else if (a === '--prompt-file') {
+      expectPromptFile = true;
+    } else if (a === '--allow-write') {
       flags.allowWrite = true;
     } else if (a === '--allow-self') {
       flags.allowSelf = true;
@@ -2114,6 +2146,27 @@ function parseArgs(argv) {
       args.push(a);
     }
   }
+  // --prompt-file <path>: read the prompt from a file. This is the escape
+  // hatch for Windows' ~32K CreateProcess command-line limit on the
+  // caller→advisor hop; the file content wins over any positional prompt.
+  let filePrompt = null;
+  if (expectPromptFile) {
+    console.error('--prompt-file requires a path');
+    process.exit(1);
+  }
+  if (promptFilePath) {
+    try {
+      filePrompt = fs.readFileSync(promptFilePath, 'utf8').trim();
+    } catch {
+      console.error(`--prompt-file: cannot read ${promptFilePath}`);
+      process.exit(1);
+    }
+    if (!filePrompt) {
+      console.error(`--prompt-file: ${promptFilePath} is empty`);
+      process.exit(1);
+    }
+  }
+
   if (args.length === 0) usage();
 
   if (args[0] === '--list-providers') return { mode: 'list', flags };
@@ -2143,7 +2196,7 @@ function parseArgs(argv) {
 
   if (args[0] === '--dry-run') {
     const spec = parseProviderSpec(args[1]);
-    const prompt = args.slice(2).join(' ').trim();
+    const prompt = filePrompt ?? args.slice(2).join(' ').trim();
     if (!spec || !prompt) usage();
     return { mode: 'dry-run', ...spec, prompt, flags };
   }
@@ -2152,7 +2205,7 @@ function parseArgs(argv) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const prompt = args.slice(2).join(' ').trim();
+    const prompt = filePrompt ?? args.slice(2).join(' ').trim();
     if (list.length < 2 || !prompt) {
       console.error('--multi requires at least two providers and a prompt');
       usage();
@@ -2169,7 +2222,7 @@ function parseArgs(argv) {
   }
 
   const spec = parseProviderSpec(args[0]);
-  const prompt = args.slice(1).join(' ').trim();
+  const prompt = filePrompt ?? args.slice(1).join(' ').trim();
   if (!spec || !prompt) usage();
   return { mode: 'run', ...spec, prompt, flags };
 }

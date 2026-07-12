@@ -27,8 +27,11 @@ Other hosts: `<plugin-root>/scripts/xllm-debate.js` (two dirs above this file).
 node <xllm-debate.js> run codex,grok,gemini "<question or claim to stress-test>"
 ```
 
-Works at N=2 (two debaters) and up. Use different vendors — same-vendor
-nesting is refused, and diversity is the point.
+Works at N=2 (two debaters) and up. Different MODELS count as different
+debaters — identity is the model, not the provider, so two local models on
+the same runtime (`ollama:llama3.2,ollama:gemma4` — different labs) attack
+each other's claims. Same-vendor HOST nesting is still refused, and diverse
+models remain the point.
 
 ## What happens
 

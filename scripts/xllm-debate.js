@@ -29,6 +29,7 @@ import {
 } from './grok-ask-advisor.js';
 import { appendLedger, ledgerPath } from './xllm-panel.js';
 import { extractJson, askStructured, adherenceSummary } from './xllm-structured.js';
+import { canonicalSpecKey } from './xllm-traits.js';
 
 export const MAX_CLAIMS = 8;
 
@@ -73,6 +74,26 @@ END with exactly one fenced json block and nothing after:
 {"attacks": [{"claim_id": "C0-1", "stance": "refute", "mechanism": "...", "falsifier": "...", "tier": "decisive"}]}
 \`\`\`
 Use stance "pass" only when a genuine kill attempt failed; then say why in mechanism.`;
+}
+
+/**
+ * Author/attacker identity is the MODEL (canonical spec key, effort stripped),
+ * not the provider: 'ollama' is a runtime hosting models from different labs
+ * (llama=Meta, gemma=Google, qwen=Alibaba), so provider-level identity made
+ * same-runtime models invisible to each other and local-only debates
+ * degenerate (claims SURVIVED with "no valid refutation" because nobody was
+ * eligible to attack them — observed live, v0.15.0 council e2e). Correlated
+ * same-lab refutation stays guarded by the decisive-falsifier bar: mere
+ * agreement never kills regardless of how many correlated attackers pile on.
+ */
+export function claimAuthorKey(claim) {
+  return canonicalSpecKey(claim.authorSpec || claim.author);
+}
+
+/** Claims a debater with this spec may attack (everything it did not author). Pure. */
+export function foreignClaims(capped, spec) {
+  const mine = canonicalSpecKey(spec);
+  return capped.filter((c) => claimAuthorKey(c) !== mine);
 }
 
 export function buildDefendPrompt(claim, attacks) {
@@ -176,8 +197,10 @@ export function classifyDebateClaim(claim, attacks, defense, N) {
   const heldAttackers = new Set(
     (defense?.rebuttals || []).filter((r) => r.result === 'holds').map((r) => r.attacker.toLowerCase())
   );
-  const attackerHeld = (a) =>
-    heldAttackers.has(String(a.attackerVendor || '').toLowerCase());
+  // Attacker identity is the canonical MODEL spec (a.attacker); the legacy
+  // provider-level field is tolerated for pre-v0.18 records/fixtures.
+  const attackerId = (a) => String(a.attacker || a.attackerVendor || '').toLowerCase();
+  const attackerHeld = (a) => heldAttackers.has(attackerId(a));
 
   // A decisive falsifier the author did NOT defeat → KILLED (works at N=2).
   const standingDecisive = refutes.find((a) => a.tier === 'decisive' && a.falsifier && !attackerHeld(a));
@@ -190,15 +213,17 @@ export function classifyDebateClaim(claim, attacks, defense, N) {
     };
   }
 
-  // N>=3: two distinct non-author vendors validly refute and author fails each.
+  // N>=3: two distinct non-author opponents (models) validly refute and the
+  // author fails each. Model-level identity: two same-runtime models count as
+  // two opponents — the decisive bar above stays the guard against correlated
+  // same-lab piling-on, since this branch still requires the author to fail
+  // BOTH defenses individually.
   if (N >= 3) {
-    const unheldVendors = new Set(
-      refutes.filter((a) => !attackerHeld(a)).map((a) => String(a.attackerVendor || '').toLowerCase())
-    );
-    if (unheldVendors.size >= 2) {
+    const unheldOpponents = new Set(refutes.filter((a) => !attackerHeld(a)).map((a) => attackerId(a)));
+    if (unheldOpponents.size >= 2) {
       return {
         status: 'KILLED',
-        reason: `${unheldVendors.size} distinct vendors refuted and the author did not hold against each`,
+        reason: `${unheldOpponents.size} distinct opponents refuted and the author did not hold against each`,
         decisive_refutation: null,
         amended: null,
       };
@@ -278,7 +303,9 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
       repairHint: 'end with exactly one fenced ```json block: {"claims":[{"text":"...","evidence":"..."}]}',
     });
     adherence.push({ spec: p.spec, phase: 'R0', adherence: r.adherence });
-    (r.value || []).forEach((c, i) => claims.push({ id: `C${pi}-${i + 1}`, author: p.provider, authorSpec: p.spec, ...c }));
+    (r.value || []).forEach((c, i) =>
+      claims.push({ id: `C${pi}-${i + 1}`, author: canonicalSpecKey(p.spec), authorSpec: p.spec, ...c })
+    );
   }
   const capped = capClaims(claims, parsed);
   if (!capped.length) {
@@ -303,7 +330,7 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
   console.error('[debate] R1 refute…');
   const attacksByClaim = Object.fromEntries(capped.map((c) => [c.id, []]));
   for (const p of parsed) {
-    const foreign = capped.filter((c) => c.author !== p.provider);
+    const foreign = foreignClaims(capped, p.spec); // model-level: same-runtime siblings ARE foreign
     if (!foreign.length) continue;
     console.error(`[debate]   ${p.spec} attacks ${foreign.length}`);
     const r = await askStructured({
@@ -314,7 +341,7 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
     });
     adherence.push({ spec: p.spec, phase: 'R1', adherence: r.adherence });
     for (const a of r.value || []) {
-      if (attacksByClaim[a.claim_id]) attacksByClaim[a.claim_id].push({ ...a, attackerVendor: p.provider });
+      if (attacksByClaim[a.claim_id]) attacksByClaim[a.claim_id].push({ ...a, attacker: canonicalSpecKey(p.spec) });
     }
   }
 
@@ -358,7 +385,7 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
         text: redactSecrets(r.text),
         status: r.status,
         reason: r.reason,
-        attacks: r.attacks.map((a) => ({ by: a.attackerVendor, tier: a.tier, stance: a.stance, mechanism: redactSecrets(a.mechanism) })),
+        attacks: r.attacks.map((a) => ({ by: a.attacker || a.attackerVendor, tier: a.tier, stance: a.stance, mechanism: redactSecrets(a.mechanism) })),
         defense: r.defense ? r.defense.response : null,
         amended: r.amended ? redactSecrets(r.amended) : null,
       })),

@@ -22,6 +22,7 @@ import process from 'process';
 import { ensureArtifactDirs, redactSecrets, slugify } from './grok-ask-advisor.js';
 import { runPanel, ledgerPath } from './xllm-panel.js';
 import { parseDebaters, capClaims, runDebateOnClaims, MAX_CLAIMS } from './xllm-debate.js';
+import { canonicalSpecKey } from './xllm-traits.js';
 
 /**
  * Bridge panel output → debate claims. Each panelist's key_claims become
@@ -34,7 +35,15 @@ export function claimsFromPanel(panelists, parsed) {
     const kc = panelist && panelist.verdict ? panelist.verdict.key_claims || [] : [];
     kc.forEach((text, i) => {
       if (text && String(text).trim()) {
-        claims.push({ id: `C${pi}-${i + 1}`, author: p.provider, authorSpec: p.spec, text: String(text).trim(), evidence: '' });
+        // author = canonical MODEL key (not provider): same-runtime models are
+        // distinct authors and may attack each other in phase 2 (v0.18.0).
+        claims.push({
+          id: `C${pi}-${i + 1}`,
+          author: canonicalSpecKey(p.spec),
+          authorSpec: p.spec,
+          text: String(text).trim(),
+          evidence: '',
+        });
       }
     });
   });
@@ -62,7 +71,7 @@ export function appendTiebreakClaims(capped, tbPanelist, originalAuthorCount) {
       .slice(0, leftover)
       .map((text, i) => ({
         id: `C${pi}-${i + 1}`,
-        author: tbPanelist.provider,
+        author: canonicalSpecKey(tbPanelist.spec),
         authorSpec: tbPanelist.spec,
         text,
         evidence: '',

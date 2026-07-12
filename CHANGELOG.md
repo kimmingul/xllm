@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.18.0 — 2026-07-12
+
+### Changed — debate identity is the MODEL, not the provider (user-adjudicated)
+`ollama` is a runtime hosting models from different labs (llama=Meta,
+gemma=Google, qwen=Alibaba), but debate treated `author = provider`, so
+same-runtime models were invisible to each other and local-only councils
+degenerated — observed live: 7/8 claims SURVIVED with "no valid refutation"
+because neither ollama model was ELIGIBLE to attack the other's.
+
+- Author/attacker identity is now the canonical spec key (effort stripped):
+  same-runtime models refute each other; the N≥3 kill rule counts distinct
+  MODELS; defense rebuttals match per model. The decisive-falsifier bar is
+  unchanged — correlated same-lab attackers still cannot kill by mere
+  agreement. Legacy provider-level fields in old records stay readable.
+- Fixed a latent defect this exposed: the defend prompt labeled every
+  attacker `[undefined]` (attacks carried `attackerVendor` while the prompt
+  and rebuttal matching read `attacker`), so authors could not address
+  attackers individually and "holds" rebuttals could fail to register.
+- Ledger `attacks[].by` now records the model spec — this also upgrades the
+  traits `decisive_refutation` attribution codex flagged as provider-level.
+
+### Added — `--prompt-file`: long prompts escape the Windows argv limit
+Windows caps a CreateProcess command line at ~32K chars; a 37KB design brief
+failed with exit 126 during live use. Two hops, two fixes:
+
+- Advisor CLI accepts `--prompt-file <path>` (run/multi/propose/dry-run;
+  file wins over a positional prompt; missing/empty file fails loudly). The
+  structured layer (panel/debate/council) switches to a temp prompt file
+  automatically past 24K chars.
+- Providers whose CLI takes the prompt via argv (grok, gemini, …) cannot
+  receive oversize prompts at all on Windows — the advisor now fails fast
+  with `prompt-too-long` and says which providers can (codex/claude, stdin),
+  instead of a cryptic spawn error.
+- Live e2e: a 40KB prompt file → codex answered the embedded token exactly
+  (`XLLM_LONGPROMPT_OK`); the same file → grok failed fast with the honest
+  message. Same-runtime debate lifecycle, complete: council with
+  `ollama:glm-5.2:cloud` × `ollama:gemma4:cloud` (one provider, two labs) —
+  mutual attacks (3↔5), per-claim defenses, and **2 KILLED by a decisive
+  falsifier from the same-provider opponent**, attributed by model spec in
+  the ledger (`attacks:["ollama:gemma4:cloud/decisive"]`). Under v0.17
+  semantics this entire exchange was structurally impossible (foreign count
+  0). Tests 121 → 124.
+
 ## 0.17.0 — 2026-07-12
 
 ### Changed — deployment hygiene: CI parity, release tags, contributor docs

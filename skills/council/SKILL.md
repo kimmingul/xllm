@@ -35,7 +35,10 @@ Other hosts: `<plugin-root>/scripts/xllm-council.js`.
 node <xllm-council.js> run codex,grok,gemini "<consequential question or claim>" [--tiebreak] [--ready=a,b,c]
 ```
 
-Use different vendors (same-vendor nesting is refused). Works at N=2 and up.
+Works at N=2 and up. Identity is the MODEL, not the provider: two models on
+the same local runtime (e.g. `ollama:llama3.2,ollama:gemma4`) are distinct
+members and refute each other in phase 2. Same-vendor HOST nesting is still
+refused.
 
 ## Tiebreak on a phase-1 split (measured decorrelation)
 

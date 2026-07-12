@@ -1,5 +1,17 @@
 # xllm debate — adversarial review design (2026-07-11)
 
+> **Amendment (2026-07-12, v0.18.0, user-adjudicated):** author/attacker
+> identity is the **model** (canonical spec key, effort stripped), not the
+> provider. 'ollama' is a runtime hosting models from different labs, so
+> provider-level identity made same-runtime models invisible to each other —
+> observed live: a local-only council where 7/8 claims SURVIVED with "no
+> valid refutation" because neither ollama model was eligible to attack the
+> other's claims. Consequences: same-runtime models now refute each other;
+> the N≥3 kill rule counts distinct MODELS ("2 distinct opponents"); defense
+> rebuttals are matched per model (this also fixed a latent `[undefined]`
+> attacker label in the defend prompt). The decisive-falsifier bar below is
+> unchanged and remains the guard against correlated same-lab piling-on.
+
 > Designed via xllm's own adversarial method: codex@high and grok@high each
 > proposed a design (Round 1), then rebutted each other (Round 2). They
 > converged. This document is the synthesized result; raw rounds are in

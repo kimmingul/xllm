@@ -1067,10 +1067,12 @@ import {
   extractDefense,
   buildRefutePrompt,
   buildDefendPrompt,
+  foreignClaims,
+  claimAuthorKey,
 } from './xllm-debate.js';
 
-const claim = { id: 'C0-1', author: 'claude', authorSpec: 'claude:opus', text: 'X is unsafe' };
-const atk = (o = {}) => ({ claim_id: 'C0-1', stance: 'refute', mechanism: 'm', falsifier: 'f', tier: 'soft', attackerVendor: 'grok', ...o });
+const claim = { id: 'C0-1', author: 'claude:opus', authorSpec: 'claude:opus', text: 'X is unsafe' };
+const atk = (o = {}) => ({ claim_id: 'C0-1', stance: 'refute', mechanism: 'm', falsifier: 'f', tier: 'soft', attacker: 'grok', ...o });
 
 test('debate: no refutation → SURVIVED', () => {
   assert.strictEqual(classifyDebateClaim(claim, [], null, 2).status, 'SURVIVED');
@@ -1106,11 +1108,34 @@ test('debate: soft attack alone can never KILL even without defense', () => {
   assert.strictEqual(r.status, 'UNRESOLVED');
 });
 
-test('debate N=3: two distinct vendors refute, author holds neither → KILLED; same-vendor double does not', () => {
-  const twoVendors = [atk({ attackerVendor: 'grok' }), atk({ attackerVendor: 'gemini' })];
-  assert.strictEqual(classifyDebateClaim(claim, twoVendors, { response: 'holds', rebuttals: [] }, 3).status, 'KILLED');
-  const sameVendor = [atk({ attackerVendor: 'grok' }), atk({ attackerVendor: 'grok' })];
-  assert.notStrictEqual(classifyDebateClaim(claim, sameVendor, { response: 'holds', rebuttals: [] }, 3).status, 'KILLED');
+test('debate N=3: two distinct OPPONENTS (models) refute, author holds neither → KILLED; same model twice does not', () => {
+  // v0.18.0: identity is the MODEL — two same-runtime models are two opponents
+  const twoModelsSameRuntime = [atk({ attacker: 'ollama:llama3.2' }), atk({ attacker: 'ollama:gemma4' })];
+  assert.strictEqual(
+    classifyDebateClaim(claim, twoModelsSameRuntime, { response: 'holds', rebuttals: [] }, 3).status,
+    'KILLED'
+  );
+  const sameModelTwice = [atk({ attacker: 'grok' }), atk({ attacker: 'grok' })];
+  assert.notStrictEqual(classifyDebateClaim(claim, sameModelTwice, { response: 'holds', rebuttals: [] }, 3).status, 'KILLED');
+  // legacy pre-v0.18 records carry attackerVendor — still matched for defense
+  const legacy = [{ claim_id: 'C0-1', stance: 'refute', mechanism: 'm', falsifier: 'f', tier: 'decisive', attackerVendor: 'grok' }];
+  const held = classifyDebateClaim(claim, legacy, { response: 'holds', rebuttals: [{ attacker: 'grok', result: 'holds', counter: 'c' }] }, 2);
+  assert.strictEqual(held.status, 'SURVIVED');
+});
+
+test('debate: same-runtime models are mutually FOREIGN; same model at different effort is not', () => {
+  const capped = [
+    { id: 'C0-1', author: 'ollama:llama3.2', authorSpec: 'ollama:llama3.2', text: 'a' },
+    { id: 'C1-1', author: 'ollama:gemma4', authorSpec: 'ollama:gemma4', text: 'b' },
+    { id: 'C2-1', author: 'grok', authorSpec: 'grok', text: 'c' },
+  ];
+  // llama may now attack gemma's claim (and grok's) — not its own
+  const llamaTargets = foreignClaims(capped, 'ollama:llama3.2').map((c) => c.id);
+  assert.deepStrictEqual(llamaTargets, ['C1-1', 'C2-1']);
+  // effort is session policy, not identity: grok@high does NOT attack grok's claim
+  assert.deepStrictEqual(foreignClaims(capped, 'grok@high').map((c) => c.id), ['C0-1', 'C1-1']);
+  // legacy claims without authorSpec fall back to author
+  assert.strictEqual(claimAuthorKey({ author: 'ollama:gemma4' }), 'ollama:gemma4');
 });
 
 test('debate: extractors parse the JSON contracts + repair wrapped newlines', () => {
@@ -1184,7 +1209,7 @@ test('council: tiebreak claims join as AUTHOR with a new index, never displacing
   const out = appendTiebreakClaims(capped, tb, 2);
   assert.strictEqual(out.length, 4);
   assert.strictEqual(out[2].id, 'C2-1'); // author index after the originals
-  assert.strictEqual(out[2].author, 'claude');
+  assert.strictEqual(out[2].author, 'claude:opus'); // model-level identity (v0.18.0)
   assert.strictEqual(out[2].authorSpec, 'claude:opus');
   // originals untouched, in place
   assert.strictEqual(out[0].id, 'C0-1');
@@ -1655,6 +1680,48 @@ test('suggestTiebreaker: trait vetoes exclude candidates; all vetoed → provide
     health: {},
   });
   assert.strictEqual(noVeto.provider, 'claude');
+});
+
+// ---------------------------------------------------------------------------
+// Long prompts (Windows argv limit) — --prompt-file + delivery guards
+// ---------------------------------------------------------------------------
+
+import { promptTooLongForArgv, WIN_ARGV_SAFE_CHARS } from './grok-ask-advisor.js';
+import { PROMPT_FILE_THRESHOLD } from './xllm-structured.js';
+import { spawnSync } from 'child_process';
+
+test('promptTooLongForArgv: only Windows, only past the safe margin', () => {
+  assert.strictEqual(promptTooLongForArgv(WIN_ARGV_SAFE_CHARS + 1, 'win32'), true);
+  assert.strictEqual(promptTooLongForArgv(WIN_ARGV_SAFE_CHARS - 1, 'win32'), false);
+  assert.strictEqual(promptTooLongForArgv(500000, 'linux'), false);
+  // the structured layer routes to a file BEFORE the OS limit would bite
+  assert.ok(PROMPT_FILE_THRESHOLD < WIN_ARGV_SAFE_CHARS);
+});
+
+test('--prompt-file: a 40KB prompt round-trips through the advisor (dry-run)', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-promptfile-'));
+  const f = path.join(tmp, 'big-prompt.txt');
+  try {
+    fs.writeFileSync(f, `reply with OK\n${'x'.repeat(40000)}`, 'utf8');
+    const r = spawnSync(
+      process.execPath,
+      [path.join(root, 'scripts', 'grok-ask-advisor.js'), '--dry-run', 'grok', '--prompt-file', f],
+      { encoding: 'utf8', shell: false, timeout: 30000 }
+    );
+    assert.strictEqual(r.status, 0); // argv delivery of the same prompt could not even spawn
+    const cfg = JSON.parse(r.stdout);
+    assert.strictEqual(cfg.provider, 'grok');
+    // missing file fails loudly, not silently
+    const bad = spawnSync(
+      process.execPath,
+      [path.join(root, 'scripts', 'grok-ask-advisor.js'), '--dry-run', 'grok', '--prompt-file', path.join(tmp, 'nope.txt')],
+      { encoding: 'utf8', shell: false, timeout: 30000 }
+    );
+    assert.notStrictEqual(bad.status, 0);
+    assert.ok(/cannot read/.test(bad.stderr));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 console.log(`\n${passed} tests passed`);

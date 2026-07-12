@@ -15,11 +15,21 @@
 
 import { spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import process from 'process';
 
 const ADVISOR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grok-ask-advisor.js');
+
+/**
+ * Prompts longer than this are handed to the advisor via --prompt-file
+ * instead of argv: Windows caps the whole CreateProcess command line at
+ * ~32K chars, and this caller→advisor hop would otherwise fail before the
+ * advisor can even pick stdin delivery for the provider. Cross-platform for
+ * determinism (a temp file is also less exposed than a process list entry).
+ */
+export const PROMPT_FILE_THRESHOLD = 24000;
 
 // ---------------------------------------------------------------------------
 // Robust JSON extraction
@@ -100,12 +110,40 @@ export function rawFromArtifact(artifactPath) {
 
 export function askAdvisorRaw(spec, prompt, { advisor = ADVISOR, env = process.env } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [advisor, spec, prompt], { env, windowsHide: true });
+    let promptArgs = [spec, prompt];
+    let tmpFile = null;
+    if (String(prompt).length > PROMPT_FILE_THRESHOLD) {
+      try {
+        tmpFile = path.join(
+          os.tmpdir(),
+          `xllm-prompt-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.txt`
+        );
+        fs.writeFileSync(tmpFile, prompt, 'utf8');
+        promptArgs = [spec, '--prompt-file', tmpFile];
+      } catch {
+        tmpFile = null; // best-effort: fall back to argv (may hit the OS limit)
+        promptArgs = [spec, prompt];
+      }
+    }
+    const cleanup = () => {
+      if (tmpFile) {
+        try {
+          fs.unlinkSync(tmpFile);
+        } catch {
+          /* best-effort */
+        }
+      }
+    };
+    const child = spawn(process.execPath, [advisor, ...promptArgs], { env, windowsHide: true });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => process.stderr.write(d));
-    child.on('error', () => resolve({ code: 1, raw: '', artifact: null }));
+    child.on('error', () => {
+      cleanup();
+      resolve({ code: 1, raw: '', artifact: null });
+    });
     child.on('close', (code) => {
+      cleanup();
       const artifact = code === 0 && out.trim() ? out.trim().split(/\r?\n/).pop() : null;
       resolve({ code: code ?? 1, raw: artifact ? rawFromArtifact(artifact) : '', artifact });
     });

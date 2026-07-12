@@ -39,10 +39,12 @@ until `npm run ci` is green locally.
   back into evidence streams.
 - **CRLF hygiene (Windows).** After editing scripts, normalize line endings:
   `sed -i 's/\r$//' scripts/<file>`.
-- **Windows argv limit.** Providers whose CLI takes the prompt as an
-  argument (grok, gemini, …) hit the ~32KB CreateProcess limit — keep
-  programmatic prompts under ~25KB or use a stdin-based provider
-  (codex, claude).
+- **Windows argv limit.** Windows caps a command line at ~32KB. The
+  caller→advisor hop escapes it with `--prompt-file <path>` (the structured
+  layer switches automatically past ~24KB), but providers whose CLI takes
+  the prompt as an argv argument (grok, gemini, …) cannot receive oversize
+  prompts at all — the advisor fails fast with `prompt-too-long`. For long
+  prompts use a stdin-based provider (codex, claude).
 - **New behavior gets tests.** Pure functions preferred; tests use fixtures,
   not disk or live LLMs.
 

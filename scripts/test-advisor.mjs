@@ -416,21 +416,33 @@ test('writeArtifact redacts secrets before persisting', () => {
 });
 
 test('cleanArtifacts removes artifact files but keeps placeholders', () => {
-  const file = writeArtifact({
-    provider: 'test',
-    model: 'clean',
-    effort: null,
-    original: 'cleanup target',
-    finalPrompt: 'cleanup target',
-    raw: 'output',
-    exitCode: 0,
-  });
-  assert.ok(fs.existsSync(file));
-  const removed = cleanArtifacts(root);
-  assert.ok(removed >= 1);
-  assert.ok(!fs.existsSync(file));
-  const askDir = path.dirname(file);
-  assert.ok(fs.existsSync(askDir));
+  // Isolate via XLLM_STATE_DIR: this test used to call cleanArtifacts against
+  // the REAL repo state dir, wiping the user's live advisor artifacts on
+  // every `npm test` run (observed 2026-07-12 — it destroyed diagnostic
+  // artifacts mid-investigation). Tests must never touch real state.
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-artifacts-'));
+  process.env.XLLM_STATE_DIR = tmp;
+  try {
+    const file = writeArtifact({
+      provider: 'test',
+      model: 'clean',
+      effort: null,
+      original: 'cleanup target',
+      finalPrompt: 'cleanup target',
+      raw: 'output',
+      exitCode: 0,
+    });
+    assert.ok(file.startsWith(tmp)); // proves the isolation actually took effect
+    assert.ok(fs.existsSync(file));
+    const removed = cleanArtifacts(root);
+    assert.ok(removed >= 1);
+    assert.ok(!fs.existsSync(file));
+    const askDir = path.dirname(file);
+    assert.ok(fs.existsSync(askDir));
+  } finally {
+    delete process.env.XLLM_STATE_DIR;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1011,7 +1023,42 @@ test('tiebreak loop closes: matrix from a past tiebreak steers the next pick', (
 // Structured-output layer (robust JSON extraction shared by the review family)
 // ---------------------------------------------------------------------------
 
-import { extractJson, lastBalanced, adherenceSummary } from './xllm-structured.js';
+import { extractJson, lastBalanced, adherenceSummary, collapseWrapDuplicates } from './xllm-structured.js';
+
+test('collapseWrapDuplicates: drops TTY wrap fragments (patterns observed live)', () => {
+  assert.strictEqual(collapseWrapDuplicates('strict equ\nequality checks'), 'strict equality checks');
+  assert.strictEqual(collapseWrapDuplicates('exact value identit\nidentity, which'), 'exact value identity, which');
+  assert.strictEqual(collapseWrapDuplicates('"evidence":\n"evidence": "x"'), '"evidence": "x"'); // duplicated JSON key
+  assert.strictEqual(collapseWrapDuplicates('floating numbers.\nnumbers.", "e"'), 'floating numbers.", "e"');
+  assert.strictEqual(collapseWrapDuplicates('the `==\n`===` operator'), 'the `===` operator');
+  // structural newlines and non-prefix lines are untouched
+  assert.strictEqual(collapseWrapDuplicates('},\n  {"a":1}'), '},\n  {"a":1}');
+  assert.strictEqual(collapseWrapDuplicates('alpha\nbeta'), 'alpha\nbeta');
+});
+
+test('extractJson recovers ollama TTY-corrupted blocks (real 2026-07-12 failure patterns)', () => {
+  // Reconstructed from the actual failed debate-R0 artifacts: the wrap
+  // duplication landed on JSON KEYS ("evidence":\n"evidence":, "eviden\n"evidence":)
+  // — structurally invalid JSON that the plain newline repair cannot fix.
+  const glm =
+    '```json\n{"claims": [{"text": "Comparing 0.1 + 0.2 === 0.3 evaluates to false.", "evidence": "inference: IEEE-754"}, ' +
+    '{"text": "It is incorrect to compare monetary amounts using the `==\n`===` operator after floating-point arithmetic in JavaScript.", "evidence":\n"evidence": ' +
+    '"inference: Floating-point rounding errors can cause strict equ\nequality checks on computed monetary values to fail unexpectedly."}]}\n```';
+  const claims = extractClaims(glm);
+  assert.ok(claims && claims.length === 2);
+  assert.ok(claims[1].text.includes('`===` operator'));
+  const gemma =
+    '```json\n{"claims": [\n  {"text": "0.1 + 0.2 does not equal 0.3 when comparing floating numbers.\nnumbers.", "evidence": "inference: standard language specification"},\n' +
+    '  {"text": "The strict equality operator (===) requires exact value identit\nidentity, which fails when floating-point precision errors occur.", "eviden\n"evidence": "inference: behavior of strict equality in JS"}\n]}\n```';
+  const g = extractClaims(gemma);
+  assert.ok(g && g.length === 2);
+  assert.ok(g[1].text.includes('exact value identity'));
+  // ORDER PROTECTION: clean output with a legitimate soft wrap parses via the
+  // plain newline repair FIRST — the collapse variant never sees it, so
+  // "of the\ntheme" stays "of the theme" (not collapsed to "of theme").
+  const clean = extractJson('```json\n{"a": "of the\ntheme"}\n```');
+  assert.strictEqual(clean.a, 'of the theme');
+});
 
 test('extractJson: fenced, bare, last-valid, trailing-comma, newline-wrapped', () => {
   assert.deepStrictEqual(extractJson('```json\n{"a":1}\n```'), { a: 1 });

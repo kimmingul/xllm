@@ -35,13 +35,37 @@ export const PROMPT_FILE_THRESHOLD = 24000;
 // Robust JSON extraction
 // ---------------------------------------------------------------------------
 
+/**
+ * Collapse ollama TTY wrap-duplication. The ollama CLI redraws the tail of a
+ * wrapped line; captured through a pipe the cursor-control codes do nothing,
+ * so after CSI stripping BOTH the truncated fragment and its reprint survive:
+ * `strict equ\nequality`, `"evidence":\n"evidence":` (observed live
+ * 2026-07-12 — fatal when the wrap lands on a JSON key, which is why debate's
+ * long claims blocks failed where panel's compact verdicts survived).
+ * Rule: at each newline, if the last non-space run before it (≥3 chars) is a
+ * prefix of the first non-space run after it, the fragment is the spurious
+ * half — drop it. Used only as a LAST-RESORT parse variant: the first
+ * successful variant wins in tryParse, so clean output (including legitimate
+ * soft wraps like `the\ntheme`) is never collapsed.
+ */
+export function collapseWrapDuplicates(text) {
+  return String(text).replace(/(\S{3,})[ \t]*\r?\n[ \t]*(\S+)/g, (match, tail, head) =>
+    head.startsWith(tail) ? head : match
+  );
+}
+
 function tryParse(text) {
   const t = String(text).trim();
+  const collapsed = collapseWrapDuplicates(t);
   const variants = [
     t,
     t.replace(/\r?\n/g, ' '), // TTY newline-wrapping inside string literals
     t.replace(/,(\s*[}\]])/g, '$1'), // trailing commas
     t.replace(/\r?\n/g, ' ').replace(/,(\s*[}\]])/g, '$1'),
+    // last resort: TTY wrap-duplication repair (see collapseWrapDuplicates)
+    collapsed,
+    collapsed.replace(/\r?\n/g, ' '),
+    collapsed.replace(/\r?\n/g, ' ').replace(/,(\s*[}\]])/g, '$1'),
   ];
   for (const v of variants) {
     try {

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.19.0 — 2026-07-12
+
+### Fixed — ollama TTY wrap-duplication repair (structured-output robustness)
+The ollama CLI redraws the tail of a wrapped line; captured through a pipe
+the cursor-control codes do nothing, so after CSI stripping BOTH the
+truncated fragment and its reprint survive (`strict equ\nequality`,
+`"evidence":\n"evidence":`). Harmless inside string values (yesterday's
+`"tok tokens"`), fatal when the wrap lands on a JSON KEY — which is why
+debate's long claims blocks failed R0 ("no claims extracted", both local and
+ollama-cloud models, reproduced twice) while panel's compact verdicts mostly
+survived. This also silently inflated ollama models' measured adherence
+retry/failed rates — the fix cleans the traits instrument itself.
+
+- `collapseWrapDuplicates` in `xllm-structured.js`: at each newline, a
+  trailing non-space run (≥3 chars) that is a PREFIX of the leading run
+  after it is the spurious half — dropped. Wired into `tryParse` as
+  LAST-RESORT variants only: the first successful variant wins, so clean
+  output (including legitimate soft wraps like `the\ntheme`) is never
+  collapsed. Fixtures are the exact corruption from the failed artifacts.
+
+### Fixed — `npm test` no longer wipes the repo's real advisor artifacts
+The `cleanArtifacts` test ran against the real state dir, deleting every
+live artifact under `.grok/artifacts` on every test run (observed live: it
+destroyed diagnostic artifacts mid-investigation). Now isolated via
+`XLLM_STATE_DIR` with an assertion that the isolation took effect.
+Tests 124 → 126.
+
 ## 0.18.0 — 2026-07-12
 
 ### Changed — debate identity is the MODEL, not the provider (user-adjudicated)

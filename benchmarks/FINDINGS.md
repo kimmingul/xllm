@@ -270,3 +270,59 @@ single member dominates, and three cheap decorrelated models can stand in for
 one frontier model — measured, not assumed.* Honest bounds: +2/21 is still
 modest (~10%); these are single-set, deterministic-regex results; and the win is
 cost-shape (3× free local calls vs one paid frontier call), not raw ceiling.
+
+## 2026-07-14 — lineage does NOT predict decorrelation (nemotron family + gpt-oss)
+
+**Setup.** Three new cloud models added: `nemotron-3-ultra:cloud`,
+`nemotron-3-nano:30b-cloud`, `gpt-oss:120b-cloud`. (Note: `nemotron-3-ultra:cloud`
+fails `ollama pull` on its cloud manifest but is reachable — one `ollama run`
+resolves it, then xllm's HTTP `/api/generate` path works.) Panel of the three
+nemotron sizes (ultra/super/nano — **same lab, NVIDIA**) + gpt-oss (**different
+lab**), hard set, single mode, run 3×. This isolates the project's founding
+question: does shared **lineage** predict correlated errors, or must you measure?
+
+**Detection (per-model mean over 3 runs):**
+
+| model | runs | mean |
+|-------|------|------|
+| nemotron-3-ultra:cloud | 17 · 18 · 16 | 17.0 |
+| nemotron-3-super:cloud | 13 · 16 · 16 | 15.0 |
+| gpt-oss:120b-cloud | 14 · 14 · 17 | 15.0 |
+| nemotron-3-nano:30b-cloud | 12 · 10 · 14 | 12.0 |
+
+ultra is the strongest of the group (~17/21), the 30b nano the weakest (~12) —
+none at ceiling, so the no-dominator regime holds.
+
+**Dividend = [+2, +2, +3], mean 2.33 — the largest yet.** Mean pairwise
+agreement fell to **0.691** (below the 3-cloud panel's 0.735), and the dividend
+rose with it (2.33 vs 2.0): more decorrelation, more recovery, exactly as the
+mechanism predicts. Per-run union 19–20/21; **zero permanent blind spots** (only
+h6 double-fire / late-handler stayed flaky at 1/3 each).
+
+**The headline: lineage is not informative — you must measure.** Mean pairwise
+agreement by pair:
+
+| pair | lab relation | mean agreement |
+|------|--------------|----------------|
+| ultra ↔ super | **same** (NVIDIA) | 0.778 |
+| super ↔ gpt-oss | cross | 0.746 |
+| nano ↔ gpt-oss | cross | 0.698 |
+| ultra ↔ nano | **same** | 0.667 |
+| ultra ↔ gpt-oss | cross | 0.651 |
+| **super ↔ nano** | **same** (NVIDIA) | **0.603** |
+
+The same-lab nemotron pairs span **0.603–0.778** — the ENTIRE range — and fully
+overlap the cross-lab pairs (0.651–0.746). The **most decorrelated pair in the
+whole panel is same-lab** (super↔nano, 0.603), while a **cross-lab pair is among
+the most correlated** (super↔gpt-oss, 0.746). Same-lab mean (0.683) is if
+anything *lower* than cross-lab mean (0.698). **Shared lineage carries no
+reliable signal about whether two models' errors decorrelate.**
+
+This is the empirical vindication of a core xllm design decision: the panel
+tiebreaker picks the unconsulted provider with the LOWEST *measured* agreement,
+"never by vendor pedigree/lineage." Had we routed diversity by lineage — "these
+are both nemotron, so redundant; add a different vendor" — we would have thrown
+away the panel's most decorrelated pair (the two nemotrons) and kept a more
+correlated cross-vendor one. The measurement inverts the pedigree intuition.
+Cross-**vendor** was the original diversity heuristic (v0.1); the benchmark has
+now retired it in favor of cross-**decorrelation**, measured per pair.

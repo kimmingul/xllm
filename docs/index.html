@@ -441,6 +441,31 @@
          with a single frontier model. The mission hypothesis, cleanly confirmed: diversity pays
          when errors decorrelate and no single member dominates — measured, not assumed.</p>
     </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act seven — lineage does not predict decorrelation</h3>
+      <p>The founding question, tested head-on: does shared <em>lineage</em> predict correlated
+         errors? We panelled three sizes of one family (nemotron ultra / super / nano — same lab,
+         NVIDIA) against a different-lab model (gpt-oss:120b), 3×. Dividend rose to a mean of
+         <b>+2.33</b> (a run hit +3, the largest yet) as agreement fell to 0.691.</p>
+      <table class="bt">
+        <tr><th>Pair</th><th>Lab</th><th>Mean agreement</th></tr>
+        <tr><td>ultra ↔ super</td><td><b>same</b></td><td>0.778</td></tr>
+        <tr><td>super ↔ gpt-oss</td><td>cross</td><td>0.746</td></tr>
+        <tr><td>nano ↔ gpt-oss</td><td>cross</td><td>0.698</td></tr>
+        <tr><td>ultra ↔ nano</td><td><b>same</b></td><td>0.667</td></tr>
+        <tr><td>ultra ↔ gpt-oss</td><td>cross</td><td>0.651</td></tr>
+        <tr><td>super ↔ nano</td><td><b>same</b></td><td class="miss">0.603</td></tr>
+      </table>
+      <p class="quote">The same-lab pairs span the whole range and overlap the cross-lab ones
+         entirely. The most decorrelated pair in the panel is same-lab (two nemotrons, 0.603); a
+         cross-lab pair is among the most correlated. Shared lineage carries no reliable signal.</p>
+      <p style="margin-top:18px">This is the vindication of a core design choice: the panel
+         tiebreaker picks by <em>lowest measured agreement</em>, never by vendor pedigree. Routing
+         diversity by lineage would have discarded the panel's most decorrelated pair and kept a
+         more correlated one. The benchmark retires cross-<em>vendor</em> — the original v0.1
+         heuristic — in favour of cross-<em>decorrelation</em>, measured per pair.</p>
+    </div>
   </div>
 </section>
 

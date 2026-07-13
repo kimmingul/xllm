@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.24.2 — 2026-07-14
+
+### Measured — lineage does NOT predict decorrelation (docs/findings only)
+Added three cloud models (`nemotron-3-ultra:cloud`, `nemotron-3-nano:30b-cloud`,
+`gpt-oss:120b-cloud`) and aimed the benchmark at the project's founding question:
+does shared lineage predict correlated errors? Panel of three nemotron sizes
+(ultra/super/nano — same lab, NVIDIA) + gpt-oss (different lab), hard set, 3×.
+
+- **Detection (mean/3):** ultra 17.0 (group-strongest) · super 15.0 ·
+  gpt-oss:120b 15.0 · nano:30b 12.0. No ceiling model → no-dominator regime.
+- **Dividend = [+2, +2, +3], mean 2.33 — the largest yet**, as mean agreement
+  fell to 0.691 (more decorrelation → more recovery). Zero permanent blind spots.
+- **Lineage is not informative.** Same-lab nemotron pairs span the ENTIRE
+  agreement range (super↔nano 0.603 — the most decorrelated pair in the panel —
+  up to ultra↔super 0.778) and overlap the cross-lab pairs (0.651–0.746)
+  completely; a cross-lab pair (super↔gpt-oss 0.746) is among the most
+  correlated. Same-lab mean (0.683) is if anything lower than cross-lab (0.698).
+  Empirical vindication of the measured tiebreaker ("lowest measured agreement,
+  never by pedigree"): routing diversity by lineage would have discarded the
+  panel's most decorrelated pair. The benchmark retires cross-vendor (the v0.1
+  heuristic) for cross-decorrelation, measured per pair.
+
+Note: `nemotron-3-ultra:cloud` fails `ollama pull` on its cloud manifest but is
+reachable — one `ollama run` resolves it, then xllm's HTTP path works.
+
+No code change: FINDINGS.md entry, README benchmark section (new act seven),
+GitHub Pages showcase (act seven). `npm run ci` green (137 tests); Pages tag
+balance checked (88/88 div, 6/6 section, 7/7 table).
+
 ## 0.24.1 — 2026-07-13
 
 ### Measured — the cleanest diversity dividend yet (docs/findings only)

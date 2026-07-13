@@ -466,6 +466,28 @@
          more correlated one. The benchmark retires cross-<em>vendor</em> — the original v0.1
          heuristic — in favour of cross-<em>decorrelation</em>, measured per pair.</p>
     </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act eight — the maximally cross-vendor panel had the lowest dividend</h3>
+      <p>The opposite extreme: three frontier vendor CLIs, one per lab, all pinned to the
+         <em>lowest</em> effort — claude:sonnet (Anthropic) · codex:gpt-5.6-luna (OpenAI) ·
+         grok-composer-2.5-fast (xAI). Maximally cross-vendor, same surface, hard set, 3×.</p>
+      <table class="bt">
+        <tr><th>Model @ low</th><th>Detected (mean/3)</th></tr>
+        <tr><td>claude:sonnet (Sonnet 5)</td><td>19.3</td></tr>
+        <tr><td>grok-composer-2.5-fast</td><td>19.0</td></tr>
+        <tr><td>codex:gpt-5.6-luna</td><td>15.3</td></tr>
+        <tr><td><b>panel (union)</b></td><td class="miss"><b>20 — dividend +0.33</b></td></tr>
+      </table>
+      <p class="quote">Mean pairwise agreement 0.841 — frontier models agree, even throttled to
+         low effort across three different labs. Two near-ceiling members (20, 19) leave no room
+         to recover. The most cross-vendor panel produced the least diversity dividend.</p>
+      <p style="margin-top:18px">The capstone: the most <em>correlated</em> pair in the whole
+         benchmark is claude ↔ grok (0.920, different vendors); the most <em>decorrelated</em> is
+         super ↔ nano (0.603, same lab). Pedigree diversity is here <em>anti</em>-correlated with
+         decorrelation. The dividend lives in the mid-tier decorrelated regime — and only
+         measurement tells you which panel you hold.</p>
+    </div>
   </div>
 </section>
 

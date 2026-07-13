@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.24.3 — 2026-07-14
+
+### Measured — the maximally cross-vendor panel had the LOWEST dividend (docs/findings only)
+The opposite end from the mid-tier cloud panels: three frontier vendor CLIs, one
+per lab, all pinned to the lowest reasoning effort — `claude:sonnet@low`
+(Anthropic, Sonnet 5), `codex:gpt-5.6-luna@low` (OpenAI),
+`grok:grok-composer-2.5-fast@low` (xAI). All cli-agentic (same surface),
+maximally cross-vendor. Hard set, single mode, 3×, zero provider errors.
+
+- **Detection (mean/3):** claude:sonnet 19.3 · grok-composer 19.0 (exactly 19 on
+  all three runs) · gpt-5.6-luna 15.3. Even at low effort, Sonnet 5 and
+  grok-composer sit near the hard-set ceiling.
+- **Dividend = [0, 0, +1], mean 0.33 — the lowest of any hard-set panel.** The
+  most cross-vendor panel produced the least recovery: two near-ceiling members
+  leave no room (union 20 barely clears best-single 20), and mean pairwise
+  agreement was **0.841** (frontier models agree even throttled to low effort).
+- **Capstone on pedigree:** the most correlated pair in the whole benchmark is
+  claude ↔ grok (0.920, DIFFERENT vendors); the most decorrelated is super ↔ nano
+  (0.603, SAME lab). Pedigree diversity is here anti-correlated with
+  decorrelation. The dividend lives in the mid-tier decorrelated regime, not the
+  frontier cross-vendor one — only measurement tells you which panel you hold.
+
+Note: claude ran with `XLLM_ALLOW_SELF=1` (same-vendor nesting is refused inside
+Claude Code by default; here we measure the model, not use it as a cross-vendor
+advisor). grok-composer's exact id is `grok-composer-2.5-fast`.
+
+No code change: FINDINGS.md entry, README benchmark section (new act eight),
+GitHub Pages showcase (act eight). `npm run ci` green (137 tests); Pages tag
+balance checked (89/89 div, 6/6 section, 8/8 table).
+
 ## 0.24.2 — 2026-07-14
 
 ### Measured — lineage does NOT predict decorrelation (docs/findings only)

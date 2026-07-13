@@ -326,3 +326,51 @@ away the panel's most decorrelated pair (the two nemotrons) and kept a more
 correlated cross-vendor one. The measurement inverts the pedigree intuition.
 Cross-**vendor** was the original diversity heuristic (v0.1); the benchmark has
 now retired it in favor of cross-**decorrelation**, measured per pair.
+
+## 2026-07-14 — the maximally cross-vendor panel had the LOWEST dividend
+
+**Setup.** The opposite end from the mid-tier cloud panels: three frontier vendor
+CLIs, one per lab, all pinned to the **lowest** reasoning effort —
+`claude:sonnet@low` (Anthropic, Sonnet 5), `codex:gpt-5.6-luna@low` (OpenAI),
+`grok:grok-composer-2.5-fast@low` (xAI). All `cli-agentic`, so same-surface;
+maximally cross-**vendor**. Hard set, single mode, 3×. (claude ran with
+`XLLM_ALLOW_SELF=1` — same-vendor nesting is refused by default inside Claude
+Code, but here we are measuring the model, not using it as a cross-vendor
+advisor. Zero provider errors on every run.)
+
+**Detection (per-model mean over 3 runs):**
+
+| model | runs | mean |
+|-------|------|------|
+| claude:sonnet@low | 20 · 20 · 18 | 19.3 |
+| grok:composer-2.5-fast@low | 19 · 19 · 19 | 19.0 |
+| codex:gpt-5.6-luna@low | 15 · 16 · 15 | 15.3 |
+
+Even at LOW effort, Sonnet 5 and grok-composer sit near the hard-set ceiling
+(19–20/21); grok-composer was eerily stable at exactly 19 all three runs.
+
+**Dividend = [0, 0, +1], mean 0.33 — the lowest of any hard-set panel.** The
+maximally cross-vendor panel produced the *least* recovery. Two mechanisms, both
+already documented, stack here:
+
+- **Near-ceiling dominator.** claude 20 and grok 19 leave almost no room: union
+  20 barely clears best-single 20. (The act-three lesson: when one member
+  dominates, the union adds nothing over it.)
+- **High correlation.** Mean pairwise agreement **0.841** — far above the
+  mid-tier cloud panels (0.69–0.74). Frontier models AGREE, even throttled to low
+  effort and across three different labs.
+
+**The capstone on lineage/pedigree (act seven, sharpened).** The single most
+correlated pair in the *entire* benchmark is **claude ↔ grok at 0.920 mean**
+(0.952 in two runs) — two models from *different vendors* (Anthropic vs xAI). The
+single most *decorrelated* pair ever measured is **super ↔ nano at 0.603** — two
+models from the *same lab* (both NVIDIA nemotron). So the cross-vendor pair is
+~0.32 more correlated than the same-lab pair. Pedigree diversity does not merely
+fail to predict decorrelation — here it is *anti*-correlated with it. The
+dividend lives in the mid-tier decorrelated regime, not the frontier
+cross-vendor one, and only measurement can tell you which panel you have.
+
+**Honest bounds.** Low effort was requested and pinned; at higher effort the
+frontier trio might diverge (or converge) differently — this is a low-effort
+snapshot. codex:gpt-5.6-luna@low was the weakest (15.3) but not decorrelated
+enough to lift the union off claude's ceiling. Single set, deterministic-regex.

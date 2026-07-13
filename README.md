@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.24.2** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.24.3** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -549,6 +549,28 @@ nemotron 3사이즈(ultra/super/nano — **같은 NVIDIA 랩**) + gpt-oss(**다�
 ("둘 다 nemotron이니 중복 — 다른 벤더 추가")가장 탈상관된 쌍(두 nemotron)을 버리고 더 상관된
 크로스-벤더 쌍을 남겼을 것입니다. 측정이 혈통 직관을 뒤집습니다 — 크로스-**벤더**(v0.1의 원래
 다양성 휴리스틱)를 벤치마크가 크로스-**탈상관**(쌍별 실측)으로 은퇴시킨 셈입니다.
+
+### 8막 — 최대 크로스-벤더 패널이 배당은 최저였다 (2026-07-14 · 프론티어 3종 @low)
+
+정반대 극단을 측정했습니다: 세 프론티어 벤더 CLI를 랩당 하나씩, 전부 **최저 강도(low)** —
+claude:sonnet@low(Anthropic·Sonnet 5) · codex:gpt-5.6-luna@low(OpenAI) ·
+grok:grok-composer-2.5-fast@low(xAI). 전부 cli-agentic(동일 표면), 최대한 크로스-**벤더**.
+hard-set 3회, 0 에러(claude는 계측 목적이라 `XLLM_ALLOW_SELF=1`로 실행).
+
+검출률(3회 평균): claude:sonnet **19.3** · grok-composer **19.0**(3회 모두 정확히 19) ·
+gpt-5.6-luna 15.3. 저강도인데도 Sonnet 5·grok-composer는 하드셋 천장 근처입니다.
+
+**배당 = [0, 0, +1], 평균 0.33 — 하드셋 역대 최저.** 최대한 크로스-벤더인 패널이 회수를 가장
+못 했습니다. 이유 둘이 겹칩니다: (1) **천장 지배자** — claude 20·grok 19라 회수 여지 없음(3막
+교훈), (2) **높은 상관** — 평균 일치율 **0.841**(중형 클라우드 패널의 0.69–0.74보다 훨씬 높음).
+프론티어 모델은 저강도로 묶고 서로 다른 랩이어도 **의견이 일치합니다.**
+
+**혈통/계보 주제의 정점(7막의 심화).** 벤치 역사상 **가장 상관된 쌍이 claude↔grok 평균 0.920**
+(두 실행에서 0.952) — 서로 **다른 벤더**(Anthropic vs xAI)입니다. 반대로 **가장 탈상관된 쌍은
+super↔nano 0.603** — **같은 랩**(둘 다 NVIDIA nemotron)입니다. 크로스-벤더 쌍이 같은 랩 쌍보다
+~0.32 더 상관됩니다. 혈통 다양성은 탈상관을 예측하지 못할 뿐 아니라, 여기서는 오히려
+**역상관**입니다. 배당은 프론티어 크로스-벤더가 아니라 중형 탈상관 영역에 살고, 어느 패널을
+쥐었는지는 오직 측정만이 알려줍니다.
 
 ### 측정 표면 태그 (모델 vs 하네스 교락)
 

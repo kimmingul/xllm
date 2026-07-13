@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.23.0 — 2026-07-13
+
+### Added — `discipline`: the setup-distillation lane (superpowers' prose residue)
+Step 2 of the ratified plan in `docs/superpowers-absorption-design.md`
+("discipline in prose, diversity in product"): when a user retires a
+process-skill pack (e.g. superpowers), the surviving discipline moves into
+host-native config as a small, visible, user-owned prose block — not into
+xllm skills.
+
+- `xllm discipline show|install|remove [--target <path>]` (advisor:
+  `--discipline`): installs a **≤25-line** process-discipline block into the
+  project's CLAUDE.md (preferred if present) or AGENTS.md.
+- Safety-by-design, per the review's anti-OMC guarantees: explicit opt-in
+  only (setup skills preview the FULL text and ask consent; never silent);
+  idempotent versioned marker block (`<!-- xllm:discipline v1 -->` …
+  `<!-- /xllm:discipline -->`) — re-runs and version upgrades replace the
+  block only, other content untouched; `remove` restores the file;
+  the 25-line cap is enforced in code ("trim it, do not raise the cap");
+  unterminated marker blocks fail closed.
+- setup skills updated: shared `setup` gains Step 4 (opt-in wizard step);
+  Grok `xllm-setup` gains §2.7 — plus residue fixes there (stale `.grok/`
+  marker paths; ghost "Agents:" list removed in v0.20.0).
+- Tests 126 → 133 (splice/remove/idempotency/version-upgrade/cap/corrupt/
+  target-resolution).
+
+Verification: `npm run ci` green (check + 133 unit tests + smoke + bench
+selftest). Live CLI e2e on a temp project: install appended the block after
+existing content, re-install was byte-identical (idempotent), remove restored
+the original file exactly.
+
 ## 0.22.0 — 2026-07-13
 
 ### Removed — pick-team, and the last grok-xllm ghost surface

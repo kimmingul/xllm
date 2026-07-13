@@ -65,9 +65,25 @@ Goal: pin role → `provider[:model][@effort]` for THIS project.
    Verify with `node <advisor.js> --profile-show`. Pinned roles override
    built-in routing exactly (including effort — no intensity bumping).
 
-## Step 4 — Summarize
+## Step 4 — Process-discipline block (optional, explicit opt-in)
+
+xllm can install a ≤25-line process-discipline block (design-before-code,
+red→green, evidence-before-done, plus pointers to cross-vendor deliberation)
+into the project's CLAUDE.md/AGENTS.md — "discipline in prose, diversity in
+product".
+
+1. Preview: `node <advisor.js> --discipline show` — show the user the FULL
+   text. Never install silently.
+2. Ask consent with the host's question UI (default = skip).
+3. On consent: `node <advisor.js> --discipline install` (auto-target: an
+   existing CLAUDE.md, else AGENTS.md; override with `--target <path>`).
+4. Mention reversibility: re-running replaces the marker block only
+   (idempotent, survives version upgrades); `--discipline remove` deletes it.
+
+## Step 5 — Summarize
 
 Report: usable advisors now, what needs installing (`ollama serve`, missing
-CLIs), pinned roles, and the standing safety defaults — advisors read-only
-(`--allow-write` to opt in), same-vendor nesting refused, artifacts redacted
-with `--clean-artifacts [--older-than=DAYS]` retention.
+CLIs), pinned roles, whether the discipline block was installed, and the
+standing safety defaults — advisors read-only (`--allow-write` to opt in),
+same-vendor nesting refused, artifacts redacted with
+`--clean-artifacts [--older-than=DAYS]` retention.

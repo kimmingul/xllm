@@ -16,7 +16,7 @@ Run these steps (do not only describe them).
 
 Find `xllm-advisor.js` via (first hit):
 
-- `.grok/xllm-advisor-path` (legacy: `.grok/xllm-advisor-path`)
+- `.xllm/xllm-advisor-path` (legacy: `.grok/xllm-advisor-path`)
 - `XLLM_ADVISOR_PATH` / `GROK_PLUGIN_ROOT` / `XLLM_PLUGIN_ROOT`
 - `./scripts/xllm-advisor.js`
 - plugin checkout path the user has open
@@ -28,7 +28,8 @@ node <advisor.js> --remember
 node <advisor.js> --which
 ```
 
-Confirm `.grok/xllm-advisor-path` exists and points at a real file.
+Confirm `.xllm/xllm-advisor-path` (or legacy `.grok/`) exists and points at a
+real file.
 
 ## 2. Artifact directories
 
@@ -56,6 +57,17 @@ node <advisor.js> --profile-show
 Pinned roles override built-in routing exactly (effort included). If the
 project is empty, ask the user what they intend to build first.
 
+## 2.7 Process-discipline block (optional, explicit opt-in)
+
+Preview with `node <advisor.js> --discipline show`, show the user the full
+text, ask consent (default = skip), then on consent:
+
+```bash
+node <advisor.js> --discipline install   # auto-target: CLAUDE.md, else AGENTS.md
+```
+
+Idempotent marker block (≤25 lines); `--discipline remove` deletes it.
+
 ## 3. Doctor
 
 ```bash
@@ -77,8 +89,8 @@ node <advisor.js> ollama:… "Reply with exactly: xllm-setup-ok"
 
 ## 5. Inventory
 
-Skills: ask, xllm, xllm-setup  
-Agents: critic, executor, verifier, security-reviewer (and friends)
+Skills: ask, xllm, xllm-setup (agents were removed in v0.20.0 — host-native
+agents cover them)
 
 ## 6. User summary
 

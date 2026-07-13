@@ -26,7 +26,7 @@ import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 
-const VERSION = '0.22.0';
+const VERSION = '0.23.0';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 
@@ -1282,6 +1282,9 @@ Usage:
   node scripts/xllm-advisor.js --set-role <role> <spec>   (project role pin)
   node scripts/xllm-advisor.js --set-default <key> <value>
   node scripts/xllm-advisor.js --clean-artifacts [--older-than=DAYS]
+  node scripts/xllm-advisor.js --discipline show|install|remove [--target <path>]
+                       (≤25-line process-discipline block for CLAUDE.md/AGENTS.md;
+                        idempotent marker block, explicit opt-in — preview with show)
 
 Safety (defaults):
   Advisors run READ-ONLY (no approvals bypass / no sandbox escape).
@@ -1299,6 +1302,83 @@ Env: XLLM_ADVISOR_PATH, XLLM_PLUGIN_ROOT, XLLM_PROVIDERS_PATH,
      XLLM_ADVISOR_TIMEOUT_MS, XLLM_STATE_DIR
 `);
   process.exit(exitCode);
+}
+
+// ---------------------------------------------------------------------------
+// Process-discipline block (setup-distillation — docs/superpowers-absorption-design.md)
+// ---------------------------------------------------------------------------
+
+const DISCIPLINE_VERSION = 'v1';
+const DISCIPLINE_BEGIN = `<!-- xllm:discipline ${DISCIPLINE_VERSION} -->`;
+const DISCIPLINE_END = '<!-- /xllm:discipline -->';
+/** Hard cap, enforced in code: this block must never grow into an agent-OS. */
+export const DISCIPLINE_MAX_LINES = 25;
+
+const DISCIPLINE_BODY = [
+  '## 작업 규율 (xllm setup 설치본 — `xllm discipline remove`로 제거)',
+  '',
+  '- 모호한 요구는 코드 전에 설계 문답으로 좁힌다; 로직 변경은 red→green(실패 테스트 먼저).',
+  '- 실행 증거 없이 "done"이라 주장하지 않는다 — 테스트/빌드 출력을 확인하고 인용한다.',
+  '- 버그는 고치기 전에 근본 원인부터 찾는다(증상 패치 금지).',
+  '- 병렬 작업·플랜·워크트리는 호스트 네이티브 기능을 쓴다; xllm은 오케스트레이션하지 않는다.',
+  '- 틀리면 비싼 결정만 크로스-벤더 심의로: `xllm panel`(측정) · `debate`(반박) · `council`(둘 다).',
+  '  panel stats의 쌍별 일치율이 낮은 곳이 다양성이 배당을 내는 곳이다.',
+  '- 리뷰 코멘트가 미심쩍으면 수용 전에 다른 벤더로 반박 검증(`xllm ask`/`debate`).',
+  '- 커밋/PR/릴리스 산문은 `xllm scribe`(최저가 모델); git 실행은 항상 사람이 한다.',
+].join('\n');
+
+export function disciplineBlock() {
+  return `${DISCIPLINE_BEGIN}\n${DISCIPLINE_BODY}\n${DISCIPLINE_END}`;
+}
+
+/** Locate an existing block (any version). Throws on an unterminated block. */
+function findDisciplineSpan(content) {
+  const s = String(content ?? '');
+  const begin = s.match(/<!--\s*xllm:discipline\b[^>]*-->/);
+  if (!begin) return null;
+  const end = s.slice(begin.index).match(/<!--\s*\/xllm:discipline\s*-->/);
+  if (!end) {
+    throw new Error(
+      'unterminated xllm:discipline block (begin marker without end marker) — fix the file manually'
+    );
+  }
+  return { start: begin.index, end: begin.index + end.index + end[0].length };
+}
+
+/** Idempotent install: replace an existing block in place, else append. Pure. */
+export function spliceDisciplineBlock(content, block = disciplineBlock()) {
+  const lines = block.split('\n');
+  if (lines.length > DISCIPLINE_MAX_LINES) {
+    throw new Error(
+      `discipline block is ${lines.length} lines; the cap is ${DISCIPLINE_MAX_LINES} — trim it, do not raise the cap`
+    );
+  }
+  const s = String(content ?? '');
+  const span = findDisciplineSpan(s);
+  if (span) return s.slice(0, span.start) + block + s.slice(span.end);
+  if (!s.trim()) return `${block}\n`;
+  return `${s.replace(/\n+$/, '')}\n\n${block}\n`;
+}
+
+/** Remove the block; collapses the seam to a single blank line. Pure. */
+export function removeDisciplineBlock(content) {
+  const s = String(content ?? '');
+  const span = findDisciplineSpan(s);
+  if (!span) return { content: s, removed: false };
+  const before = s.slice(0, span.start).replace(/\n+$/, '');
+  const after = s.slice(span.end).replace(/^\n+/, '');
+  const joined = [before, after].filter(Boolean).join('\n\n');
+  return { content: joined ? `${joined}\n` : '', removed: true };
+}
+
+/** Explicit --target wins; else prefer an existing CLAUDE.md, then AGENTS.md. */
+export function resolveDisciplineTarget(projectRoot, explicitTarget = null) {
+  if (explicitTarget) return path.resolve(projectRoot, explicitTarget);
+  for (const name of ['CLAUDE.md', 'AGENTS.md']) {
+    const candidate = path.join(projectRoot, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(projectRoot, 'AGENTS.md');
 }
 
 // ---------------------------------------------------------------------------
@@ -2227,6 +2307,19 @@ function parseArgs(argv) {
   if (args[0] === '--clean-artifacts') {
     return { mode: 'clean-artifacts', flags, olderThan };
   }
+  if (args[0] === '--discipline') {
+    const action = args[1];
+    if (!['show', 'install', 'remove'].includes(action || '')) {
+      console.error('Usage: --discipline show|install|remove [--target <path>]');
+      process.exit(1);
+    }
+    const ti = args.indexOf('--target');
+    if (ti !== -1 && !args[ti + 1]) {
+      console.error('--target requires a path');
+      process.exit(1);
+    }
+    return { mode: 'discipline', action, target: ti !== -1 ? args[ti + 1] : null, flags };
+  }
   if (args[0] === '--help' || args[0] === '-h') return { mode: 'help', flags };
 
   if (args[0] === '--dry-run') {
@@ -2279,6 +2372,40 @@ async function main() {
     console.log(r.advisor);
     console.error(`marker: ${r.marker}`);
     process.exit(0);
+  }
+  if (parsed.mode === 'discipline') {
+    if (parsed.action === 'show') {
+      console.log(disciplineBlock());
+      process.exit(0);
+    }
+    const target = resolveDisciplineTarget(process.cwd(), parsed.target);
+    let existing = '';
+    try {
+      existing = fs.readFileSync(target, 'utf8');
+    } catch {
+      /* new file */
+    }
+    try {
+      if (parsed.action === 'install') {
+        const had = /<!--\s*xllm:discipline\b/.test(existing);
+        fs.writeFileSync(target, spliceDisciplineBlock(existing));
+        console.error(`discipline ${DISCIPLINE_VERSION} ${had ? 'updated' : 'installed'}: ${target}`);
+        console.log(target);
+        process.exit(0);
+      }
+      const res = removeDisciplineBlock(existing);
+      if (!res.removed) {
+        console.error(`no discipline block in ${target}`);
+        process.exit(2);
+      }
+      fs.writeFileSync(target, res.content);
+      console.error(`discipline block removed: ${target}`);
+      console.log(target);
+      process.exit(0);
+    } catch (e) {
+      console.error(String(e?.message || e));
+      process.exit(1);
+    }
   }
   if (parsed.mode === 'doctor') {
     const report = runDoctor();

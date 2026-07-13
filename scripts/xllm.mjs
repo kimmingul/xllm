@@ -67,6 +67,9 @@ Commands:
   profile set-role <role> <spec>     Pin a role for THIS project (e.g. analysis codex@high)
   profile set-default <key> <value>  Set a [defaults] key in the project profile
   clean [--older-than=DAYS]   Delete persisted advisor artifacts
+  discipline show|install|remove [--target <path>]
+                     Process-discipline block for CLAUDE.md/AGENTS.md
+                     (≤25 lines, idempotent marker block, opt-in via setup)
   smoke [--live]     Dry smoke or live READY provider
   list               List providers JSON
   pick <role> <task> Auto model/effort for a role (see xllm-routing)
@@ -125,6 +128,9 @@ switch (cmd) {
   case 'clean':
   case 'clean-artifacts':
     run(advisor, ['--clean-artifacts', ...rest]);
+    break;
+  case 'discipline':
+    run(advisor, ['--discipline', ...rest]);
     break;
   case 'inventory':
     run(advisor, ['--inventory', ...rest]);

@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.22.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.23.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -233,7 +233,7 @@ Claude Code와 Codex는 동일한 호스트 중립 스킬 7종을 `./skills/`에
 | `/xllm:council` | panel(독립) → debate(적대) 2단계 파이프라인 | `scripts/xllm-council.js` |
 | `/xllm:exec` | 격리 클론에서 구현 위임 → 검증된 브랜치 | `scripts/xllm-exec.js` |
 | `/xllm:scribe` | 커밋/PR/릴리스 산문을 최저가 모델로 | `scripts/xllm-scribe.js` |
-| `/xllm:setup` | 머신 인벤토리 + 프로젝트 역할 핀 위저드 | `scripts/xllm-advisor.js --inventory/--remember/--set-role` |
+| `/xllm:setup` | 머신 인벤토리 + 역할 핀 위저드 + 규율 블록 옵트인 | `scripts/xllm-advisor.js --inventory/--remember/--set-role/--discipline` |
 
 Grok Build 어댑터는 별도 3종입니다: `/ask` · `/xllm` · `/xllm-setup` (`.grok/skills/`).
 
@@ -407,6 +407,9 @@ which                    해석된 advisor 스크립트 경로 출력
 remember                 .xllm/xllm-advisor-path 마커 + 아티팩트 디렉토리(자기 무시 .gitignore) 생성
 list | list-providers    프로바이더 목록 JSON
 clean [--older-than=DAYS]   보존된 어드바이저 아티팩트 삭제
+discipline show|install|remove [--target <path>]
+                         프로세스 규율 블록(≤25줄)을 CLAUDE.md/AGENTS.md에 설치/제거 —
+                         마커 블록으로 멱등, setup 위저드에서 전문 미리보기 후 옵트인
 ```
 
 ---
@@ -414,7 +417,7 @@ clean [--older-than=DAYS]   보존된 어드바이저 아티팩트 삭제
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 126개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 133개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)

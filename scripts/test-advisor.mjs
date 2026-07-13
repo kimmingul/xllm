@@ -1503,6 +1503,84 @@ test('pick includes cost metadata and low intensity prefers cheap', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Process-discipline block (setup-distillation)
+// ---------------------------------------------------------------------------
+
+import {
+  disciplineBlock,
+  spliceDisciplineBlock,
+  removeDisciplineBlock,
+  resolveDisciplineTarget,
+  DISCIPLINE_MAX_LINES,
+} from './xllm-advisor.js';
+
+test('disciplineBlock stays under the hard line cap', () => {
+  const lines = disciplineBlock().split('\n');
+  assert.ok(lines.length <= DISCIPLINE_MAX_LINES, `${lines.length} > ${DISCIPLINE_MAX_LINES}`);
+  assert.ok(lines[0].includes('xllm:discipline'));
+  assert.ok(lines[lines.length - 1].includes('/xllm:discipline'));
+});
+
+test('spliceDisciplineBlock installs into empty and existing content', () => {
+  const fresh = spliceDisciplineBlock('');
+  assert.ok(fresh.startsWith('<!-- xllm:discipline'));
+  assert.ok(fresh.endsWith('\n'));
+  const appended = spliceDisciplineBlock('# My project\n\nNotes.\n');
+  assert.ok(appended.startsWith('# My project'));
+  assert.ok(appended.includes('<!-- xllm:discipline'));
+});
+
+test('spliceDisciplineBlock is idempotent and replaces in place', () => {
+  const doc = 'before\n\n' + disciplineBlock() + '\n\nafter\n';
+  const once = spliceDisciplineBlock(doc);
+  assert.strictEqual(spliceDisciplineBlock(once), once);
+  assert.strictEqual((once.match(/xllm:discipline v/g) || []).length, 1);
+  assert.ok(once.startsWith('before'));
+  assert.ok(once.includes('after'));
+});
+
+test('spliceDisciplineBlock upgrades an older block version', () => {
+  const old = '# P\n\n<!-- xllm:discipline v0 -->\nold rules\n<!-- /xllm:discipline -->\n';
+  const next = spliceDisciplineBlock(old);
+  assert.ok(!next.includes('old rules'));
+  assert.ok(next.includes('xllm:discipline v1'));
+  assert.ok(next.startsWith('# P'));
+});
+
+test('removeDisciplineBlock removes cleanly and reports absence', () => {
+  const doc = spliceDisciplineBlock('# P\n\nbody\n');
+  const res = removeDisciplineBlock(doc);
+  assert.ok(res.removed);
+  assert.ok(!res.content.includes('xllm:discipline'));
+  assert.ok(res.content.includes('# P'));
+  assert.ok(res.content.includes('body'));
+  const absent = removeDisciplineBlock('# P\n');
+  assert.strictEqual(absent.removed, false);
+});
+
+test('discipline cap and unterminated block fail closed', () => {
+  const fat = Array.from({ length: DISCIPLINE_MAX_LINES + 1 }, (_, i) => `l${i}`).join('\n');
+  assert.throws(() => spliceDisciplineBlock('', fat));
+  const corrupt = '<!-- xllm:discipline v1 -->\nno end marker\n';
+  assert.throws(() => spliceDisciplineBlock(corrupt));
+  assert.throws(() => removeDisciplineBlock(corrupt));
+});
+
+test('resolveDisciplineTarget prefers CLAUDE.md, falls back to AGENTS.md', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-discipline-'));
+  try {
+    assert.ok(resolveDisciplineTarget(tmp).endsWith('AGENTS.md'));
+    fs.writeFileSync(path.join(tmp, 'AGENTS.md'), '');
+    assert.ok(resolveDisciplineTarget(tmp).endsWith('AGENTS.md'));
+    fs.writeFileSync(path.join(tmp, 'CLAUDE.md'), '');
+    assert.ok(resolveDisciplineTarget(tmp).endsWith('CLAUDE.md'));
+    assert.ok(resolveDisciplineTarget(tmp, 'X.md').endsWith('X.md'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Traits (evidence-based provider profiles → measured routing)
 // ---------------------------------------------------------------------------
 

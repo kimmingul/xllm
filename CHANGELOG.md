@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.21.1 — 2026-07-13
+
+### Docs — README tells the whole benchmark arc; commands are actually documented
+Documentation/metadata-only release; no runtime behavior change.
+
+- **README benchmark section is now the full three-act story.** It previously
+  stopped at the easy-set result (correlation 1.0, dividend 0) — the least
+  favorable of the three committed measurements. Added the hard-set acts from
+  `benchmarks/FINDINGS.md`: the five-model calibration + claude/grok/gemma4
+  panel (mean pairwise agreement 0.746, union 20/21 = **dividend +1** over the
+  best single, per-task matrix in a collapsible), and the codex-vs-grok rerun
+  (0.762; grok dominates 20 vs 15 → the dividend is a routing question) with
+  the first live traits→routing loop closure (grok LCB 0.7733 vs codex 0.5004
+  → `pick verify` routed grok@xhigh). Honesty note on the excluded
+  qwen-OOM run and reproduction commands included.
+- **README "CLI 명령 요약" became a command reference** grouped along the
+  escalation ladder (opinion / deliberation / delegation / prose / instruments
+  / routing / maintenance): signatures, flags, and output conventions
+  (last-stdout-line artifact path, append-only ledger, `.patch` sidecars,
+  scribe exit 3). Previously undocumented commands (`which`, `remember`,
+  `list-providers`, `clean`, `dry-run`) and flags (`panel outcome
+  --adopted/--helpful`) are now listed, plus the 7-skill ↔ script mapping
+  table with per-host invocation (`/xllm:<skill>`; Grok Build `/ask` ·
+  `/xllm` · `/xllm-setup`).
+- **Purged the remaining grok-xllm-era residue from docs.**
+  `getting-started.md` and `architecture.md` still instructed the
+  never-ported `/ralph`/`/team`/`/verify` skills and a "Grok-native first"
+  principle; `local-llms.md` still said `ollama run` (HTTP `/api/generate`
+  since v0.20.0) and `.grok/` profile paths. All three rewritten against the
+  current product, fact-checked against the scripts (artifact subdirs
+  `{ask,xllm,proposals,exec}`, `OLLAMA_HOST` normalization, env var set).
+- **GitHub Pages now matches the README arc**: the stat row reads
+  1.0 → 0.75 correlation and +1 panel dividend; a new Act-two block covers
+  the five-model panel; fixed a factual slip ("off-by-one" was never in the
+  seeded defect set → plaintext passwords).
+- `package.json` description/keywords: dropped "for Grok Build … ralph
+  evidence loops" (stale since v0.20.0).
+
+Verification: `npm run ci` green (check + 128 unit tests + smoke + bench
+selftest); `docs/index.html` tag balance checked (84/84 div, 6/6 section,
+3/3 table). Docs-only — no runtime surface, so no live e2e.
+
 ## 0.21.0 — 2026-07-12
 
 ### Removed — the grok-ask-advisor.js deprecation shim

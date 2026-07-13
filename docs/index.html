@@ -305,19 +305,19 @@
     <div class="section-head">
       <h2>We measured it.</h2>
       <p>xllm ships a seeded-defect benchmark that can refute its own core claim.
-         Here's the first thing it told us.</p>
+         Here's what it told us — in three acts.</p>
     </div>
 
     <div class="stat-row">
-      <div class="stat"><div class="big">1.0</div><div class="lbl">measured pairwise<br>error correlation</div></div>
-      <div class="stat"><div class="big">0</div><div class="lbl">incremental defects<br>from the second model</div></div>
-      <div class="stat"><div class="big">9</div><div class="lbl">providers, incl.<br>3 local runtimes</div></div>
+      <div class="stat"><div class="big">1.0</div><div class="lbl">error correlation<br>on textbook defects</div></div>
+      <div class="stat"><div class="big">0.75</div><div class="lbl">error correlation<br>on hard defects</div></div>
+      <div class="stat"><div class="big">+1</div><div class="lbl">panel dividend beyond<br>the best single model</div></div>
       <div class="stat"><div class="big">128</div><div class="lbl">unit tests<br>green</div></div>
     </div>
 
     <div class="finding">
-      <h3>The uncomfortable first result</h3>
-      <p>On a set of well-known defects (SQL injection, XSS, off-by-one, TOCTOU…), two
+      <h3>Act one — the uncomfortable first result</h3>
+      <p>On a set of well-known defects (SQL injection, XSS, plaintext passwords, TOCTOU…), two
          <em>different-vendor</em> frontier models — OpenAI's <b>codex</b> and xAI's <b>grok</b> —
          caught the same 10 of 11 defects and missed the identical one.</p>
       <table class="bt">
@@ -337,10 +337,32 @@
     </div>
 
     <div class="finding" style="margin-top:26px">
-      <h3>Act two: on hard problems the errors decorrelate — and the evidence routes</h3>
-      <p>On a harder set (21 subtle defects — boundary windows, retry jitter, LRU eviction,
-         timezone edges) the same pair stopped agreeing: pairwise error correlation fell from
-         <b>1.0 to 0.762</b>, with exactly one shared blind spot.</p>
+      <h3>Act two — on hard problems, the dividend is real</h3>
+      <p>On a harder set (6 tasks, 21 subtle defects — boundary windows, retry jitter, LRU
+         eviction, timezone edges) a five-model calibration showed the errors decorrelating:
+         mean pairwise agreement fell from <b>1.0 to 0.746</b>. A blind panel of
+         claude / grok / gemma4 then recovered a defect the best single model missed.</p>
+      <table class="bt">
+        <tr><th>Reviewer</th><th>Detected (hard set)</th></tr>
+        <tr><td>claude:opus (alone)</td><td>19 / 21</td></tr>
+        <tr><td>grok-4.5 (alone)</td><td>19 / 21</td></tr>
+        <tr><td>gemma4 (alone)</td><td>12 / 21</td></tr>
+        <tr><td><b>panel (union)</b></td><td><b>20 / 21 — dividend +1</b></td></tr>
+      </table>
+      <p class="quote">claude and grok each missed two defects — but <em>different</em> ones,
+         and the panel bought one back. Diversity pays exactly when errors decorrelate, and
+         error correlation is a function of problem difficulty.</p>
+      <p style="margin-top:18px">One defect remained a <b>shared blind spot</b> — both strong
+         models missed it, so no union can recover it. That is the case for escalating to a
+         fourth, measured-decorrelated model: the strong pair agrees at <b>0.905</b>, while the
+         weaker, different model decorrelates most (<b>0.667</b> against each).</p>
+    </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act three — when one model dominates, the dividend is a routing question</h3>
+      <p>A rerun of the full hard set (codex vs grok, zero provider errors) confirmed the
+         decorrelation — pairwise error correlation <b>0.762</b>, one shared blind spot — but
+         this time one panelist dominated:</p>
       <table class="bt">
         <tr><th>Reviewer</th><th>Detected (hard set)</th></tr>
         <tr><td>codex (alone)</td><td>15 / 21</td></tr>

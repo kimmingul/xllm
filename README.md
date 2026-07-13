@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.21.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.21.1** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -55,8 +55,12 @@ node scripts/xllm.mjs exec codex@high "X를 구현해줘" --test-cmd "npm test"
 
 xllm은 **자기 핵심 주장을 반증할 수 있는** 시딩 결함 벤치마크를 내장합니다. 알려진 결함을 심은
 코드 리뷰 과제에서 단일 프로바이더 vs 블라인드 패널의 검출률과 **쌍별 오류 상관**을 비교합니다.
+실측은 3막으로 진행됐고, 세 결과가 합쳐져 "탈상관이 측정된 곳에만 다양성을 쓴다"는 제품
+동작으로 귀결됩니다.
 
-### 첫 실측 결과 (codex vs grok, 11개 결함)
+### 1막 — 쉬운 결함: 다양성은 연극이었다 (2026-07-11 · codex vs grok)
+
+4개 시딩 과제, 잘 알려진 결함 11개(SQLi · XSS · 평문 비밀번호 · TOCTOU 등), 결정적 regex 채점.
 
 | 리뷰어 | 검출 | 놓침 |
 |--------|------|------|
@@ -68,17 +72,97 @@ xllm은 **자기 핵심 주장을 반증할 수 있는** 시딩 결함 벤치마
 결함 클래스에서는 오류가 완벽히 상관되어, 크로스-벤더 다양성이 여기서는 연극이었습니다 —
 앙상블 이론이 "오류가 탈상관일 때만 다양성이 배당을 낸다"고 예측한 그대로입니다.
 
-이것은 미션의 기각이 아니라 **정밀화**입니다. xllm의 답은 **탈상관이 측정된 곳에만 다양성을 쓰는
-것**입니다: 패널 원장이 쌍별 일치율을 추적하고, 타이브레이커는 측정된 일치율이 **가장 낮은**
-모델로 갑니다 — 벤더 계보가 아니라 측정값으로. 자기 제품의 주장을 반증할 수 있는 계측기,
-이것이 "증거 없이 이득을 주장"하는 도구와의 정직한 차이입니다.
+### 2막 — 어려운 결함: 탈상관이 출현하고, 배당이 실재한다 (2026-07-11 · 5모델)
 
-```bash
-npm run bench:live                                    # 기본 세트(잘 알려진 결함)
-node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks   # 어려운/탈상관 세트
+hard 세트(6과제 h1–h6, 미묘한 결함 21개)에서 5개 모델(`claude:opus`, `codex:gpt-5.5`,
+`grok:grok-4.5`, `ollama:glm-5.2:cloud`, `ollama:gemma4:cloud`)을 캘리브레이션한 뒤,
+패널(claude / grok / gemma4)을 실측했습니다.
+
+| | 검출 |
+|--|--|
+| claude:opus 단독 | 19 / 21 |
+| grok-4.5 단독 | 19 / 21 |
+| gemma4 단독 | 12 / 21 |
+| **최고 단일 모델** | **19 / 21** |
+| **패널 합집합** | **20 / 21** |
+| **다양성 배당** | **+1** |
+
+claude와 grok은 각각 2개를 놓치지만 **서로 다른** 결함을 놓칩니다(claude는 h4에서, grok은
+h3에서 — 상대가 잡아줌). 패널이 최고 단일 모델이 놓친 결함 1개를 회수했고, 이 배당은 순수하게
+탈상관된 오류가 만든 것입니다. 나머지 1개(h6의 once-emitter 이중 호출/누수 클래스)는 두 강한
+모델이 함께 놓친 **공유 맹점** — 패널도 못 잡으며, 바로 이 지점이 4번째의 더 탈상관된 모델로
+에스컬레이션할 자리입니다.
+
+| 쌍 | 일치율 | 공유 맹점 |
+|----|--------|-----------|
+| claude ↔ grok | 0.905 | 1 |
+| claude ↔ gemma4 | 0.667 | 2 |
+| grok ↔ gemma4 | 0.667 | 2 |
+| **평균** | **0.746** | — |
+
+평균 쌍별 일치율이 easy 세트 **1.0 → hard 세트 0.746**으로 떨어지며 배당의 전제 조건(오류
+탈상관)이 실제로 실현됐고, 그와 함께 배당(+1/21)이 나타났습니다. **오류 상관은 문제 난이도의
+함수입니다** — 교과서 결함에선 1.0, 미묘한 결함에선 뚜렷이 낮아집니다. 여기서 배당이 작은 것은
+패널에 천장 근처의 모델이 둘이나 있기 때문이며, 단일 지배자가 없을수록 커집니다.
+
+<details>
+<summary>과제별 검출률 캘리브레이션 (5모델 × 6과제)</summary>
+
+| task | claude:opus | gpt-5.5 | grok-4.5 | glm-5.2 | gemma4 |
+|------|-----|-----|-----|-----|-----|
+| h1-median | 100% | 100% | 100% | 67% | 67% |
+| h2-retry-jitter | 100% | **25%** | 100% | 75% | 100% |
+| h3-cache-lru | 100% | 67% | 67% | 67% | **33%** |
+| h4-date-range | 67% | 67% | 100% | 67% | **33%** |
+| h5-parse-int | 100% | 100% | 100% | 100% | 75% |
+| h6-event-emitter | 75% | 50% | 75% | 50% | **25%** |
+
+- "5모델 전부 ≤70%" 난이도 필터에 걸린 과제는 **0개** — 프론티어 모델(Opus 4.8, grok-4.5)에겐
+  이 세트도 대부분 쉽습니다. 난이도는 약한 모델 기준으로만 성립합니다.
+- 하지만 오류는 탈상관합니다: gpt-5.5는 h2에서 25%(채점기 인공물 아님 — 다른 유효 이슈는
+  찾았으나 시딩 결함 3개를 실제로 놓침), gemma4는 h3/h4/h6에서 크게 발산.
+
+</details>
+
+### 3막 — 측정이 라우팅을 움직인다 (2026-07-12 · hard 세트 재실행)
+
+full hard 세트(6과제 21결함)에서 codex vs grok 재실행. 프로바이더 오류 0 — 모든 셀이 실제 판정.
+
+| 프로바이더 | 검출 | 놓친 것 |
+|-----------|------|---------|
+| codex 단독 | 15 / 21 (71%) | h1 윈도 엣지 ×2 · h4 tz 비교 · h6 이중 발화 + late-handler ×2 |
+| grok 단독 | 20 / 21 (95%) | h3 `no-eviction-on-equal`만 |
+| 패널 (합집합) | 20 / 21 | 공유 맹점 1 |
+
+쌍별 오류 상관 **0.762**(공유 21셀) — 2막의 0.746과 일관되게 재현. 배당은 최고 단일 대비
+**0**(grok이 지배), codex 대비 **+5**. 한 패널리스트가 압도하면 합집합은 지배자 위에 아무것도
+더하지 못하고, 공유 맹점은 합집합에서도 살아남습니다. **배당은 추상적 "다양성"의 속성이 아니라
+"당신의 최고 단일 모델이 누구냐"의 속성 — 즉 라우팅 문제입니다.**
+
+그리고 이 결과가 실제로 라우팅을 움직였습니다(측정→라우팅 루프의 첫 라이브 폐쇄):
+
+```text
+pick verify / pick security (high intensity, legacy baseline = codex):
+  → grok@xhigh · measured bench: grok LCB 0.7733 vs codex 0.5004
+    over 21 shared opportunities (6 tasks, via lcb-margin)
 ```
 
-전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) · [`docs/diversity-roadmap.md`](docs/diversity-roadmap.md)
+측정 → 원장/결과 → `traits`(Wilson 95% 하한) → 라우팅 결정, 근거 문자열에 표본 수 인용.
+벤치마크가 잰 것이 곧 라우터가 하는 일이 됐습니다.
+
+> **정직성 노트** — qwen3.6이 CUDA OOM으로 리뷰를 한 번도 내지 못한 교란 실행은 "0개 검출"로
+> 채점하지 않고 `valid_comparison` 플래그로 **무효 처리**했습니다. 크래시는 데이터가 아닙니다.
+
+### 재현
+
+```bash
+npm run bench:live                                                                 # 기본 세트(잘 알려진 결함)
+node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks      # 어려운/탈상관 세트
+node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks --tasks h3-cache-lru   # 과제 지정
+```
+
+원시 실행 JSON은 gitignore, 요약은 커밋 — 전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) ·
+로드맵: [`docs/diversity-roadmap.md`](docs/diversity-roadmap.md)
 
 ---
 
@@ -135,9 +219,26 @@ codex plugin add xllm@xllm
 grok plugin install kimmingul/xllm --trust
 ```
 
-Claude Code와 Codex는 동일한 호스트 중립 스킬 7종(`ask`, `multi`, `debate`, `council`, `exec`, `scribe`, `setup`)을
-`./skills/`에서 공유합니다. 팀·루프·플래닝·검증은 **의도적으로 포팅하지 않았습니다** — 호스트
-네이티브 기능이 이미 담당합니다. 플러그인 이름: Grok Build에서 `xllm`, Claude/Codex에서 `xllm`.
+### 설치 후 — 호스트 안에서 부르는 법
+
+Claude Code와 Codex는 동일한 호스트 중립 스킬 7종을 `./skills/`에서 공유합니다. Claude Code에서는
+`/xllm:<스킬>` 슬래시 커맨드 또는 자연어("codex한테 이 설계 물어봐줘")로 트리거되며, 각 스킬은
+아래 명령 레퍼런스의 스크립트를 실행합니다.
+
+| 스킬 | 하는 일 | 실행하는 스크립트 |
+|------|---------|-------------------|
+| `/xllm:ask` | 외부 어드바이저 1명의 의견 (read-only) | `scripts/xllm-advisor.js` |
+| `/xllm:multi` | 병렬 다중 어드바이저 + 합의 깊이 종합 | `scripts/xllm-advisor.js --multi` |
+| `/xllm:debate` | 적대적 상호 반박 → survived/killed/unresolved | `scripts/xllm-debate.js` |
+| `/xllm:council` | panel(독립) → debate(적대) 2단계 파이프라인 | `scripts/xllm-council.js` |
+| `/xllm:exec` | 격리 클론에서 구현 위임 → 검증된 브랜치 | `scripts/xllm-exec.js` |
+| `/xllm:scribe` | 커밋/PR/릴리스 산문을 최저가 모델로 | `scripts/xllm-scribe.js` |
+| `/xllm:setup` | 머신 인벤토리 + 프로젝트 역할 핀 위저드 | `scripts/xllm-advisor.js --inventory/--remember/--set-role` |
+
+Grok Build 어댑터는 별도 3종입니다: `/ask` · `/xllm` · `/xllm-setup` (`.grok/skills/`).
+
+팀·루프·플래닝·검증은 **의도적으로 포팅하지 않았습니다** — 호스트 네이티브 기능이 이미
+담당합니다.
 
 ---
 
@@ -154,36 +255,160 @@ Claude Code와 Codex는 동일한 호스트 중립 스킬 7종(`ask`, `multi`, `
 
 ---
 
-## CLI 명령 요약
+## 명령 레퍼런스
 
-```text
-node scripts/xllm.mjs <command>
+모든 명령의 진입점은 하나입니다:
 
-ask <spec> "<prompt>"        단일 어드바이저 (read-only); 긴 프롬프트는
-                             --prompt-file <경로> (Windows argv ~32KB 한계 회피)
-multi p1,p2 "<prompt>"       병렬 다중 어드바이저 + 합의 계약 인덱스
-panel run p1,p2 "<q>" [--tiebreak] [--ready=a,b]
-                             블라인드 독립 패널 → 판정 원장 (다양성 측정);
-                             split이면 실측 일치율 최저 미참여 모델을 타이브레이커로
-                             제안(무료)·실행(--tiebreak 옵트인)
-panel stats | outcome <id>   쌍별 일치 행렬(+tiebreak 행 합산) / 결정 채택 기록
-debate run p1,p2 "<q>"       적대적 검토: 모델이 서로 반박 → survived/killed/unresolved (품질 극대화)
-council run p1,p2 "<q>" [--tiebreak] [--ready=a,b]
-                             2단계 파이프라인: panel(독립) → debate(적대) 한 번에;
-                             1단계 split 시 타이브레이커 주장이 2단계에 저자로만 참여
-propose <spec> "<change>"    diff 제안 → artifacts/proposals/*.patch
-exec <spec> "<task>"         격리 실행 → refs/xllm/exec/<id> + 증거
-scribe commit|pr|release|notes   저비용 산문 → stdout (git 실행은 사용자)
-traits [--json]              실측 특성 프로파일(원장/벤치/계약 파생, 표본 수 노출)
-contracts [--live]           프로바이더 계약 프로브(드리프트/실패분류/인증)
-inventory [--refresh]        머신 역량 캐시
-profile show|set-role|set-default   프로젝트 프로파일
-doctor | smoke [--live]      상태 진단 / 스모크
-pick|pick-team|infer|roles   역할·강도·비용 라우팅 (+실측 특성; --no-traits로 레거시)
+```bash
+node scripts/xllm.mjs <command> …          # 저장소에서
+node <plugin-root>/scripts/xllm.mjs …      # 플러그인 설치본에서
 ```
 
-스펙 문법: `provider[:model][@effort]` — 예: `codex@high`, `claude:opus@medium`,
-`ollama:qwen3.6:latest`.
+**공통 규약**
+
+- **스펙 문법** — `provider[:model][@effort]`. 예: `codex@high`, `claude:opus@medium`,
+  `grok:grok-4@high`, `ollama:qwen3.6:latest`. 프로젝트 프로파일: `.xllm/xllm-providers.toml`.
+- **출력 규약** — 실행 결과의 **마지막 stdout 줄이 아티팩트/인덱스 경로**입니다
+  (`.xllm/artifacts/…`). 심의 계열(panel/debate/council)의 구조화 판정은 산문보다 먼저
+  `.xllm/panel-ledger.jsonl`(append-only)에 기록됩니다.
+- **안전 플래그** (ask/multi) — `--allow-write`(어드바이저 파일 쓰기 옵트인) ·
+  `--allow-self`(동일 벤더 중첩 해제) · `--no-artifacts`(아티팩트 미저장).
+  셋 모두 사용자의 명시적 요청 없이는 쓰지 않는 것이 규약입니다.
+- **긴 프롬프트** — Windows argv ~32KB 한계가 있습니다. `--prompt-file <경로>`를 쓰세요
+  (panel/debate/council은 24KB 초과 시 자동으로 파일 경유).
+
+### 의견 — `ask` · `multi`
+
+```text
+ask   <spec> "<prompt>"  [--propose] [--prompt-file <path>] [--allow-write] [--allow-self] [--no-artifacts]
+multi p1,p2[,p3] "<prompt>"  [--propose] [동일 플래그]
+```
+
+```bash
+node scripts/xllm.mjs ask codex@high "이 마이그레이션 설계의 위험을 짚어줘"
+node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "advisor 스크립트 보안 리뷰"
+```
+
+- `ask`는 어드바이저 1명의 진짜 답을 `.xllm/artifacts/ask/…` 아티팩트로 남깁니다(프롬프트+출력,
+  시크릿 마스킹). 어드바이저는 이 대화를 볼 수 없으므로 필요한 컨텍스트만 프롬프트에 담으세요.
+- `multi`는 프로바이더별 자식 프로세스로 병렬 실행 후, 어드바이저별 아티팩트 목록을 담은
+  인덱스(`.md`)와 기계 판독용 `.json` 사이드카를 생성합니다. 종합은 합의 깊이 라벨
+  (만장일치/다수결/split/단일출처)로 하며, 실패한 어드바이저는 지지가 아닌 **기권**으로 칩니다.
+- `--propose`를 붙이면 의견 대신 **unified diff**를 받습니다 — `artifacts/proposals/`에 `.patch`
+  사이드카로 저장되고, 아무것도 적용되지 않습니다.
+
+### 심의 — `panel` · `debate` · `council`
+
+```text
+panel run p1,p2[,p3] "<질문>"  [--tiebreak] [--ready=a,b,c]
+panel stats                                  쌍별 일치 행렬 (실측 탈상관 + tiebreak 행 합산)
+panel outcome <run-id> --adopted <spec|majority|minority|none> --helpful yes|no
+debate run p1,p2[,p3] "<질문/주장>"
+council run p1,p2[,p3] "<질문>"  [--tiebreak] [--ready=a,b,c]
+```
+
+```bash
+node scripts/xllm.mjs panel run codex,grok,gemini "이 캐시 설계가 동시성에 안전한가?"
+node scripts/xllm.mjs debate run ollama:llama3.2,ollama:gemma4 "이 인증 흐름은 토큰 재사용에 취약하다"
+node scripts/xllm.mjs council run codex,grok,gemini "결제 웹훅을 재설계해야 하는가?" --tiebreak
+```
+
+- **panel** — 모든 패널리스트가 **동일 프롬프트를 블라인드로** 받고 구조화 판정
+  (approve/reject/mixed + 핵심 주장)을 반환합니다. 원장이 산문보다 먼저 기록되며, 요약은 원장과
+  모순될 수 없습니다. split이면 코어가 **원장의 실측 일치율이 가장 낮은 미참여 프로바이더**를
+  무료로 선정·기록하고, `--tiebreak`을 줬을 때만 실제 추가 호출을 지불합니다(벤더를 손으로 고르지
+  않는 것이 규약; `--ready=`는 가용 프로바이더 제약일 뿐). 실행 후 `panel outcome`으로 무엇을
+  채택했는지 기록하면 측정→라우팅 루프가 이어집니다.
+- **debate** — R0 블라인드 주장 → R1 상호 반박(구체적 메커니즘+falsifier, decisive/soft 태그) →
+  R2 저자 방어 → **기계적 판정**(judge LLM 없음, 순서 불변). 저자가 못 막은 decisive falsifier만
+  주장을 KILL하고, 단순 이견은 UNRESOLVED입니다. 정체성은 모델 단위 — 같은 ollama 위의
+  llama↔gemma도 서로 공격합니다.
+- **council** — panel(독립 발산) → debate(적대 수렴)을 한 명령으로. 1단계가 split이면 타이브레이커
+  주장이 2단계에 **저자로만** 참여합니다(원 멤버 주장을 밀어내지 않음, 토론자 아님).
+- **비용 감각** — `ask` < `panel` < `debate`(~2–3×) < `council`(~3–4×). SURVIVED는 "적대적 검증을
+  통과했다"는 프로토콜 결과이지 증명이 아니며, 중요한 것은 직접 재검증하세요.
+
+### 변경 위임 — `propose` · `exec`
+
+```text
+propose <spec> "<변경 요청>"
+exec <spec> "<과제>" --test-cmd "npm test"  [--sandbox-mode bypass]
+exec list | exec cleanup <id>|--all
+```
+
+```bash
+node scripts/xllm.mjs propose codex@high "login()에 입력 검증 추가"
+node scripts/xllm.mjs exec codex@high "slugify 유닛 테스트 추가" --test-cmd "npm test"
+```
+
+- `propose`는 read-only 그대로입니다 — 산출물은 `.patch`뿐이고 적용은 항상 사용자 몫
+  (`git apply --check` → 리뷰 → 병합).
+- `exec`는 **임시 로컬 클론**에서 편집→빌드→테스트를 돌리고 `refs/xllm/exec/<id>`(fetch 전용) +
+  `.patch` + 테스트 증거 아티팩트를 돌려줍니다. `--test-cmd`가 없으면 증거는 executor의 주장뿐이니
+  가능하면 항상 지정하세요. 샌드박스 가능한 프로바이더만 허용(codex; 호스트가 아닐 때 claude) —
+  gemini/grok/cursor(비샌드박스), ollama(순수 텍스트)는 거부됩니다. OS 샌드박스가 없으면
+  **fail-closed**; `--sandbox-mode bypass`는 클론 격리만 남는다는 것을 이해하고 명시적으로만.
+- **핸드백 절차** — 증거 아티팩트의 `Status`(green/not-green/no-change/timeout) 확인 →
+  `git diff <base>..refs/xllm/exec/<id>` 리뷰 → `git merge --no-ff` → **병합 후 직접 재검증**
+  (executor-green은 증거이지 신뢰가 아님) → `exec cleanup <id>`.
+
+### 저비용 산문 — `scribe`
+
+```text
+scribe commit                     staged diff → 커밋 메시지
+scribe pr --base <branch>         커밋+디프스탯 → PR 제목/본문
+scribe release --from <tag>       로그 범위 → 릴리스 노트
+scribe notes --from <tag>         로그 범위 → CHANGELOG 항목
+                                  (모두 --provider <spec>로 라우팅 오버라이드 가능)
+```
+
+- 메시지는 **stdout**, 진단은 stderr — `MSG=$(… scribe commit) && git commit -m "$MSG"` 패턴이
+  기본입니다. git/gh 실행은 항상 사용자가 합니다.
+- 출력은 결정적으로 검증됩니다(Conventional Commits, 제목 ≤72자, 펜스 금지 등) + 1회 교정 재시도.
+  **exit 3**은 검증 실패 — 원문을 그대로 쓰지 말고 검토하라는 신호입니다.
+- diff는 라우팅된 어드바이저에게만 가고 **절대 디스크에 저장되지 않습니다**. 민감한 저장소는
+  scribe를 로컬 모델에 핀하세요: `profile set-role scribe ollama:qwen3.6:latest@low`.
+
+### 계측·진단 — `traits` · `contracts` · `inventory` · `doctor` · `smoke` · `dry-run`
+
+```text
+traits [--json]          실측 특성 프로파일 (원장·벤치·계약 파생, 표본 수 상시 노출)
+contracts [--live]       CLI 계약 프로브: 플래그 드리프트, 실패 분류; --live는 클라우드별 소형 호출 1회
+inventory [--refresh]    머신 역량 캐시 (설치된 CLI, pull된 ollama 모델; 24h TTL)
+doctor                   프로바이더 + 경로 건강 진단 (사람용)
+smoke [--live]           드라이 스모크 / READY 프로바이더 라이브 확인
+dry-run <spec> "<p>"     실제 호출 없이 조립될 커맨드라인 확인
+```
+
+- `traits`는 손으로 쓴 모델 인상론을 배제하고 실측만 파생합니다. 판단 역할 라우팅은 시딩 결함
+  검출률의 Wilson 95% 하한을 게이트(과제≥4 · 기회≥12 · 마진 +0.10) 하에 소비합니다 — 3막의
+  `grok LCB 0.7733 vs codex 0.5004`가 정확히 이 경로입니다.
+
+### 라우팅 — `pick` · `pick-team` · `infer` · `roles` · `profile`
+
+```text
+pick <role> <task>       역할×과제 → 모델/강도 자동 선정 (+실측 특성; --no-traits로 레거시와 비트 동일)
+pick-team <task> [--json]   /team 역할 구성 자동 플랜
+infer <task>             과제 강도 추정 low|medium|high
+roles                    라우팅 역할 목록
+profile show             해석된 프로젝트 프로파일 + 상태 디렉토리
+profile set-role <role> <spec>      이 프로젝트에서 역할 핀 (라우팅을 정확히 오버라이드, 강도 범핑 없음)
+profile set-default <key> <value>   프로파일 [defaults] 키 설정
+```
+
+```bash
+node scripts/xllm.mjs pick security "auth token refresh"
+node scripts/xllm.mjs profile set-role critic ollama:qwen3.6:latest@low
+```
+
+### 유지관리 — `which` · `remember` · `list-providers` · `clean`
+
+```text
+which                    해석된 advisor 스크립트 경로 출력
+remember                 .xllm/xllm-advisor-path 마커 + 아티팩트 디렉토리(자기 무시 .gitignore) 생성
+list | list-providers    프로바이더 목록 JSON
+clean [--older-than=DAYS]   보존된 어드바이저 아티팩트 삭제
+```
 
 ---
 

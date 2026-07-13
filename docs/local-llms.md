@@ -6,17 +6,25 @@ Local models are first-class advisors — same artifact contract as cloud CLIs.
 
 | Spec | How it runs | Setup |
 |------|-------------|--------|
-| `ollama` / `ollama:llama3.2` | `ollama run <model>` | Install Ollama; pull model |
+| `ollama` / `ollama:llama3.2` | HTTP `POST /api/generate` (default `http://localhost:11434`; `OLLAMA_HOST` honored). `ollama list`/`ollama stop` stay CLI. | Install Ollama; pull model |
 | `lmstudio` / `lmstudio:phi3` | HTTP `POST /v1/chat/completions` | LM Studio server |
 | `lemonade` | `LEMONADE_BIN` or synthetic stub | Set `LEMONADE_BIN` |
 
 ## Examples
 
 ```bash
-node scripts/xllm-advisor.js ollama:qwen3.6:latest "Review this function"
-/xllm ollama:qwen3.6:latest,codex "Analyze authentication changes"
-/ralph --critic=ollama:qwen3.6:latest,grok "Build feature X"
+node scripts/xllm.mjs ask ollama:qwen3.6:latest "Review this function"
+node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "Analyze authentication changes"
+node scripts/xllm.mjs debate run ollama:llama3.2,ollama:gemma4 "Is this cache design safe under concurrency?"
 ```
+
+Or via the host skills: `/xllm:ask`, `/xllm:multi` (Claude Code / Codex) · `/ask`, `/xllm`
+(Grok Build).
+
+Identity is the **model**, not the provider: two models on the same local runtime
+(`ollama:llama3.2,ollama:gemma4`) are distinct panel/debate members and refute each other.
+Tiny local models are barred from voting on judgment roles (capability floor) — they still
+serve fine as cheap critics and `scribe` writers.
 
 ## Spec (all providers)
 
@@ -32,12 +40,14 @@ provider[:model][@effort]
 | `antigravity:…` | preferred design advisor (over gemini) |
 | `grok:…@high` | grok model + reasoning effort |
 
-Profiles: `.grok/xllm-providers.toml` (`default_model`, `default_effort`, timeouts).
+Profiles: `.xllm/xllm-providers.toml`, legacy `.grok/` honored
+(`default_model`, `default_effort`, timeouts).
 
 ## Environment
 
 | Variable | Meaning |
 |----------|---------|
+| `OLLAMA_HOST` | Ollama server (default `http://localhost:11434`; scheme-less accepted) |
 | `OLLAMA_DEFAULT_MODEL` | Default bare `ollama` model |
 | `LMSTUDIO_MODEL` | Default LM Studio model id |
 | `LMSTUDIO_BASE` | Default `http://localhost:1234` |
@@ -48,5 +58,9 @@ Profiles: `.grok/xllm-providers.toml` (`default_model`, `default_effort`, timeou
 ## Health
 
 ```bash
-node scripts/xllm.mjs doctor
+node scripts/xllm.mjs doctor                 # provider + path health
+node scripts/xllm.mjs inventory --refresh    # re-probe installed CLIs + pulled ollama models
 ```
+
+**Wedged ollama server** (diagnosed live): if `ollama ps` shows nothing but calls fail with a
+cudaMalloc OOM, the server itself is wedged — restarting it is the fix, not switching models.

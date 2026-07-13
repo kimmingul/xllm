@@ -4,41 +4,73 @@
 
 ## Principles
 
-1. **Grok-native first** — prefer `spawn_subagent`, `todo_write`, plan mode, skills.  
-2. **One multi-LLM door** — all external models go through `scripts/xllm-advisor.js`.  
-3. **Artifacts over chat memory** — durable paths under `<state>/artifacts/`.  
-4. **Evidence over claims** — `/ralph` and `/verify` refuse vibes-based completion.  
-5. **Thin over clever** — skills are playbooks; no second agent OS.
+1. **Host-native first** — the host CLI (Claude Code · Codex · Grok Build) keeps subagents,
+   plan mode, hooks, and all orchestration. xllm adds only what the host structurally cannot:
+   other vendors' independent opinions, free local models, and measured diversity.
+2. **One multi-LLM door** — every external model call goes through `scripts/xllm-advisor.js`
+   (quoting, stdin-vs-argv, Windows shims, timeouts, env sanitization, artifact capture).
+   Skills never hand-build `codex exec` / `claude -p` invocations.
+3. **Artifacts over chat memory** — durable paths under `<state>/artifacts/`; the last stdout
+   line of every command is the artifact/index path.
+4. **Evidence over claims** — structured verdicts land in the append-only ledger *before* any
+   prose; derived views (stats, traits) never write back; no hand-written model lore — measured
+   values with sample sizes only.
+5. **Thin over clever** — skills are playbooks over scripts; no second agent OS, no loops, no
+   orchestration state machines (see [SCOPE.md](./SCOPE.md)).
 
 ## Components
 
 ```text
-┌─────────────────────────────────────────────────────┐
-│  Grok Build session                                 │
-│  skills: ask xllm ralph team verify xllm-setup       │
-│  agents: critic executor verifier security-reviewer │
-└───────────────┬─────────────────────┬───────────────┘
-                │                     │
-                ▼                     ▼
-        spawn_subagent         run_terminal_command
-        (native workers)       node scripts/xllm-advisor.js
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    ▼                 ▼                 ▼
-                 cloud CLIs        ollama           lmstudio HTTP
-                    │                 │                 │
-                    └────────────┬────┴─────────────────┘
-                                 ▼
-                      <state>/artifacts/{ask,xllm,ralph,team,verify}
+┌──────────────────────────────────────────────────────────────┐
+│  Host session (Claude Code · Codex · Grok Build)             │
+│  shared skills: ask multi debate council exec scribe setup   │
+│  (Grok Build adapter: ask · xllm · xllm-setup)               │
+└──────────────────────────────┬───────────────────────────────┘
+                               │  shell: node scripts/xllm.mjs <command>
+                               ▼
+   ┌───────────────┬───────────────────┬──────────────┬─────────────────┐
+   ▼               ▼                   ▼              ▼                 ▼
+ xllm-advisor   xllm-panel          xllm-exec      xllm-scribe     xllm-bench
+ (ask · multi   xllm-debate         (ephemeral     (cheap git      xllm-traits
+  · propose)    xllm-council         clone)         prose)         xllm-routing
+   │               │                   │              │
+   └───────────────┴─────────┬─────────┴──────────────┘
+                             ▼
+   cloud CLIs: codex · claude · gemini · grok · antigravity · cursor
+   local runtimes: ollama (HTTP :11434) · lmstudio (HTTP) · lemonade
+                             │
+                             ▼
+   <state>/artifacts/{ask,xllm,proposals,exec}     (xllm = multi-run indexes)
+   <state>/panel-ledger.jsonl                      (append-only verdict ledger)
 ```
 
-## Skill layering
+## The measurement loop
 
-| Layer | Skill | Depends on |
-|-------|-------|------------|
-| L0 | advisor script | Node + provider CLIs |
-| L1 | `/ask` | L0 |
-| L2 | `/xllm` | L1 × N + synthesis |
-| L2 | `/verify` | shell tools (+ optional L1) |
-| L3 | `/ralph` | L1 + L2 + todo_write |
-| L3 | `/team` | subagents + L1 + todo_write |
+Evidence is written once, derived many times, and finally *routes*:
+
+```text
+panel / debate / council ──► <state>/panel-ledger.jsonl ──┐
+seeded-defect bench ──────► benchmarks/results/*.json ────┼──► xllm-traits ──► xllm-routing
+contract probes ──────────► contract cache ───────────────┘    Wilson 95% LCB,   pick / pick-team
+                                                               sample sizes      (gates: tasks ≥ 4 ·
+                                                               always visible     opportunities ≥ 12 ·
+                                                                                  margin +0.10)
+```
+
+What the benchmark measures is what the router does. With no evidence, routing stays
+bit-identical to the legacy baseline (`--no-traits` forces this). Raw bench runs are
+gitignored; notable findings are transcribed to [benchmarks/FINDINGS.md](../benchmarks/FINDINGS.md).
+
+## Layering
+
+| Layer | Surface | Depends on |
+|-------|---------|------------|
+| L0 | `xllm-advisor.js` — the one door | Node ≥ 18 + provider CLIs / local runtimes |
+| L1 | `ask` · `multi` · `propose` | L0 |
+| L2 | `panel` · `debate` · `council` | L0 + structured-output extractor + ledger |
+| L2 | `scribe` | L0 + deterministic collectors/validators |
+| L3 | `exec` | L0 + separate-`.git` clone + OS sandbox (codex/claude only, fail-closed) |
+| — | `bench` · `traits` · `pick`/`pick-team` | ledger + results (read-only derivation) |
+
+The escalation ladder (`ask` → `propose` → `exec`) grows advisor freedom per rung; power over
+the user's checkout stays **zero on every rung** — merge, push, and credentials are host-side.

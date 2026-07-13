@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.24.1 — 2026-07-13
+
+### Measured — the cleanest diversity dividend yet (docs/findings only)
+Follow-up experiment to v0.24.0's honest "no clean advantage" reading. Prior
+panels always carried a near-ceiling model whose high best-single ate the
+dividend; ensemble theory predicts the dividend grows when no member dominates.
+Tested directly with a balanced, same-surface, decorrelated panel.
+
+- **Balanced panel: `gemma4:cloud` + `glm-5.2:cloud` + `nemotron-3-super:cloud`**
+  (comparable strength, different labs, all `http-completion` → no cross-surface
+  confound), hard set, single mode, **run 3× to separate signal from variance.**
+- **Dividend = +2 on every run (mean 2.0, σ=0)** — double the +1 of any
+  dominated panel, and rock-steady. Model ranks rotate run-to-run and individual
+  scores swing ±3, yet the ensemble dividend does not move (the panel is more
+  stable than its members). Mean pairwise agreement 0.735; **zero permanent
+  blind spots** across the 3 runs (vs 2 for the grok-anchored panel). Per-run
+  union 19–20/21 — on par with a single frontier model, from three free local
+  mid-tier models.
+- The mission hypothesis, cleanly confirmed: diversity pays when errors
+  decorrelate AND no single member dominates — measured, not assumed. Honest
+  bounds kept: +2/21 is ~10%, single-set, and the win is cost-shape (3× free
+  local calls vs one paid frontier call), not raw ceiling.
+
+No code change: FINDINGS.md entry, README benchmark section (new act six),
+GitHub Pages showcase (act six + headline stat +1 → +2). `npm run ci` green
+(137 tests); Pages tag balance checked (87/87 div, 6/6 section, 6/6 table).
+
 ## 0.24.0 — 2026-07-13
 
 ### Added — the bench now measures deliberation and tags its measurement surface

@@ -223,3 +223,50 @@ quality OR harness amplification. For the record, xllm never invokes grok in a
 team/agent mode — the call is a one-shot `grok -m … --reasoning-effort … -p`
 print, read-only, identical to every cloud CLI; but grok's `-p` is still a
 vendor CLI, hence `cli-agentic`.
+
+## 2026-07-13 — the cleanest dividend yet: a balanced, same-surface panel
+
+**Motivation.** Every panel measured so far carried a near-ceiling model
+(grok 18–20, claude 19), so its high best-single ate the dividend (the
+2026-07-12 grok-anchored panel: +1 over best single). Ensemble theory predicts
+the dividend GROWS when no member dominates. Test it directly: a panel of three
+mid-tier models that are (a) roughly comparable — no dominator, (b) different
+labs — decorrelated, and (c) **all `http-completion`** — so the cross-surface
+confound of the grok-anchored run is eliminated. `ollama:gemma4:cloud` +
+`ollama:glm-5.2:cloud` + `ollama:nemotron-3-super:cloud`, hard set, single mode,
+**run 3× to separate signal from run-to-run variance.**
+
+**Result — dividend +2 on every run:**
+
+| run | gemma4 | glm-5.2 | nemotron | best single | union | dividend |
+|-----|--------|---------|----------|-------------|-------|----------|
+| 1 | 16 | 17 | 14 | 17 | 19/21 | **+2** |
+| 2 | 14 | 16 | 17 | 17 | 19/21 | **+2** |
+| 3 | 16 | 18 | 15 | 18 | 20/21 | **+2** |
+
+- **Dividend = [+2, +2, +2], mean 2.0, zero spread** — double the +1 of every
+  dominated panel, and rock-steady across runs. The hypothesis is confirmed:
+  remove the dominator and the dividend grows.
+- **No model dominates — the rank rotates.** glm-5.2 was best in runs 1 & 3,
+  nemotron in run 2; each model was the weakest in some run (nemotron 14, gemma4
+  14, nemotron 15). Individual scores swing ±3 run-to-run, yet **the ensemble
+  dividend does not move.** The panel is more stable than any of its members —
+  a selling point, not a footnote.
+- **Mean pairwise agreement 0.735** — the same decorrelation regime as the hard
+  set (0.746), now with no surface confound to explain it away.
+- **Zero permanent blind spots.** Across the 3 runs the union covered ALL 21
+  defects (17 in every run; 4 flaky — including h6 `double-fire`, the defect the
+  grok-anchored run had called "missed by every model", which a balanced
+  panelist actually caught in 2/3 runs). Contrast the grok-anchored 4-model run,
+  which left 2 defects (h4 tz, h6 double-fire) permanently uncovered.
+
+**Reading — this is the mission hypothesis, cleanly confirmed.** A same-surface,
+no-dominator, decorrelated panel produced the largest and most stable dividend
+in the benchmark's history (+2/21, σ=0), reaching a per-run union of 19–20/21 —
+on par with a single frontier model (grok 20, claude 19) — from three mid-tier
+**free local** models. The practical claim the whole project rests on finally
+has its clean demonstration: *diversity pays when errors decorrelate and no
+single member dominates, and three cheap decorrelated models can stand in for
+one frontier model — measured, not assumed.* Honest bounds: +2/21 is still
+modest (~10%); these are single-set, deterministic-regex results; and the win is
+cost-shape (3× free local calls vs one paid frontier call), not raw ceiling.

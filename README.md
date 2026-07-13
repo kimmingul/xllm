@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.23.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.24.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -48,121 +48,6 @@ node scripts/xllm.mjs exec codex@high "X를 구현해줘" --test-cmd "npm test"
 `refs/xllm/exec/<id>` 반환, 변조 트립와이어) · 병합/push/자격증명은 호스트 측 · 샌드박스 가능한
 프로바이더만(codex/claude) · OS 샌드박스 고장 시 fail-closed · executor의 green은 증거이지 신뢰가
 아님(병합 후 재검증).
-
----
-
-## 벤치마크 — "우리는 측정했습니다"
-
-xllm은 **자기 핵심 주장을 반증할 수 있는** 시딩 결함 벤치마크를 내장합니다. 알려진 결함을 심은
-코드 리뷰 과제에서 단일 프로바이더 vs 블라인드 패널의 검출률과 **쌍별 오류 상관**을 비교합니다.
-실측은 3막으로 진행됐고, 세 결과가 합쳐져 "탈상관이 측정된 곳에만 다양성을 쓴다"는 제품
-동작으로 귀결됩니다.
-
-### 1막 — 쉬운 결함: 다양성은 연극이었다 (2026-07-11 · codex vs grok)
-
-4개 시딩 과제, 잘 알려진 결함 11개(SQLi · XSS · 평문 비밀번호 · TOCTOU 등), 결정적 regex 채점.
-
-| 리뷰어 | 검출 | 놓침 |
-|--------|------|------|
-| codex (단독) | 10 / 11 | `no-fail-return` |
-| grok (단독) | 10 / 11 | `no-fail-return` |
-| 패널 (합집합) | 10 / 11 | `no-fail-return` |
-
-**쌍별 오류 상관 = 1.0, 추가 검출 = 0.** 서로 다른 벤더(OpenAI codex, xAI grok)인데도 잘 알려진
-결함 클래스에서는 오류가 완벽히 상관되어, 크로스-벤더 다양성이 여기서는 연극이었습니다 —
-앙상블 이론이 "오류가 탈상관일 때만 다양성이 배당을 낸다"고 예측한 그대로입니다.
-
-### 2막 — 어려운 결함: 탈상관이 출현하고, 배당이 실재한다 (2026-07-11 · 5모델)
-
-hard 세트(6과제 h1–h6, 미묘한 결함 21개)에서 5개 모델(`claude:opus`, `codex:gpt-5.5`,
-`grok:grok-4.5`, `ollama:glm-5.2:cloud`, `ollama:gemma4:cloud`)을 캘리브레이션한 뒤,
-패널(claude / grok / gemma4)을 실측했습니다.
-
-| | 검출 |
-|--|--|
-| claude:opus 단독 | 19 / 21 |
-| grok-4.5 단독 | 19 / 21 |
-| gemma4 단독 | 12 / 21 |
-| **최고 단일 모델** | **19 / 21** |
-| **패널 합집합** | **20 / 21** |
-| **다양성 배당** | **+1** |
-
-claude와 grok은 각각 2개를 놓치지만 **서로 다른** 결함을 놓칩니다(claude는 h4에서, grok은
-h3에서 — 상대가 잡아줌). 패널이 최고 단일 모델이 놓친 결함 1개를 회수했고, 이 배당은 순수하게
-탈상관된 오류가 만든 것입니다. 나머지 1개(h6의 once-emitter 이중 호출/누수 클래스)는 두 강한
-모델이 함께 놓친 **공유 맹점** — 패널도 못 잡으며, 바로 이 지점이 4번째의 더 탈상관된 모델로
-에스컬레이션할 자리입니다.
-
-| 쌍 | 일치율 | 공유 맹점 |
-|----|--------|-----------|
-| claude ↔ grok | 0.905 | 1 |
-| claude ↔ gemma4 | 0.667 | 2 |
-| grok ↔ gemma4 | 0.667 | 2 |
-| **평균** | **0.746** | — |
-
-평균 쌍별 일치율이 easy 세트 **1.0 → hard 세트 0.746**으로 떨어지며 배당의 전제 조건(오류
-탈상관)이 실제로 실현됐고, 그와 함께 배당(+1/21)이 나타났습니다. **오류 상관은 문제 난이도의
-함수입니다** — 교과서 결함에선 1.0, 미묘한 결함에선 뚜렷이 낮아집니다. 여기서 배당이 작은 것은
-패널에 천장 근처의 모델이 둘이나 있기 때문이며, 단일 지배자가 없을수록 커집니다.
-
-<details>
-<summary>과제별 검출률 캘리브레이션 (5모델 × 6과제)</summary>
-
-| task | claude:opus | gpt-5.5 | grok-4.5 | glm-5.2 | gemma4 |
-|------|-----|-----|-----|-----|-----|
-| h1-median | 100% | 100% | 100% | 67% | 67% |
-| h2-retry-jitter | 100% | **25%** | 100% | 75% | 100% |
-| h3-cache-lru | 100% | 67% | 67% | 67% | **33%** |
-| h4-date-range | 67% | 67% | 100% | 67% | **33%** |
-| h5-parse-int | 100% | 100% | 100% | 100% | 75% |
-| h6-event-emitter | 75% | 50% | 75% | 50% | **25%** |
-
-- "5모델 전부 ≤70%" 난이도 필터에 걸린 과제는 **0개** — 프론티어 모델(Opus 4.8, grok-4.5)에겐
-  이 세트도 대부분 쉽습니다. 난이도는 약한 모델 기준으로만 성립합니다.
-- 하지만 오류는 탈상관합니다: gpt-5.5는 h2에서 25%(채점기 인공물 아님 — 다른 유효 이슈는
-  찾았으나 시딩 결함 3개를 실제로 놓침), gemma4는 h3/h4/h6에서 크게 발산.
-
-</details>
-
-### 3막 — 측정이 라우팅을 움직인다 (2026-07-12 · hard 세트 재실행)
-
-full hard 세트(6과제 21결함)에서 codex vs grok 재실행. 프로바이더 오류 0 — 모든 셀이 실제 판정.
-
-| 프로바이더 | 검출 | 놓친 것 |
-|-----------|------|---------|
-| codex 단독 | 15 / 21 (71%) | h1 윈도 엣지 ×2 · h4 tz 비교 · h6 이중 발화 + late-handler ×2 |
-| grok 단독 | 20 / 21 (95%) | h3 `no-eviction-on-equal`만 |
-| 패널 (합집합) | 20 / 21 | 공유 맹점 1 |
-
-쌍별 오류 상관 **0.762**(공유 21셀) — 2막의 0.746과 일관되게 재현. 배당은 최고 단일 대비
-**0**(grok이 지배), codex 대비 **+5**. 한 패널리스트가 압도하면 합집합은 지배자 위에 아무것도
-더하지 못하고, 공유 맹점은 합집합에서도 살아남습니다. **배당은 추상적 "다양성"의 속성이 아니라
-"당신의 최고 단일 모델이 누구냐"의 속성 — 즉 라우팅 문제입니다.**
-
-그리고 이 결과가 실제로 라우팅을 움직였습니다(측정→라우팅 루프의 첫 라이브 폐쇄):
-
-```text
-pick verify / pick security (high intensity, legacy baseline = codex):
-  → grok@xhigh · measured bench: grok LCB 0.7733 vs codex 0.5004
-    over 21 shared opportunities (6 tasks, via lcb-margin)
-```
-
-측정 → 원장/결과 → `traits`(Wilson 95% 하한) → 라우팅 결정, 근거 문자열에 표본 수 인용.
-벤치마크가 잰 것이 곧 라우터가 하는 일이 됐습니다.
-
-> **정직성 노트** — qwen3.6이 CUDA OOM으로 리뷰를 한 번도 내지 못한 교란 실행은 "0개 검출"로
-> 채점하지 않고 `valid_comparison` 플래그로 **무효 처리**했습니다. 크래시는 데이터가 아닙니다.
-
-### 재현
-
-```bash
-npm run bench:live                                                                 # 기본 세트(잘 알려진 결함)
-node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks      # 어려운/탈상관 세트
-node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks --tasks h3-cache-lru   # 과제 지정
-```
-
-원시 실행 JSON은 gitignore, 요약은 커밋 — 전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) ·
-로드맵: [`docs/diversity-roadmap.md`](docs/diversity-roadmap.md)
 
 ---
 
@@ -417,7 +302,7 @@ discipline show|install|remove [--target <path>]
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 133개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 137개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)
@@ -447,6 +332,183 @@ docs/  index.html SCOPE.md *-design.md …   소개 페이지 + 스코프/설계
 오케스트레이션 상태기계**(autopilot류), 자동 병합, push/배포, 자격증명 처리, 다수결 자동 적용
 ("투표=진리" 엔진) — 실행 오케스트레이션과 다중 태스크 조합은 호스트 네이티브의 몫입니다.
 (debate/council은 한 질문에 대한 **유한한** 심의 파이프라인이지 실행 루프가 아닙니다.)
+
+---
+
+## 벤치마크 — "우리는 측정했습니다"
+
+xllm은 **자기 핵심 주장을 반증할 수 있는** 시딩 결함 벤치마크를 내장합니다. 알려진 결함을 심은
+코드 리뷰 과제에서 검출률·**쌍별 오류 상관**·심의 결과를 측정합니다. 실측은 시간순으로 누적됐고,
+"탈상관이 측정된 곳에만 다양성을 쓰고, 그것이 실제로 도움이 되는지도 잰다"는 제품 동작으로
+귀결됩니다. **긍정적 결과를 보장하는 도구가 아니라, 도움이 될 때를 감지하는 계측기입니다.**
+
+### 1막 — 쉬운 결함: 다양성은 연극이었다 (2026-07-11 · codex vs grok)
+
+4개 시딩 과제, 잘 알려진 결함 11개(SQLi · XSS · 평문 비밀번호 · TOCTOU 등), 결정적 regex 채점.
+
+| 리뷰어 | 검출 | 놓침 |
+|--------|------|------|
+| codex (단독) | 10 / 11 | `no-fail-return` |
+| grok (단독) | 10 / 11 | `no-fail-return` |
+| 패널 (합집합) | 10 / 11 | `no-fail-return` |
+
+**쌍별 오류 상관 = 1.0, 추가 검출 = 0.** 서로 다른 벤더(OpenAI codex, xAI grok)인데도 잘 알려진
+결함 클래스에서는 오류가 완벽히 상관되어, 크로스-벤더 다양성이 여기서는 연극이었습니다 —
+앙상블 이론이 "오류가 탈상관일 때만 다양성이 배당을 낸다"고 예측한 그대로입니다.
+
+### 2막 — 어려운 결함: 탈상관이 출현하고, 배당이 실재한다 (2026-07-11 · 5모델)
+
+hard 세트(6과제 h1–h6, 미묘한 결함 21개)에서 5개 모델(`claude:opus`, `codex:gpt-5.5`,
+`grok:grok-4.5`, `ollama:glm-5.2:cloud`, `ollama:gemma4:cloud`)을 캘리브레이션한 뒤,
+패널(claude / grok / gemma4)을 실측했습니다.
+
+| | 검출 |
+|--|--|
+| claude:opus 단독 | 19 / 21 |
+| grok-4.5 단독 | 19 / 21 |
+| gemma4 단독 | 12 / 21 |
+| **최고 단일 모델** | **19 / 21** |
+| **패널 합집합** | **20 / 21** |
+| **다양성 배당** | **+1** |
+
+claude와 grok은 각각 2개를 놓치지만 **서로 다른** 결함을 놓칩니다(claude는 h4에서, grok은
+h3에서 — 상대가 잡아줌). 패널이 최고 단일 모델이 놓친 결함 1개를 회수했고, 이 배당은 순수하게
+탈상관된 오류가 만든 것입니다. 나머지 1개(h6의 once-emitter 이중 호출/누수 클래스)는 두 강한
+모델이 함께 놓친 **공유 맹점** — 패널도 못 잡으며, 바로 이 지점이 4번째의 더 탈상관된 모델로
+에스컬레이션할 자리입니다.
+
+| 쌍 | 일치율 | 공유 맹점 |
+|----|--------|-----------|
+| claude ↔ grok | 0.905 | 1 |
+| claude ↔ gemma4 | 0.667 | 2 |
+| grok ↔ gemma4 | 0.667 | 2 |
+| **평균** | **0.746** | — |
+
+평균 쌍별 일치율이 easy 세트 **1.0 → hard 세트 0.746**으로 떨어지며 배당의 전제 조건(오류
+탈상관)이 실제로 실현됐고, 그와 함께 배당(+1/21)이 나타났습니다. **오류 상관은 문제 난이도의
+함수입니다** — 교과서 결함에선 1.0, 미묘한 결함에선 뚜렷이 낮아집니다. 여기서 배당이 작은 것은
+패널에 천장 근처의 모델이 둘이나 있기 때문이며, 단일 지배자가 없을수록 커집니다.
+
+<details>
+<summary>과제별 검출률 캘리브레이션 (5모델 × 6과제)</summary>
+
+| task | claude:opus | gpt-5.5 | grok-4.5 | glm-5.2 | gemma4 |
+|------|-----|-----|-----|-----|-----|
+| h1-median | 100% | 100% | 100% | 67% | 67% |
+| h2-retry-jitter | 100% | **25%** | 100% | 75% | 100% |
+| h3-cache-lru | 100% | 67% | 67% | 67% | **33%** |
+| h4-date-range | 67% | 67% | 100% | 67% | **33%** |
+| h5-parse-int | 100% | 100% | 100% | 100% | 75% |
+| h6-event-emitter | 75% | 50% | 75% | 50% | **25%** |
+
+- "5모델 전부 ≤70%" 난이도 필터에 걸린 과제는 **0개** — 프론티어 모델(Opus 4.8, grok-4.5)에겐
+  이 세트도 대부분 쉽습니다. 난이도는 약한 모델 기준으로만 성립합니다.
+- 하지만 오류는 탈상관합니다: gpt-5.5는 h2에서 25%(채점기 인공물 아님 — 다른 유효 이슈는
+  찾았으나 시딩 결함 3개를 실제로 놓침), gemma4는 h3/h4/h6에서 크게 발산.
+
+</details>
+
+### 3막 — 측정이 라우팅을 움직인다 (2026-07-12 · hard 세트 재실행)
+
+full hard 세트(6과제 21결함)에서 codex vs grok 재실행. 프로바이더 오류 0 — 모든 셀이 실제 판정.
+
+| 프로바이더 | 검출 | 놓친 것 |
+|-----------|------|---------|
+| codex 단독 | 15 / 21 (71%) | h1 윈도 엣지 ×2 · h4 tz 비교 · h6 이중 발화 + late-handler ×2 |
+| grok 단독 | 20 / 21 (95%) | h3 `no-eviction-on-equal`만 |
+| 패널 (합집합) | 20 / 21 | 공유 맹점 1 |
+
+쌍별 오류 상관 **0.762**(공유 21셀) — 2막의 0.746과 일관되게 재현. 배당은 최고 단일 대비
+**0**(grok이 지배), codex 대비 **+5**. 한 패널리스트가 압도하면 합집합은 지배자 위에 아무것도
+더하지 못하고, 공유 맹점은 합집합에서도 살아남습니다. **배당은 추상적 "다양성"의 속성이 아니라
+"당신의 최고 단일 모델이 누구냐"의 속성 — 즉 라우팅 문제입니다.**
+
+그리고 이 결과가 실제로 라우팅을 움직였습니다(측정→라우팅 루프의 첫 라이브 폐쇄):
+
+```text
+pick verify / pick security (high intensity, legacy baseline = codex):
+  → grok@xhigh · measured bench: grok LCB 0.7733 vs codex 0.5004
+    over 21 shared opportunities (6 tasks, via lcb-margin)
+```
+
+측정 → 원장/결과 → `traits`(Wilson 95% 하한) → 라우팅 결정, 근거 문자열에 표본 수 인용.
+벤치마크가 잰 것이 곧 라우터가 하는 일이 됐습니다.
+
+### 4막 — 4번째 탈상관 모델이 강 모델 쌍의 맹점을 회수한다 (2026-07-13 · 4모델)
+
+2막이 예측한 "공유 맹점 → 4번째 탈상관 모델로 에스컬레이션"을 실측했습니다. 강 앵커(grok)에
+클라우드 로컬 모델 3종을 추가한 4모델 패널(single):
+
+| 모델 | 표면 | 검출 |
+|------|------|------|
+| grok | cli-agentic | 18 / 21 |
+| nemotron-3-super:cloud | http-completion | 16 / 21 |
+| glm-5.2:cloud | http-completion | 15 / 21 |
+| gemma4:cloud | http-completion | 13 / 21 |
+| **패널 합집합** | 혼합 | **19 / 21 (배당 +1)** |
+
+**예측 확인.** `h3 no-eviction-on-equal` — 2026-07-12에 codex와 grok이 **둘 다** 놓친 공유 맹점
+— 을 이번엔 **gemma4:cloud와 nemotron-3-super:cloud가 잡았습니다.** nemotron은 h3를 **3/3**으로
+완전 검출해 강 모델 쌍이 놓친 LRU off-by-one을 회수했습니다. 더 탈상관된 모델로의 에스컬레이션이
+실제로 작동한다는 라이브 증거입니다.
+
+**단, 다양성은 만능 용매가 아닙니다.** 두 결함(`h4 tz-comparison`, `h6 double-fire`)은 4모델
+합집합에서도 살아남습니다. 특히 h6 double-fire는 지금까지 측정된 **모든 모델(codex·grok·gemma4·
+glm-5.2·nemotron)이 전부 놓친** 깊은 맹점입니다.
+
+쌍별 일치율: grok↔gemma4 **0.667**(최고 탈상관), grok↔nemotron 0.810, grok↔glm-5.2 0.857.
+정직한 교락 2가지: (1) 이건 **크로스-표면** 패널 — grok은 벤더 CLI(cli-agentic), 클라우드 3종은
+원 모델에 가까운 HTTP 완성 — 이라 grok↔클라우드 탈상관에는 모델 차이와 표면 차이가 섞여 있고,
+(2) grok이 여기서 **18/21**(2026-07-12엔 20/21)로 같은 모델이 실행마다 다른 점수를 냅니다 —
+단일 실행 셀에 측정 노이즈가 있다는 뜻이며, traits가 원점수가 아닌 Wilson 하한·표본 수로 게이트하는
+이유입니다.
+
+### 5막 — debate를 처음으로 측정: 여기서는 품질 배당이 없었다 (2026-07-13 · codex vs grok)
+
+`--modes debate`는 검출 합집합이 아니라 **실제 적대 프로토콜**을 채점합니다. 각 주장의 텍스트를
+시딩 결함에 매핑해, 시딩 결함에 대응하면 **grounded(참 검출)**, 대응 없으면 **surplus**로 나누고,
+반박이 grounded를 surplus보다 높은 비율로 살려두는지(품질 판별)를 봅니다.
+
+| 버킷 | 생존 | 비율 |
+|------|------|------|
+| grounded (참 결함) 주장 | 20 / 23 | 0.87 |
+| surplus 주장 | 22 / 25 | 0.88 |
+| **품질 판별** | | **−0.01** |
+
+debate는 48개 주장 중 **6개(12.5%)만** 죽였고, 그 kill은 **grounded 3 / surplus 3**으로 갈려
+참 결함 주장을 surplus만큼 자주 죽였습니다. 강하고 정렬된 동일-표면 쌍에서 SURVIVED 라벨은 시딩
+결함 대응 여부를 **추적하지 못했습니다.**
+
+이것은 1막(상관 1.0 → "다양성은 연극")의 debate 판입니다. **심의 배당도 다양성 배당처럼
+조건부이지 공짜가 아닙니다** — 적대적 반박은 죽일 만한 확신에 찬 오류가 있을 때만 품질을
+날카롭게 하는데, 강하고 정렬된 쌍은 이 과제들에서 그런 오류를 거의 만들지 않았습니다(kill 근접
+제로). 성과는 긍정적 결과가 아니라, **debate가 도움이 될 때를 감지하는 계측기가 이제 존재한다는
+것** — "설계+라이브 e2e로만 출하됐던" 마지막 공백을 닫았습니다. 코드·리포트에 강제된 정직성
+단서: *surplus ≠ 거짓* — 프론티어 모델은 시딩되지 않은 진짜 이슈도 제기해 surplus에 섞이므로
+품질 판별은 하한입니다. 다만 kill이 이토록 드물면 하한조차 날카로움 없음을 보입니다.
+
+### 측정 표면 태그 (모델 vs 하네스 교락)
+
+이제 모든 결과가 각 프로바이더의 측정 표면을 기록합니다: `cli-agentic`(자체 도구·추론을 돌릴 수
+있는 벤더 CLI — codex·claude·grok·gemini…) vs `http-completion`(원 모델 — ollama·lmstudio).
+벤치의 측정 단위는 **원 모델이 아니라 xllm이 호출하는 어드바이저 표면**이라는 것을 명시합니다 —
+강한 CLI 점수는 모델 실력일 수도, 하네스 증폭일 수도 있습니다. 기록을 위해: **xllm은 grok을
+team/agent 모드로 부른 적이 없습니다** — 호출은 `grok -m … --reasoning-effort … -p` 원샷 print,
+read-only이며 모든 클라우드 CLI와 동일합니다. 다만 grok의 `-p`도 벤더 CLI이므로 `cli-agentic`입니다.
+
+### 재현
+
+```bash
+npm run bench:live                                                                          # 기본 세트(잘 알려진 결함)
+node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks               # 어려운 세트 (single+panel)
+node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks --modes debate       # 심의 채점
+node scripts/xllm-bench.js run --providers grok,ollama:gemma4:cloud,ollama:nemotron-3-super:cloud --tasks-file hard-tasks --modes single   # 4모델 패널
+```
+
+원시 실행 JSON은 gitignore, 요약은 커밋 — 전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) ·
+로드맵: [`docs/diversity-roadmap.md`](docs/diversity-roadmap.md)
+
+---
 
 ## 라이선스
 

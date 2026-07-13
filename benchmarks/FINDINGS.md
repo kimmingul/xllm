@@ -141,3 +141,85 @@ pick verify / pick security (high intensity, legacy baseline = codex):
 Measurement → ledger/results → traits → routing decision, with the sample
 sizes cited in the reason string. What the benchmark measured is now what
 the router does.
+
+## 2026-07-13 — a 4th, decorrelated model recovers a strong-pair blind spot
+
+**Setup:** full hard set (6 tasks, 21 defects), single mode, a 4-model panel
+that keeps a strong anchor and adds three cloud models pulled for this run:
+`grok` + `ollama:gemma4:cloud` + `ollama:glm-5.2:cloud` +
+`ollama:nemotron-3-super:cloud`. Zero provider errors.
+
+**Single detection:**
+
+| model | surface | detected |
+|-------|---------|----------|
+| grok | cli-agentic | 18/21 |
+| nemotron-3-super:cloud | http-completion | 16/21 |
+| glm-5.2:cloud | http-completion | 15/21 |
+| gemma4:cloud | http-completion | 13/21 |
+| **panel union** | mixed | **19/21 (dividend +1 over best single)** |
+
+**The 2막/2026-07-12 prediction, confirmed.** `h3 no-eviction-on-equal` — the
+shared blind spot both codex and grok missed on 2026-07-12 — is now caught by
+**gemma4:cloud AND nemotron-3-super:cloud**. nemotron scored h3 **3/3**, fully
+recovering the LRU off-by-one the strong pair missed. This is exactly the
+"escalate to a 4th, measured-decorrelated model" case the earlier finding
+named — now with live evidence that the escalation works.
+
+**But diversity is not a universal solvent.** Two defects survive the whole
+4-model union: `h4 tz-comparison` and `h6 double-fire`. h6 double-fire has now
+been missed by **every model measured across every run** (codex, grok, gemma4,
+glm-5.2, nemotron) — a deep blind spot no panel here can buy.
+
+**Pairwise agreement (21 shared cells each):** grok↔gemma4 **0.667** (most
+decorrelated), grok↔nemotron 0.810, grok↔glm-5.2 0.857; the three cloud models
+agree with each other 0.810–0.857. Two honest confounds: (1) this is a
+**cross-surface** panel — grok is a vendor CLI (cli-agentic), the cloud models
+are raw HTTP completion — so grok↔cloud decorrelation is model *and* surface;
+(2) grok scored **18/21 here vs 20/21 on 2026-07-12** — same model, run-to-run
+variance, a reminder that single-run cells carry measurement noise (this is why
+traits gate on Wilson lower bounds and sample counts, not raw rates).
+
+## 2026-07-13 — debate, measured for the first time: no quality dividend here
+
+**Setup:** the new `--modes debate` grades the ACTUAL adversarial protocol, not
+a detection union. For each hard task, `debate run codex,grok` produces claims
+that end SURVIVED/KILLED/UNRESOLVED; each claim's text is mapped to the seeded
+defects. A **grounded** claim maps to ≥1 seeded defect; a **surplus** claim maps
+to none. The falsifiable question: does refutation preserve grounded claims at a
+higher rate than surplus ones (quality discrimination)?
+
+**Result (codex vs grok, both cli-agentic, 0 errors):**
+
+| bucket | survived | rate |
+|--------|----------|------|
+| grounded (real-defect) claims | 20/23 | 0.87 |
+| surplus claims | 22/25 | 0.88 |
+| **quality discrimination** | | **−0.01** |
+
+Debate killed **6 of 48 claims (12.5%)**, and those kills split **3 grounded /
+3 surplus** — it removed real-defect claims as often as unmapped ones. On a
+strong, aligned, same-surface pair over these tasks, the SURVIVED label did
+**not** track seeded grounding.
+
+**Reading.** This is the debate analogue of the easy-set panel result
+(correlation 1.0 → "diversity was theater"): the deliberation dividend, like
+the diversity dividend, is conditional, not free. Adversarial refutation
+sharpens quality only when there are confident-but-wrong claims to kill — which
+a strong aligned pair on these tasks rarely produced (near-zero kills). The
+deliverable is not a positive result; it is that the **instrument now exists**
+to detect when debate helps, closing the last "shipped on design + live e2e
+only" gap. Honest caveat, enforced in code and the report: *surplus ≠ false* —
+frontier models raise real UNSEEDED issues that land in the surplus bucket, so
+`quality_discrimination` is a lower bound. With kills this rare, even the lower
+bound shows no sharpening here.
+
+**Surface tags (harness-vs-model confound).** Every result now records each
+provider's measurement surface: `cli-agentic` (vendor CLI that may run its own
+tools/reasoning — codex, claude, grok, gemini, …) vs `http-completion` (raw
+model — ollama, lmstudio). This makes explicit that the bench unit is the
+advisor surface xllm calls, not the bare model: a strong CLI score can be model
+quality OR harness amplification. For the record, xllm never invokes grok in a
+team/agent mode — the call is a one-shot `grok -m … --reasoning-effort … -p`
+print, read-only, identical to every cloud CLI; but grok's `-p` is still a
+vendor CLI, hence `cli-agentic`.

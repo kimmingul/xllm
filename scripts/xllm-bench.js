@@ -7,8 +7,13 @@
  * planted defects:
  *   - single:  each provider reviews alone
  *   - panel:   blind same-prompt panel (union of detections)
- * and reports incremental defects found, misses, duration, and pairwise
- * error correlation (hit/miss agreement over task×defect cells).
+ *   - debate:  adversarial refutation; grade the SURVIVING claims
+ *   - council: panel -> debate; grade the SURVIVING claims
+ * and reports incremental defects found, misses, duration, pairwise error
+ * correlation (hit/miss agreement over task×defect cells), and — for the
+ * deliberation modes — whether SURVIVED tracks real detections (grounded vs
+ * surplus survival). Also tags each provider's measurement surface
+ * (cli-agentic vs http-completion) so the model-vs-harness confound is visible.
  *
  * Grading is deterministic regex matching against known defect labels —
  * imperfect but falsifiable and cheap. Live providers required; NOT part of
@@ -62,6 +67,76 @@ export function gradeAnswer(task, answerText) {
     else misses.push(d.id);
   }
   return { hits, misses };
+}
+
+/**
+ * Which delivery surface does xllm actually measure for a provider? The bench
+ * unit is NOT the raw model — it is the advisor surface xllm calls. The vendor
+ * CLIs (codex/claude/grok/…) may run their own agentic loop/tools we do not
+ * control, so a strong CLI score can be model quality OR harness amplification;
+ * the HTTP completion providers (ollama/lmstudio) are much closer to the raw
+ * model. Recording this makes every result self-describing about that confound.
+ */
+export function providerSurface(spec) {
+  const provider = String(spec || '').split(/[:@]/)[0].toLowerCase();
+  if (provider === 'ollama' || provider === 'lmstudio') return 'http-completion';
+  if (provider === 'lemonade') return 'binary-stub';
+  return 'cli-agentic';
+}
+
+/**
+ * Grade debate/council claims against a task's seeded defects. A claim is
+ * "grounded" if its text maps to >=1 seeded defect; otherwise "surplus".
+ *
+ * IMPORTANT honesty caveat: surplus != false. A surplus claim can be a genuine
+ * UNSEEDED defect (frontier models routinely find real issues outside the
+ * planted set) OR a hallucinated one — the two are deliberately conflated here
+ * because the grader cannot tell them apart. So surplus survival is a NOISY
+ * proxy. The falsifiable signal is the DIFFERENTIAL: does deliberation preserve
+ * grounded (real-defect) claims at a higher rate than surplus ones?
+ */
+export function gradeClaims(task, claims) {
+  return (claims || []).map((c) => {
+    const g = gradeAnswer(task, `${c.text || ''} ${c.evidence || ''}`);
+    return {
+      id: c.id,
+      author: c.author || c.authorSpec || null,
+      status: c.status,
+      text: c.text || '',
+      mapped_defects: g.hits,
+      grounded: g.hits.length > 0,
+    };
+  });
+}
+
+/**
+ * The deliberation quality signal, from graded claims:
+ *  - grounded_survival_rate: does debate PRESERVE real detections? (should be
+ *    high — if debate kills grounded claims, it is destroying signal)
+ *  - quality_discrimination = grounded_rate - surplus_rate: does debate keep
+ *    grounded claims MORE than surplus ones? (>0 = discriminates by quality;
+ *    ~0 = deliberation theater — the SURVIVED label is not tracking truth).
+ *    Confounded downward by real-unseeded surplus, so it is a LOWER bound.
+ *  - seeded_defects_covered: distinct seeded defects with >=1 SURVIVING claim.
+ */
+export function deliberationScore(graded) {
+  const survived = (c) => c.status === 'SURVIVED';
+  const grounded = graded.filter((c) => c.grounded);
+  const surplus = graded.filter((c) => !c.grounded);
+  const rate = (arr) => (arr.length ? +(arr.filter(survived).length / arr.length).toFixed(3) : null);
+  const gr = rate(grounded);
+  const sr = rate(surplus);
+  return {
+    total_claims: graded.length,
+    grounded_claims: grounded.length,
+    grounded_survived: grounded.filter(survived).length,
+    grounded_survival_rate: gr,
+    surplus_claims: surplus.length,
+    surplus_survived: surplus.filter(survived).length,
+    surplus_survival_rate: sr,
+    quality_discrimination: gr !== null && sr !== null ? +(gr - sr).toFixed(3) : null,
+    seeded_defects_covered: [...new Set(grounded.filter(survived).flatMap((c) => c.mapped_defects))],
+  };
 }
 
 /**
@@ -131,6 +206,10 @@ export async function runBench({ providers, taskIds = null, modes = ['single', '
   const report = {
     created_at: new Date().toISOString(),
     providers: parsed.map((p) => p.spec),
+    // Self-describing measurement surface (model-vs-harness confound): the
+    // vendor CLIs may run their own agentic loop; http-completion is closer to
+    // the raw model. A cross-surface panel mixes both — noted here, not hidden.
+    surfaces: Object.fromEntries(parsed.map((p) => [p.spec, providerSurface(p.spec)])),
     tasks: tasks.map((t) => t.id),
     modes,
     single: {},
@@ -219,6 +298,86 @@ export async function runBench({ providers, taskIds = null, modes = ['single', '
     }
   }
 
+  // Deliberation modes — run the ACTUAL debate/council protocol over each
+  // seeded task and grade the SURVIVING claims. This is the first measurement
+  // of the quality claim ("plausible-but-wrong claims die, correct ones
+  // survive"), which debate/council previously shipped on design + live e2e
+  // only. Lazy-imported to keep single/panel runs free of the heavier deps.
+  for (const mode of ['debate', 'council']) {
+    if (!modes.includes(mode)) continue;
+    const runner =
+      mode === 'debate'
+        ? (await import('./xllm-debate.js')).runDebate
+        : (await import('./xllm-council.js')).runCouncil;
+    const specs = parsed.map((p) => p.spec);
+    const agg = {
+      per_task: {},
+      task_errors: 0,
+      grounded_claims: 0,
+      grounded_survived: 0,
+      surplus_claims: 0,
+      surplus_survived: 0,
+      seeded_defects_covered: 0,
+      duration_ms: 0,
+      caveat:
+        'surplus != false (a surplus claim may be a real UNSEEDED defect); ' +
+        'quality_discrimination is a lower-bound signal, not a false-positive rate.',
+    };
+    const coveredAll = new Set();
+    for (const t of tasks) {
+      console.error(`[bench] ${mode} × ${t.id}…`);
+      const started = Date.now();
+      let res;
+      try {
+        res = await runner({ specs, question: buildBenchPrompt(spec, t), root: process.cwd() });
+      } catch {
+        res = { exitCode: 1 };
+      }
+      const claimResults = mode === 'debate' ? res.results : res.debate && res.debate.results;
+      if (res.exitCode !== 0 || !Array.isArray(claimResults)) {
+        agg.per_task[t.id] = { error: true };
+        agg.task_errors += 1;
+        agg.duration_ms += Date.now() - started;
+        continue;
+      }
+      const graded = gradeClaims(t, claimResults);
+      const score = deliberationScore(graded);
+      // Coverage counted against THIS task's seeded defects only.
+      const taskCovered = score.seeded_defects_covered.filter((d) =>
+        t.defects.some((x) => x.id === d)
+      );
+      taskCovered.forEach((d) => coveredAll.add(`${t.id}:${d}`));
+      agg.per_task[t.id] = {
+        tally: (mode === 'debate' ? res.tally : res.debate.tally) || null,
+        ...score,
+        seeded_defects_covered: taskCovered,
+        seeded_defects_total: t.defects.length,
+      };
+      agg.grounded_claims += score.grounded_claims;
+      agg.grounded_survived += score.grounded_survived;
+      agg.surplus_claims += score.surplus_claims;
+      agg.surplus_survived += score.surplus_survived;
+      agg.duration_ms += Date.now() - started;
+    }
+    agg.seeded_defects_covered = coveredAll.size;
+    const gRate = agg.grounded_claims ? +(agg.grounded_survived / agg.grounded_claims).toFixed(3) : null;
+    const sRate = agg.surplus_claims ? +(agg.surplus_survived / agg.surplus_claims).toFixed(3) : null;
+    agg.grounded_survival_rate = gRate;
+    agg.surplus_survival_rate = sRate;
+    agg.quality_discrimination = gRate !== null && sRate !== null ? +(gRate - sRate).toFixed(3) : null;
+    agg.verdict =
+      agg.task_errors === tasks.length
+        ? 'INCONCLUSIVE — every task errored'
+        : gRate === null
+          ? 'INCONCLUSIVE — no grounded claims surfaced'
+          : agg.quality_discrimination === null
+            ? `grounded claims survived ${(gRate * 100).toFixed(0)}% (no surplus claims to contrast)`
+            : agg.quality_discrimination > 0
+              ? `deliberation DISCRIMINATED by quality: grounded survived ${(gRate * 100).toFixed(0)}% vs surplus ${(sRate * 100).toFixed(0)}% (+${(agg.quality_discrimination * 100).toFixed(0)}pt)`
+              : `NO quality discrimination on this run: grounded ${(gRate * 100).toFixed(0)}% vs surplus ${(sRate * 100).toFixed(0)}%`;
+    report[mode] = agg;
+  }
+
   // Dividend summary — only over providers that actually ran (a crashed
   // model is not a data point). Flag validity so "no dividend" is never
   // read as proof when the comparison was confounded.
@@ -254,7 +413,21 @@ export async function runBench({ providers, taskIds = null, modes = ['single', '
   const jsonPath = path.join(dir, `${base}.json`);
   fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2), 'utf8');
 
-  console.log(JSON.stringify(report.dividend || {}, null, 2));
+  const summary = {};
+  if (report.dividend) summary.dividend = report.dividend;
+  for (const mode of ['debate', 'council']) {
+    if (report[mode]) {
+      summary[mode] = {
+        verdict: report[mode].verdict,
+        grounded_survival_rate: report[mode].grounded_survival_rate,
+        surplus_survival_rate: report[mode].surplus_survival_rate,
+        quality_discrimination: report[mode].quality_discrimination,
+        seeded_defects_covered: report[mode].seeded_defects_covered,
+        task_errors: report[mode].task_errors,
+      };
+    }
+  }
+  console.log(JSON.stringify(summary, null, 2));
   console.log(jsonPath);
   return { exitCode: 0, report, jsonPath };
 }
@@ -291,7 +464,7 @@ async function main() {
 
   console.error(`xllm bench — seeded-defect diversity benchmark (live providers required)
 Usage:
-  node scripts/xllm-bench.js run --providers p1,p2[,p3] [--tasks t1,t2] [--modes single,panel]
+  node scripts/xllm-bench.js run --providers p1,p2[,p3] [--tasks t1,t2] [--modes single,panel,debate,council]
   node scripts/xllm-bench.js grade-selftest`);
   process.exit(cmd ? 1 : 0);
 }

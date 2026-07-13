@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.24.0 — 2026-07-13
+
+### Added — the bench now measures deliberation and tags its measurement surface
+Closes two honest gaps the user flagged: the benchmark only ever measured the
+blind panel (single/union), and it never recorded whether a strong score was
+model quality or vendor-CLI harness amplification.
+
+- **`--modes debate,council`** — the bench now runs the ACTUAL adversarial
+  protocol over each seeded task and grades the SURVIVING claims. Each claim is
+  mapped to the seeded defects: **grounded** (maps to a real defect) vs
+  **surplus** (maps to none). New pure functions `gradeClaims` /
+  `deliberationScore` report grounded-vs-surplus survival and
+  `quality_discrimination` = grounded_rate − surplus_rate. Honest caveat,
+  enforced in code and the report: *surplus ≠ false* (frontier models raise
+  real UNSEEDED issues), so discrimination is a lower bound. This is the first
+  measurement of debate/council's core quality claim, which previously shipped
+  on design + live e2e only.
+- **Surface tags** — every result records each provider's measurement surface
+  via `providerSurface`: `cli-agentic` (vendor CLI that may run its own
+  tools/reasoning) vs `http-completion` (raw model: ollama/lmstudio). Makes the
+  model-vs-harness confound self-describing in every result file.
+- Tests 133 → 137 (gradeClaims, deliberationScore, providerSurface, null-bucket
+  edge case).
+
+### Measured — three new live findings (benchmarks/FINDINGS.md)
+- **A 4th decorrelated model recovers the strong-pair blind spot.** grok +
+  gemma4:cloud + glm-5.2:cloud + nemotron-3-super:cloud on the hard set: the
+  `h3 no-eviction-on-equal` defect both codex and grok missed on 2026-07-12 is
+  now caught by gemma4 and nemotron (3/3 on h3). Union 19/21, dividend +1. But
+  `h6 double-fire` is now missed by every model measured across every run — a
+  deep blind spot no panel here buys. Honest confounds noted: cross-surface
+  panel; grok scored 18/21 here vs 20/21 before (run-to-run variance).
+- **Debate has no quality dividend on a strong aligned pair.** codex vs grok
+  debate: grounded claims survived 0.87, surplus 0.88 — discrimination −0.01;
+  6/48 claims killed, split 3 grounded / 3 surplus. SURVIVED did not track
+  truth here — the debate analogue of the easy-set "diversity was theater". The
+  deliverable is the instrument, not a guaranteed positive result.
+
+### Changed — README benchmark section moved to the end (before License)
+Per request: all benchmark content now lives in one section just before the
+License, expanded from three acts to five (adds the 4th-model recovery and the
+debate measurement) plus a measurement-surface note. GitHub Pages benchmark
+showcase updated to match (Act four + Act five; test stat 133 → 137).
+
+Verification: `npm run ci` green (check + 137 unit tests + smoke + bench
+selftest); `docs/index.html` tag balance checked (86/86 div, 6/6 section, 5/5
+table). Live bench runs recorded to FINDINGS (raw JSON gitignored).
+
 ## 0.23.0 — 2026-07-13
 
 ### Added — `discipline`: the setup-distillation lane (superpowers' prose residue)

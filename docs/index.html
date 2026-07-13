@@ -305,14 +305,14 @@
     <div class="section-head">
       <h2>We measured it.</h2>
       <p>xllm ships a seeded-defect benchmark that can refute its own core claim.
-         Here's what it told us — in three acts.</p>
+         Here's what it told us — and it keeps measuring.</p>
     </div>
 
     <div class="stat-row">
       <div class="stat"><div class="big">1.0</div><div class="lbl">error correlation<br>on textbook defects</div></div>
       <div class="stat"><div class="big">0.75</div><div class="lbl">error correlation<br>on hard defects</div></div>
       <div class="stat"><div class="big">+1</div><div class="lbl">panel dividend beyond<br>the best single model</div></div>
-      <div class="stat"><div class="big">133</div><div class="lbl">unit tests<br>green</div></div>
+      <div class="stat"><div class="big">137</div><div class="lbl">unit tests<br>green</div></div>
     </div>
 
     <div class="finding">
@@ -377,6 +377,47 @@
          next judgment-role pick consumed them — <code>pick verify</code> moved to grok citing
          <code>LCB 0.7733 vs 0.5004 over 21 shared opportunities</code>. What the benchmark
          measured is what the router does.</p>
+    </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act four — a fourth, decorrelated model recovers the shared blind spot</h3>
+      <p>Act two predicted it: when both strong models share a blind spot, escalate to a
+         fourth, measured-decorrelated model. So we did — anchoring on grok and adding three
+         cloud models. The LRU off-by-one that <em>both</em> codex and grok missed on the rerun
+         is now caught by <b>gemma4</b> and <b>nemotron-3-super</b> (which scored 3/3 on that task).</p>
+      <table class="bt">
+        <tr><th>Model</th><th>Surface</th><th>Detected</th></tr>
+        <tr><td>grok</td><td>cli-agentic</td><td>18 / 21</td></tr>
+        <tr><td>nemotron-3-super:cloud</td><td>http-completion</td><td>16 / 21</td></tr>
+        <tr><td>glm-5.2:cloud</td><td>http-completion</td><td>15 / 21</td></tr>
+        <tr><td>gemma4:cloud</td><td>http-completion</td><td>13 / 21</td></tr>
+        <tr><td><b>panel (union)</b></td><td>mixed</td><td><b>19 / 21 — dividend +1</b></td></tr>
+      </table>
+      <p class="quote">Escalation works — but diversity is not a universal solvent. One defect
+         (a once-emitter double-fire) is now missed by <em>every</em> model measured across
+         every run: a deep blind spot no panel here can buy.</p>
+    </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act five — debate, measured for the first time: no quality dividend here</h3>
+      <p>Debate and council shipped on design + live e2e only — the quality claim
+         ("plausible-but-wrong claims die, correct ones survive") was never <em>measured</em>.
+         Now it is: the bench grades the actual adversarial protocol, mapping each surviving
+         claim to the seeded defects. A <b>grounded</b> claim maps to a real defect; a
+         <b>surplus</b> one does not.</p>
+      <table class="bt">
+        <tr><th>Bucket</th><th>Survived refutation</th></tr>
+        <tr><td>grounded (real-defect) claims</td><td>20 / 23 — 0.87</td></tr>
+        <tr><td>surplus claims</td><td>22 / 25 — 0.88</td></tr>
+        <tr><td><b>quality discrimination</b></td><td class="miss"><b>−0.01</b></td></tr>
+      </table>
+      <p class="quote">On a strong, aligned pair (codex vs grok), debate killed only 6 of 48
+         claims — and split them 3 grounded / 3 surplus. SURVIVED did not track truth. This is
+         the debate analogue of act one: the dividend is conditional, not free.</p>
+      <p style="margin-top:18px">The deliverable is not a positive result — it is that the
+         <b>instrument now exists</b> to detect when deliberation helps. Every result also tags
+         its measurement surface (<code>cli-agentic</code> vs <code>http-completion</code>), so a
+         strong CLI score is never silently mistaken for raw model quality.</p>
     </div>
   </div>
 </section>

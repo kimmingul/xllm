@@ -758,7 +758,15 @@ import {
   suggestTiebreaker,
   JUDGMENT_ROLES,
 } from './xllm-routing.js';
-import { gradeAnswer, errorCorrelation, loadTasks, resolveTasksFile } from './xllm-bench.js';
+import {
+  gradeAnswer,
+  errorCorrelation,
+  loadTasks,
+  resolveTasksFile,
+  gradeClaims,
+  deliberationScore,
+  providerSurface,
+} from './xllm-bench.js';
 
 test('modelCapability parses size class and kind from model names', () => {
   assert.strictEqual(modelCapability('ollama:llama3.2').size_class, 'unknown'); // no B tag
@@ -836,6 +844,50 @@ test('bench errorCorrelation intersects keys — a crashed provider has no cells
   const worked = { 'x:1': true, 'x:2': false };
   const crashed = {}; // errored — contributed nothing
   assert.strictEqual(errorCorrelation(worked, crashed), null);
+});
+
+test('providerSurface splits harness vs raw-model measurement', () => {
+  assert.strictEqual(providerSurface('ollama:gemma4:cloud'), 'http-completion');
+  assert.strictEqual(providerSurface('lmstudio:phi3'), 'http-completion');
+  assert.strictEqual(providerSurface('grok@high'), 'cli-agentic');
+  assert.strictEqual(providerSurface('codex'), 'cli-agentic');
+  assert.strictEqual(providerSurface('lemonade'), 'binary-stub');
+});
+
+test('gradeClaims maps debate claims to seeded defects (grounded vs surplus)', () => {
+  const h3 = loadTasks(resolveTasksFile('hard-tasks')).tasks.find((t) => t.id === 'h3-cache-lru');
+  const claims = [
+    { id: 'C1', status: 'SURVIVED', text: 'get() does not reorder recency so it is not truly LRU' },
+    { id: 'C2', status: 'KILLED', text: 'the variable name is ugly' }, // surplus
+    { id: 'C3', status: 'SURVIVED', text: '>= evicts too early, holds max-1 items' },
+  ];
+  const graded = gradeClaims(h3, claims);
+  assert.strictEqual(graded[0].grounded, true);
+  assert.ok(graded[0].mapped_defects.includes('get-no-touch'));
+  assert.strictEqual(graded[1].grounded, false); // surplus
+  assert.ok(graded[2].mapped_defects.includes('no-eviction-on-equal'));
+});
+
+test('deliberationScore: quality discrimination = grounded minus surplus survival', () => {
+  const graded = [
+    { grounded: true, status: 'SURVIVED', mapped_defects: ['d1'] },
+    { grounded: true, status: 'SURVIVED', mapped_defects: ['d2'] },
+    { grounded: true, status: 'KILLED', mapped_defects: ['d3'] },
+    { grounded: false, status: 'KILLED', mapped_defects: [] },
+    { grounded: false, status: 'KILLED', mapped_defects: [] },
+  ];
+  const s = deliberationScore(graded);
+  assert.strictEqual(s.grounded_claims, 3);
+  assert.ok(Math.abs(s.grounded_survival_rate - 0.667) < 0.001);
+  assert.strictEqual(s.surplus_survival_rate, 0); // both surplus killed
+  assert.ok(s.quality_discrimination > 0); // grounded survives more than surplus
+  assert.deepStrictEqual(s.seeded_defects_covered.sort(), ['d1', 'd2']);
+});
+
+test('deliberationScore: null rates when a bucket is empty', () => {
+  const s = deliberationScore([{ grounded: true, status: 'SURVIVED', mapped_defects: ['d1'] }]);
+  assert.strictEqual(s.surplus_survival_rate, null);
+  assert.strictEqual(s.quality_discrimination, null); // no surplus to contrast
 });
 
 // ---------------------------------------------------------------------------

@@ -1393,12 +1393,7 @@ test('pickScribeProvider: local-first for commit, escalates release off local', 
 // Role / intensity routing
 // ---------------------------------------------------------------------------
 
-import {
-  inferIntensity,
-  pickAdvisorForRole,
-  pickTeamAdvisors,
-  defaultRolesForTask,
-} from './xllm-routing.js';
+import { inferIntensity, pickAdvisorForRole } from './xllm-routing.js';
 
 test('inferIntensity high on security keywords', () => {
   const r = inferIntensity('Implement secure JWT auth and payment webhook');
@@ -1458,12 +1453,6 @@ test('pickAdvisorForRole critic escalates to cloud on high', () => {
   assert.ok(['codex', 'grok', 'claude'].includes(p.provider));
 });
 
-test('defaultRolesForTask includes security for auth', () => {
-  const roles = defaultRolesForTask('Refactor auth and add tests');
-  assert.ok(roles.includes('implement'));
-  assert.ok(roles.includes('security'));
-});
-
 test('loadProviderProfiles propagates [roles] from TOML (CLI path)', () => {
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-roles-'));
   const file = path.join(tmp, 'p.toml');
@@ -1511,14 +1500,6 @@ test('pick includes cost metadata and low intensity prefers cheap', () => {
   assert.ok(p.cost);
   assert.strictEqual(p.cost.tier, 'local');
   assert.strictEqual(p.pinned, false);
-});
-
-test('pickTeamAdvisors returns multiple picks', () => {
-  const plan = pickTeamAdvisors('Refactor auth module with tests', null, {
-    readyProviders: ['codex', 'ollama', 'grok', 'claude'],
-  });
-  assert.ok(plan.roles.length >= 2);
-  assert.ok(plan.picks.implement || plan.picks.security);
 });
 
 // ---------------------------------------------------------------------------

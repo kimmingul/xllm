@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.21.1** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.22.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -384,11 +384,10 @@ dry-run <spec> "<p>"     실제 호출 없이 조립될 커맨드라인 확인
   검출률의 Wilson 95% 하한을 게이트(과제≥4 · 기회≥12 · 마진 +0.10) 하에 소비합니다 — 3막의
   `grok LCB 0.7733 vs codex 0.5004`가 정확히 이 경로입니다.
 
-### 라우팅 — `pick` · `pick-team` · `infer` · `roles` · `profile`
+### 라우팅 — `pick` · `infer` · `roles` · `profile`
 
 ```text
 pick <role> <task>       역할×과제 → 모델/강도 자동 선정 (+실측 특성; --no-traits로 레거시와 비트 동일)
-pick-team <task> [--json]   /team 역할 구성 자동 플랜
 infer <task>             과제 강도 추정 low|medium|high
 roles                    라우팅 역할 목록
 profile show             해석된 프로젝트 프로파일 + 상태 디렉토리
@@ -415,7 +414,7 @@ clean [--older-than=DAYS]   보존된 어드바이저 아티팩트 삭제
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 128개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 126개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)

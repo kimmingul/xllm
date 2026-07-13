@@ -70,7 +70,6 @@ Commands:
   smoke [--live]     Dry smoke or live READY provider
   list               List providers JSON
   pick <role> <task> Auto model/effort for a role (see xllm-routing)
-  pick-team <task>   Auto plan for /team roles
   infer <task>       Infer intensity low|medium|high
   roles              List routing roles
 
@@ -80,7 +79,6 @@ Examples:
   node scripts/xllm.mjs remember
   node scripts/xllm.mjs ask codex@high "ping"
   node scripts/xllm.mjs pick security "auth token refresh"
-  node scripts/xllm.mjs pick-team "refactor payment webhooks" --json
   node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "review risks"
   node scripts/xllm.mjs propose codex@high "add input validation to login()"
   node scripts/xllm.mjs profile set-role critic ollama:qwen3.6:latest@low
@@ -190,7 +188,6 @@ switch (cmd) {
     run(advisor, ['--dry-run', ...rest]);
     break;
   case 'pick':
-  case 'pick-team':
   case 'infer':
   case 'roles':
     run(routing, [cmd, ...rest]);

@@ -18,8 +18,10 @@ node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "Security review of the 
 /xllm ollama:qwen3.6:latest,codex Review scripts/xllm-advisor.js for security and simplicity
 ```
 
-## Ralph micro-task
+## Escalation ladder
 
-```text
-/ralph --critic=ollama:qwen3.6:latest,codex --max-iterations=4 Add one unit test for cleanOllamaOutput thinking-strip
+```bash
+node scripts/xllm.mjs ask codex@high "Review this design"                        # 01 opinion
+node scripts/xllm.mjs propose codex@high "Add input validation to login()"      # 02 static diff
+node scripts/xllm.mjs exec codex@high "Implement X" --test-cmd "npm test"       # 03 verified branch
 ```

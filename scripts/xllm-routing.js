@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 /**
- * Role + intensity based advisor routing for xllm (/team, /ralph, /xllm helpers).
+ * Role + intensity based advisor routing for xllm.
  *
  *   node scripts/xllm-routing.js pick security "auth token refresh"
- *   node scripts/xllm-routing.js pick-team "refactor payment webhooks" --roles implement,security,critic
  *   node scripts/xllm-routing.js infer "typo in README"
  *
  * Importable from xllm-advisor / tests.
@@ -28,7 +27,7 @@ import {
 } from './xllm-traits.js';
 import process from 'process';
 
-/** Canonical roles used by /team and routing table */
+/** Canonical roles for the routing table */
 export const ROUTING_ROLES = [
   'explore',
   'implement',
@@ -682,61 +681,6 @@ export function suggestTiebreaker(onPanel, ready, ledgerMatrix = [], profiles = 
   };
 }
 
-/**
- * Pick advisors for multiple roles for a /team run.
- */
-export function pickTeamAdvisors(taskText, roles = null, options = {}) {
-  const roleList =
-    roles && roles.length
-      ? roles.map(normalizeRole).filter(Boolean)
-      : defaultRolesForTask(taskText);
-
-  const picks = {};
-  for (const role of roleList) {
-    picks[role] = pickAdvisorForRole(role, { ...options, taskText });
-  }
-  return {
-    task: taskText,
-    intensity: inferIntensity(taskText, options.intensity),
-    roles: roleList,
-    picks,
-  };
-}
-
-/**
- * Suggest default roles from task text for /team decomposition.
- */
-export function defaultRolesForTask(taskText = '') {
-  const t = String(taskText || '');
-  const roles = new Set(['implement']);
-
-  if (/\b(explor|investigat|find where|codebase|map)\b/i.test(t)) roles.add('explore');
-  if (HIGH_SIGNALS.test(t) || /\b(auth|payment|security)\b/i.test(t)) roles.add('security');
-  if (/\b(architect|design system|api boundary|scalability)\b/i.test(t)) {
-    roles.add('architecture');
-  }
-  if (/\b(ux|ui|copy|onboarding|design)\b/i.test(t)) roles.add('design');
-  if (/\b(test|coverage|jest|vitest|pytest)\b/i.test(t)) roles.add('tests');
-  if (/\b(doc|readme|changelog)\b/i.test(t)) roles.add('docs');
-  // always useful critic for multi-file / refactor
-  if (/\b(refactor|multi|module|review)\b/i.test(t) || t.length > 120) {
-    roles.add('critic');
-  }
-  // cap at 4 for thrash control
-  const order = [
-    'explore',
-    'implement',
-    'security',
-    'architecture',
-    'design',
-    'tests',
-    'critic',
-    'docs',
-    'verify',
-  ];
-  return order.filter((r) => roles.has(r)).slice(0, 4);
-}
-
 export function formatPickHuman(pick) {
   const lines = [
     `role:       ${pick.role}`,
@@ -762,7 +706,6 @@ function usage() {
 
 Usage:
   node scripts/xllm-routing.js pick <role> [task text...]
-  node scripts/xllm-routing.js pick-team [task text...] [--roles a,b,c]
   node scripts/xllm-routing.js infer [task text...]
   node scripts/xllm-routing.js roles
 
@@ -788,12 +731,6 @@ function parseCli(argv) {
     else if (a === '--force-native') flags.forceNative = true;
     else if (a.startsWith('--ready=')) {
       flags.readyProviders = a
-        .slice(8)
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    } else if (a.startsWith('--roles=')) {
-      flags.roles = a
         .slice(8)
         .split(',')
         .map((s) => s.trim())
@@ -851,31 +788,6 @@ function main() {
       } else {
         console.log(`\n# Native\nspawn_subagent type=${pick.native_agent || 'general-purpose'}`);
       }
-    }
-    return;
-  }
-
-  if (cmd === 'pick-team') {
-    const task = positional.slice(1).join(' ') || '';
-    const plan = pickTeamAdvisors(task, flags.roles, {
-      intensity: flags.intensity,
-      forceCli: flags.forceCli,
-      forceNative: flags.forceNative,
-      readyProviders: flags.readyProviders || detectAvailableProviders(),
-      readySource: flags.readyProviders ? 'explicit' : 'detected',
-      traits: flags.noTraits ? null : loadTraits(process.cwd()),
-    });
-    if (flags.json) {
-      console.log(JSON.stringify(plan, null, 2));
-      return;
-    }
-    console.log(`task intensity: ${plan.intensity.intensity} (${plan.intensity.source})`);
-    console.log(`roles: ${plan.roles.join(', ')}`);
-    console.log('');
-    for (const role of plan.roles) {
-      console.log(`## ${role}`);
-      console.log(formatPickHuman(plan.picks[role]));
-      console.log('');
     }
     return;
   }

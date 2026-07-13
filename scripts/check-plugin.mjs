@@ -144,6 +144,37 @@ ok(pkg.version === plugin.version, `package.json version matches plugin.json (${
   }
 }
 
+// Shipped surface must not re-advertise removed grok-xllm-era features
+// (/ralph and /team skills removed in v0.20.0; pick-team removed after v0.21.1).
+// Historical records are exempt: CHANGELOG, FINDINGS, docs/*-design.md, and
+// diversity-roadmap.md (transcribed debate records are append-only evidence).
+{
+  const forbidden = [/\/ralph\b/, /\/team\b/, /pick-team/];
+  const shipped = ['README.md'];
+  const collectMd = (dir) => {
+    const abs = path.join(root, dir);
+    if (!fs.existsSync(abs)) return;
+    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (e.isDirectory()) collectMd(rel);
+      else if (e.name.endsWith('.md')) shipped.push(rel);
+    }
+  };
+  collectMd('examples');
+  collectMd('skills');
+  collectMd(path.join('.grok', 'skills'));
+  for (const e of fs.readdirSync(path.join(root, 'docs'))) {
+    if (e.endsWith('.md') && !e.endsWith('-design.md') && e !== 'diversity-roadmap.md') {
+      shipped.push(path.join('docs', e));
+    }
+  }
+  for (const rel of shipped) {
+    const body = fs.readFileSync(path.join(root, rel), 'utf8');
+    const hit = forbidden.find((re) => re.test(body));
+    ok(!hit, `no removed-feature residue in ${rel}${hit ? ` (matched ${hit})` : ''}`);
+  }
+}
+
 if (failed) {
   console.error(`\n${failed} check(s) failed`);
   process.exit(1);

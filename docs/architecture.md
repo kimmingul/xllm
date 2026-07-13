@@ -51,7 +51,7 @@ Evidence is written once, derived many times, and finally *routes*:
 ```text
 panel / debate / council ──► <state>/panel-ledger.jsonl ──┐
 seeded-defect bench ──────► benchmarks/results/*.json ────┼──► xllm-traits ──► xllm-routing
-contract probes ──────────► contract cache ───────────────┘    Wilson 95% LCB,   pick / pick-team
+contract probes ──────────► contract cache ───────────────┘    Wilson 95% LCB,   pick
                                                                sample sizes      (gates: tasks ≥ 4 ·
                                                                always visible     opportunities ≥ 12 ·
                                                                                   margin +0.10)
@@ -70,7 +70,7 @@ gitignored; notable findings are transcribed to [benchmarks/FINDINGS.md](../benc
 | L2 | `panel` · `debate` · `council` | L0 + structured-output extractor + ledger |
 | L2 | `scribe` | L0 + deterministic collectors/validators |
 | L3 | `exec` | L0 + separate-`.git` clone + OS sandbox (codex/claude only, fail-closed) |
-| — | `bench` · `traits` · `pick`/`pick-team` | ledger + results (read-only derivation) |
+| — | `bench` · `traits` · `pick` | ledger + results (read-only derivation) |
 
 The escalation ladder (`ask` → `propose` → `exec`) grows advisor freedom per rung; power over
 the user's checkout stays **zero on every rung** — merge, push, and credentials are host-side.

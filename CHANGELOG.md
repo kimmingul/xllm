@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.22.0 — 2026-07-13
+
+### Removed — pick-team, and the last grok-xllm ghost surface
+`pick-team` planned advisor roles for the `/team` skill that was removed in
+v0.20.0 — dead product surface still advertising a ghost feature in help and
+README. Removal was ratified by a 3-round codex×grok adversarial review
+(recorded in `docs/superpowers-absorption-design.md`): both reviewers
+independently converged on "delete without replacement".
+
+- `pick-team` CLI command, its `pickTeamAdvisors`/`defaultRolesForTask`
+  helpers, and the `--roles=` flag removed from `xllm.mjs`/`xllm-routing.js`.
+  Tests 128 → 126.
+- Live-code residue fixed: `xllm-doctor.js` still probed for the removed
+  grok-xllm-era skills (`ralph`/`team`/`verify`); it now checks the actual
+  3-skill Grok adapter (ask/xllm/xllm-setup).
+- Doc residue purged: README routing section, `docs/architecture.md`,
+  `examples/minimal-xllm.md` (the `/ralph` example became an
+  escalation-ladder example).
+- New regression guard in check-plugin (`npm run check`): the shipped surface
+  (README, skills, examples, .grok/skills, docs) must not mention `/ralph`,
+  `/team`, or `pick-team`. Historical records are exempt (CHANGELOG,
+  FINDINGS, `docs/*-design.md`, diversity-roadmap debate transcripts). The
+  guard caught one residue the manual sweep had missed on its first run.
+- New design doc: `docs/superpowers-absorption-design.md` — the converged
+  superpowers-absorption plan (selective absorption; setup-distillation next;
+  umbrella-5 deferred) with the user-ratified priority addendum.
+
+Verification: `npm run ci` green (check + 126 unit tests + smoke + bench
+selftest); the removed command fails honestly (advisor rejects `pick-team` as
+an unknown provider); `pick`/`infer`/`roles` unaffected (offline routing).
+
 ## 0.21.1 — 2026-07-13
 
 ### Docs — README tells the whole benchmark arc; commands are actually documented

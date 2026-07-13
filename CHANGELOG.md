@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.24.4 — 2026-07-14
+
+### Docs — install once, run `setup` per project (README + Pages)
+Documents the per-project setup step explicitly: the plugin installs once, but
+xllm's state and config are per-project, so each new project should run
+`/xllm:setup` (`/xllm-setup` on Grok Build) once.
+
+- README gains a "설치는 한 번(전역), setup은 프로젝트마다 한 번" subsection with a
+  table of what setup does and the project-local output it writes
+  (`.xllm/xllm-advisor-path`, `.xllm/artifacts/`, `.xllm/xllm-providers.toml`,
+  optional CLAUDE.md/AGENTS.md discipline block) and why per-project (each
+  project wants different advisors; setup analyses locally, never sends repo
+  contents to advisors).
+- GitHub Pages gains a matching "Install once. Run setup once per project." card
+  in the Install section.
+
+No code change. `npm run ci` green (137 tests); Pages tag balance checked
+(91/91 div, 6/6 section, 9/9 table).
+
 ## 0.24.3 — 2026-07-14
 
 ### Measured — the maximally cross-vendor panel had the LOWEST dividend (docs/findings only)

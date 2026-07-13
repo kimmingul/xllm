@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.24.3** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.24.4** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -124,6 +124,34 @@ Grok Build 어댑터는 별도 3종입니다: `/ask` · `/xllm` · `/xllm-setup`
 
 팀·루프·플래닝·검증은 **의도적으로 포팅하지 않았습니다** — 호스트 네이티브 기능이 이미
 담당합니다.
+
+### 설치는 한 번(전역), setup은 프로젝트마다 한 번
+
+플러그인 설치는 호스트에 **한 번**이면 됩니다. 하지만 xllm의 상태·설정은 **프로젝트별**이므로,
+새 프로젝트에서 처음 쓸 때 **`/xllm:setup`(Grok Build는 `/xllm-setup`)을 한 번** 실행하는 것을
+권장합니다. 왜 프로젝트마다인가 — 프로젝트마다 알맞은 어드바이저가 다르기 때문입니다(보안 민감
+코드는 strong tier 고정, 문서 프로젝트는 무료 로컬 모델 고정). setup은 저장소 내용을 어드바이저에
+보내지 않고 **로컬에서만** 분석하며, 결과 설정만 프로젝트의 `.xllm/`에 씁니다.
+
+setup이 하는 일(그리고 남기는 프로젝트-로컬 상태):
+
+| 단계 | 하는 일 | 산출물 (프로젝트 로컬) |
+|------|---------|------------------------|
+| **1. 머신 인벤토리** | 설치된 어드바이저 CLI·로컬 모델·tier·비용을 프로브(24h 캐시) | `~/.xllm` 캐시(머신 단위) |
+| **2. 마커 + 아티팩트** | 호스트가 이 프로젝트에서 advisor 스크립트를 해석하도록 경로 마커 생성 + 시크릿 마스킹 아티팩트 디렉토리 | `.xllm/xllm-advisor-path` · `.xllm/artifacts/{ask,xllm,proposals,exec}/`(자기 무시 `.gitignore`) |
+| **3. 역할 핀 위저드** | 역할별(analysis·security·design·critic…) `provider:model@effort`를 프로젝트에 고정 — 내장 라우팅을 정확히 오버라이드 | `.xllm/xllm-providers.toml` |
+| **4. 규율 블록(옵트인)** | superpowers류 프로세스 규율 ≤25줄을 CLAUDE.md/AGENTS.md에 설치(전문 미리보기 후 동의; 멱등 마커 블록; `--discipline remove`로 제거) | `CLAUDE.md`/`AGENTS.md`의 `<!-- xllm:discipline -->` 블록 |
+
+setup을 건너뛰어도 내장 라우팅으로 동작하지만, **마커가 없으면** 스킬이 경로 해석 휴리스틱에
+의존하고 **역할 핀이 없으면** 프로젝트 맞춤 어드바이저 선택을 못 합니다. 그래서 프로젝트마다 한 번
+실행이 권장 기본값입니다. CLI로 직접 하려면:
+
+```bash
+node scripts/xllm.mjs doctor       # 프로바이더 + 경로 건강 진단
+node scripts/xllm.mjs remember     # 마커 + 아티팩트 디렉토리 생성
+```
+
+`.xllm/` 런타임 상태(마커·프로파일·아티팩트·원장)는 기본적으로 gitignore되는 운영 산출물입니다.
 
 ---
 

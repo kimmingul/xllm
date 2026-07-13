@@ -532,6 +532,30 @@ codex plugin add xllm@xllm</code></pre>
   kimmingul/xllm --trust</code></pre>
       </div>
     </div>
+
+    <div class="card" style="margin-top:32px; max-width:760px; margin-left:auto; margin-right:auto;">
+      <div class="ico">🧰</div>
+      <h3>Install once. Run <code>setup</code> once per project.</h3>
+      <p style="margin-bottom:14px">The plugin installs once, but xllm's state and
+         configuration are <b>per-project</b> — different projects want different advisors (pin a
+         strong tier for security-sensitive code, a free local model for a docs repo). So the first
+         time you use xllm in a project, run <code>/xllm:setup</code> (Grok Build:
+         <code>/xllm-setup</code>). It analyses the project <em>locally</em> — repository contents
+         are never sent to advisors — and writes only the resulting config under the project's
+         <code>.xllm/</code>.</p>
+      <table class="bt">
+        <tr><th>setup step</th><th>what it does</th><th>project-local output</th></tr>
+        <tr><td>Machine inventory</td><td>probe installed advisor CLIs, local models, tier &amp; cost (24h cache)</td><td><code>~/.xllm</code> (per machine)</td></tr>
+        <tr><td>Marker + artifacts</td><td>let the host resolve the advisor script from this project; secret-redacting artifact dirs</td><td><code>.xllm/xllm-advisor-path</code>, <code>.xllm/artifacts/</code></td></tr>
+        <tr><td>Role-pin wizard</td><td>pin <code>provider:model@effort</code> per role — overrides built-in routing exactly</td><td><code>.xllm/xllm-providers.toml</code></td></tr>
+        <tr><td>Discipline block (opt-in)</td><td>install a ≤25-line process-discipline block after a full-text preview; idempotent, removable</td><td><code>CLAUDE.md</code> / <code>AGENTS.md</code></td></tr>
+      </table>
+      <p style="margin-top:14px; margin-bottom:0">Skipping setup still works via built-in routing —
+         but without the marker, skills fall back to path heuristics, and without role pins there is
+         no project-tailored advisor choice. The <code>.xllm/</code> runtime state is gitignored
+         operational output.</p>
+    </div>
+
     <div style="text-align:center; margin-top:40px">
       <a class="btn" href="https://github.com/kimmingul/xllm">View on GitHub →</a>
     </div>

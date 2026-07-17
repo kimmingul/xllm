@@ -1534,6 +1534,43 @@ test('pickAdvisorForRole critic escalates to cloud on high', () => {
   assert.ok(['codex', 'grok', 'claude'].includes(p.provider));
 });
 
+// ---------------------------------------------------------------------------
+// --- setup packs ---
+// ---------------------------------------------------------------------------
+
+import { resolveSetupPlan, SETUP_PACKS } from './xllm-routing.js';
+
+// Fixture inventories for setup packs
+const INV_RICH = {
+  host_cli: 'claude',
+  providers: {
+    codex:  { kind:'cloud', installed:true, healthy:true, tier:'strong',   relative_cost:7 },
+    grok:   { kind:'cloud', installed:true, healthy:true, tier:'strong',   relative_cost:6 },
+    gemini: { kind:'cloud', installed:true, healthy:true, tier:'balanced', relative_cost:4 },
+    claude: { kind:'cloud', installed:true, healthy:true, tier:'strong',   relative_cost:7 },
+    ollama: { kind:'local', installed:true, healthy:true, tier:'local',    relative_cost:0,
+              models:['qwen3.6:14b','llama3.2:3b'] },
+  },
+};
+
+test('setup balanced pins only a local critic; analysis/design OPEN; host excluded', () => {
+  const plan = resolveSetupPlan(INV_RICH, { pack: 'balanced' });
+  assert.strictEqual(plan.roles.analysis, null, 'analysis OPEN');
+  assert.strictEqual(plan.roles.design, null, 'design OPEN');
+  assert.ok(/^ollama:/.test(plan.roles.critic), 'critic pinned to a local');
+  assert.ok(plan.roles.critic.endsWith('@low'), 'critic @low');
+  assert.ok(!/claude/.test(JSON.stringify(plan.roles)), 'host vendor never recommended');
+});
+
+test('setup skip yields all-OPEN roles', () => {
+  const plan = resolveSetupPlan(INV_RICH, { pack: 'skip' });
+  assert.deepStrictEqual(plan.roles, { analysis:null, design:null, critic:null });
+});
+
+test('SETUP_PACKS lists the five v1 packs', () => {
+  assert.deepStrictEqual(SETUP_PACKS, ['balanced','quality','frugal','local','skip']);
+});
+
 test('loadProviderProfiles propagates [roles] from TOML (CLI path)', () => {
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-roles-'));
   const file = path.join(tmp, 'p.toml');

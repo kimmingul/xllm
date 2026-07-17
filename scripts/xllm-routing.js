@@ -698,6 +698,101 @@ export function formatPickHuman(pick) {
 }
 
 // ---------------------------------------------------------------------------
+// Setup posture packs (docs/setup-ux-design.md)
+// ---------------------------------------------------------------------------
+
+export const SETUP_PACKS = ['balanced', 'quality', 'frugal', 'local', 'skip'];
+export const SETUP_ROLES = ['analysis', 'design', 'critic'];
+
+/** READY, non-host providers as {name, kind, tier, relative_cost, models}. */
+function setupReady(inventory, { excludeHost = true } = {}) {
+  const host = excludeHost ? inventory.host_cli : null;
+  return Object.entries(inventory.providers || {})
+    .filter(([name, p]) => p && p.installed && p.healthy && name !== host)
+    .map(([name, p]) => ({ name, ...p }));
+}
+function setupCloud(inv) { return setupReady(inv).filter((p) => p.kind === 'cloud'); }
+function setupCheapest(list) {
+  return list.length ? [...list].sort((a, b) => a.relative_cost - b.relative_cost)[0] : null;
+}
+/** Strong tier first, then balanced; cheapest within tier. */
+function setupStrongCloud(cloud) {
+  const strong = cloud.filter((p) => p.tier === 'strong');
+  if (strong.length) return setupCheapest(strong);
+  const bal = cloud.filter((p) => p.tier === 'balanced');
+  return bal.length ? setupCheapest(bal) : null;
+}
+/** Expand local runtimes into candidate models. ollama enumerates; others = provider default. */
+function setupLocals(inv) {
+  const out = [];
+  for (const p of setupReady(inv).filter((x) => x.kind === 'local')) {
+    if (p.name === 'ollama' && Array.isArray(p.models) && p.models.length) {
+      for (const m of p.models) {
+        out.push({ provider: 'ollama', runtime: 'ollama', spec: `ollama:${m}`, model: m, cap: modelCapability(m) });
+      }
+    } else {
+      out.push({ provider: p.name, runtime: p.name, spec: p.name, model: null, cap: modelCapability('') });
+    }
+  }
+  return out;
+}
+function setupSizeDesc(a, b) { return (b.cap.billions ?? -1) - (a.cap.billions ?? -1); }
+function setupSizeAsc(a, b) {
+  return (a.cap.billions ?? Infinity) - (b.cap.billions ?? Infinity);
+}
+const setupCloudSpec = (p, effort) => `${p.name}@${effort}`;
+const setupLocalSpec = (c, effort) => `${c.spec}@${effort}`;
+
+/**
+ * Resolve a posture pack into role pins. Pure: no fs / network / clock.
+ * Role values are a spec string (pin) or null (OPEN → measured routing).
+ */
+export function resolveSetupPlan(inventory, { pack = 'balanced', host = null, overrides = {}, sensitive = 'no' } = {}) {
+  const inv = { ...inventory, host_cli: host || inventory.host_cli || null };
+  const roles = { analysis: null, design: null, critic: null };
+  const warnings = [];
+  const evidence = {};
+
+  if (pack === 'skip') {
+    for (const r of SETUP_ROLES) evidence[r] = { routing_mode: 'open', basis: 'skip' };
+    return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
+  }
+
+  if (pack === 'balanced') {
+    evidence.analysis = { routing_mode: 'open', basis: 'measurement_first' };
+    evidence.design = { routing_mode: 'open', basis: 'measurement_first' };
+    const locals = setupLocals(inv);
+    if (locals.length) {
+      const critic = [...locals].sort(setupSizeAsc)[0];
+      roles.critic = setupLocalSpec(critic, 'low');
+      evidence.critic = { routing_mode: 'pinned', basis: 'local_second_opinion',
+        size: critic.cap.billions != null ? `${critic.cap.billions}B` : 'size_unknown' };
+    } else {
+      evidence.critic = { routing_mode: 'open', basis: 'open_no_local' };
+      warnings.push('no local model → critic left to built-in routing; re-run setup after `ollama pull`');
+    }
+    return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
+  }
+
+  if (pack === 'quality' || pack === 'frugal' || pack === 'local') {
+    throw new Error(`setup pack '${pack}' not yet implemented`);
+  }
+  throw new Error(`unknown setup pack: ${pack}`);
+}
+
+/** Apply --role overrides + sensitive policy, then return the plan object. */
+function finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv) {
+  // sensitive policy is layered in Task 3; overrides validated at apply time.
+  for (const [r, spec] of Object.entries(overrides || {})) {
+    if (SETUP_ROLES.includes(r)) {
+      roles[r] = spec === null ? null : String(spec);
+      evidence[r] = { routing_mode: spec ? 'pinned' : 'open', basis: 'user_override' };
+    }
+  }
+  return { pack, roles, warnings, evidence };
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 

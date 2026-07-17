@@ -778,17 +778,20 @@ export function resolveSetupPlan(inventory, { pack = 'balanced', host = null, ov
     const cloud = setupCloud(inv);
     const a = setupStrongCloud(cloud);
     if (a) { roles.analysis = setupCloudSpec(a, 'xhigh'); evidence.analysis = { routing_mode:'pinned', basis:'explicit_lock' }; }
+    else { evidence.analysis = { routing_mode: 'open', basis: 'no_cloud' }; }
     const d = setupStrongCloud(cloud.filter((p) => !a || p.name !== a.name)) || a;
     if (d) {
       roles.design = setupCloudSpec(d, 'high');
       evidence.design = { routing_mode:'pinned', basis:'explicit_lock' };
       if (a && d.name === a.name) warnings.push('single_lab_collapse: only one strong lab READY — design reuses it (best available, not cross-lab)');
     }
+    else { evidence.design = { routing_mode: 'open', basis: 'no_cloud' }; }
     const strongCritic = setupStrongCloud(cloud);
     if (strongCritic) { roles.critic = setupCloudSpec(strongCritic, 'medium'); evidence.critic = { routing_mode:'pinned', basis:'explicit_lock' }; }
     else {
       const locals = setupLocals(inv);
       if (locals.length) { const c = [...locals].sort(setupSizeDesc)[0]; roles.critic = setupLocalSpec(c, 'medium'); evidence.critic = { routing_mode:'pinned', basis:'largest_local' }; }
+      else { evidence.critic = { routing_mode: 'open', basis: 'no_cloud_no_local' }; }
     }
     if (!cloud.length) warnings.push('no non-host cloud READY — quality falls back to local; consider `local` pack');
     return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
@@ -800,6 +803,7 @@ export function resolveSetupPlan(inventory, { pack = 'balanced', host = null, ov
     const a = setupCheapest(cloud.filter((p) => p.tier === 'strong' || p.tier === 'balanced'));
     if (a) { roles.analysis = setupCloudSpec(a, 'medium'); evidence.analysis = { routing_mode:'pinned', basis:'cost_lock' }; }
     else if (locals.length) { const la = [...locals].sort(setupSizeDesc)[0]; roles.analysis = setupLocalSpec(la, 'medium'); evidence.analysis = { routing_mode:'pinned', basis:'cost_lock_local' }; }
+    else { evidence.analysis = { routing_mode: 'open', basis: 'open_no_provider' }; }
     if (locals.length) {
       const cheapLocal = [...locals].sort(setupSizeAsc)[0];
       roles.design = setupLocalSpec(cheapLocal, 'low'); evidence.design = { routing_mode:'pinned', basis:'local_cheap' };

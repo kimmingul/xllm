@@ -1602,6 +1602,22 @@ test('setup sensitive=yes forbids paid critic and floors analysis effort', () =>
   assert.ok(/@(high|xhigh)$/.test(plan.roles.analysis), 'analysis effort >= high');
 });
 
+test('setup sensitive=yes floors a @medium analysis pin up to @high', () => {
+  // frugal pins analysis to cheapest strong/balanced cloud @medium; sensitive must bump it
+  const plan = resolveSetupPlan(INV_NOLOCAL, { pack: 'frugal', sensitive: 'yes' });
+  assert.ok(/@high$/.test(plan.roles.analysis), 'analysis floored to @high');
+  assert.strictEqual(plan.roles.critic, null, 'no paid critic under sensitive');
+});
+
+test('setup quality with no non-host cloud still labels every role evidence', () => {
+  const invHostOnly = { host_cli:'claude', providers:{
+    claude:{ kind:'cloud', installed:true, healthy:true, tier:'strong', relative_cost:7 } } };
+  const plan = resolveSetupPlan(invHostOnly, { pack: 'quality' });
+  for (const r of ['analysis','design','critic']) {
+    assert.ok(plan.evidence[r] && plan.evidence[r].routing_mode, `evidence.${r} present`);
+  }
+});
+
 test('loadProviderProfiles propagates [roles] from TOML (CLI path)', () => {
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-roles-'));
   const file = path.join(tmp, 'p.toml');

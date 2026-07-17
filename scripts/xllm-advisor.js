@@ -488,7 +488,11 @@ export function loadProviderProfiles({ force = false } = {}) {
 const PROFILE_TEMPLATE = `# xllm provider profile (project-local)
 # Managed by \`xllm profile set-role\` / \`set-default\`; hand-edits are preserved.
 #
-# [roles]                pins a role to an exact spec
+# [roles]                pins a role to an exact spec, e.g.
+#   analysis = "codex@high"
+#   design = "gemini"
+#   critic = "ollama:qwen3.6:latest@low"
+#
 # [providers.<name>]     overrides: default_model, default_effort, timeout_ms,
 #                        tier (strong|balanced|local), relative_cost (0-10),
 #                        latency_class (fast|medium|slow)

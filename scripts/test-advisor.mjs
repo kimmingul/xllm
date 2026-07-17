@@ -2094,8 +2094,8 @@ test('applySetupPlan writes pins and deletes OPEN keys atomically', () => {
     const plan = { pack:'balanced', roles:{ analysis:null, design:null, critic:'ollama:qwen3.6:14b@low' } };
     const res = applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp });
     const body = fs.readFileSync(path.join(tmp, '.xllm', 'xllm-providers.toml'), 'utf8');
-    assert.ok(!/analysis\s*=/.test(body), 'OPEN analysis key deleted');
-    assert.ok(/critic\s*=\s*"ollama:qwen3.6:14b@low"/.test(body), 'critic pinned');
+    assert.ok(!/^analysis\s*=/m.test(body), 'OPEN analysis key deleted');
+    assert.ok(/^critic\s*=\s*"ollama:qwen3.6:14b@low"/m.test(body), 'critic pinned');
     assert.ok(res.deleted.includes('analysis') && res.written.includes('critic'));
   } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
 });
@@ -2117,7 +2117,7 @@ test('applySetupPlan skip clears all posture role keys', () => {
     const plan = { pack:'skip', roles:{ analysis:null, design:null, critic:null } };
     applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp });
     const body = fs.readFileSync(path.join(tmp, '.xllm', 'xllm-providers.toml'), 'utf8');
-    assert.ok(!/analysis\s*=/.test(body) && !/critic\s*=/.test(body), 'posture pins cleared');
+    assert.ok(!/^analysis\s*=/m.test(body) && !/^critic\s*=/m.test(body), 'posture pins cleared');
   } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
 });
 

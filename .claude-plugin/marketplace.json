@@ -9,7 +9,7 @@
     {
       "name": "xllm",
       "description": "Cross-vendor LLM advisors: ask codex, gemini, grok, cursor, or local ollama/lmstudio from inside Claude Code and synthesize their independent opinions. Read-only by default; no hooks, no agents, no skill catalog.",
-      "version": "0.24.4",
+      "version": "0.25.0",
       "author": {
         "name": "xllm contributors"
       },
@@ -24,5 +24,5 @@
       ]
     }
   ],
-  "version": "0.24.4"
+  "version": "0.25.0"
 }

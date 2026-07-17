@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.25.0 — 2026-07-17
+
+### Feature — `setup` posture packs: one command pins advisors per project
+`/xllm:setup` (and `node scripts/xllm.mjs setup`) now runs an argument-driven
+wizard that pins which provider+model+effort each advisory role
+(analysis/design/critic) uses **for this project**, instead of leaving every
+role to cold-start defaults. The plugin installs once, but config is
+per-project — this closes the gap the 0.24.4 docs described.
+
+Five posture packs, recommended in order from the local inventory:
+
+- **balanced** — measured routing stays OPEN for analysis/design (let the ledger
+  decide), pins a cheap local critic for a decorrelated second opinion.
+- **quality** — strong cloud for analysis/design, cloud critic.
+- **frugal** — cheapest healthy model per role; warns if a paid model would be
+  pinned to an analysis role.
+- **local** — locals only, spread across sizes for decorrelation; warns on
+  degenerate single-model inventories.
+- **skip** — clears all posture role keys (back to cold-start).
+
+Design guarantees:
+
+- **Preview-first.** Bare `setup` / `--setup <pack>` previews and writes
+  nothing; `--apply` is required to touch `.xllm/xllm-providers.toml`. Writes
+  are atomic and semantically validated — a pin to a non-READY provider is
+  rejected with **zero** writes.
+- **`sensitive=yes` policy.** Under the sensitive posture, paid-cloud overrides
+  for analysis/critic and below-`high` effort floors are rejected with zero
+  writes; local overrides still pass.
+- **Machine-readable.** `--json` emits `{pack, roles, warnings, evidence,
+  recommended_packs}` so the skill UI can render the 4-option picker; every
+  role carries evidence (`routing_mode` + `basis`, plus model size for pins).
+
+Also: role recipes (`--role analysis=<spec>`) force `sensitive=yes` semantics;
+CLI errors print clean one-liners; `xllm.mjs setup` subcommand + help.
+
+`npm run ci` green (163 tests). Live e2e: `xllm.mjs setup` and
+`--setup balanced --json` both preview without writing (providers.toml
+untouched); `applySetupPlan` covered for atomic write, non-READY rejection,
+skip-clear, and sensitive-posture rejections.
+
 ## 0.24.4 — 2026-07-14
 
 ### Docs — install once, run `setup` per project (README + Pages)

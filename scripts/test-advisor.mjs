@@ -540,8 +540,8 @@ test('deleteProfileKey removes a pin and round-trips through the parser', () => 
     setProfileValue('roles', 'critic', 'ollama:llama3.2@low', tmp);
     deleteProfileKey('roles', 'analysis', tmp);
     const body = fs.readFileSync(path.join(tmp, '.xllm', 'xllm-providers.toml'), 'utf8');
-    assert.ok(!/analysis\s*=/.test(body), 'analysis pin gone');
-    assert.ok(/critic\s*=/.test(body), 'critic pin kept');
+    assert.ok(!/^analysis\s*=/m.test(body), 'analysis pin gone');
+    assert.ok(/^critic\s*=/m.test(body), 'critic pin kept');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -34,6 +34,8 @@ import {
   getProviderCostMeta,
   upsertTomlKey,
   setProfileValue,
+  deleteTomlKey,
+  deleteProfileKey,
   buildInventory,
   buildProposalPrompt,
   extractProposalPatch,
@@ -515,6 +517,33 @@ test('setProfileValue creates template and round-trips through parser', () => {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
     loadProviderProfiles({ force: true });
+  }
+});
+
+test('deleteTomlKey removes only the target key in the section', () => {
+  const src = '[roles]\nanalysis = "codex@high"\ncritic = "ollama:llama3.2@low"\n';
+  const out = deleteTomlKey(src, 'roles', 'analysis');
+  assert.ok(!/analysis\s*=/.test(out), 'analysis removed');
+  assert.ok(/critic\s*=\s*"ollama:llama3.2@low"/.test(out), 'critic kept');
+});
+
+test('deleteTomlKey is a no-op when key or section absent', () => {
+  const src = '[roles]\ncritic = "ollama@low"\n';
+  assert.strictEqual(deleteTomlKey(src, 'roles', 'analysis'), src);
+  assert.strictEqual(deleteTomlKey(src, 'defaults', 'critic'), src);
+});
+
+test('deleteProfileKey removes a pin and round-trips through the parser', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-del-'));
+  try {
+    setProfileValue('roles', 'analysis', 'codex@high', tmp);
+    setProfileValue('roles', 'critic', 'ollama:llama3.2@low', tmp);
+    deleteProfileKey('roles', 'analysis', tmp);
+    const body = fs.readFileSync(path.join(tmp, '.xllm', 'xllm-providers.toml'), 'utf8');
+    assert.ok(!/analysis\s*=/.test(body), 'analysis pin gone');
+    assert.ok(/critic\s*=/.test(body), 'critic pin kept');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

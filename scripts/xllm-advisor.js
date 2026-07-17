@@ -488,11 +488,7 @@ export function loadProviderProfiles({ force = false } = {}) {
 const PROFILE_TEMPLATE = `# xllm provider profile (project-local)
 # Managed by \`xllm profile set-role\` / \`set-default\`; hand-edits are preserved.
 #
-# [roles]                pins a role to an exact spec, e.g.
-#   analysis = "codex@high"
-#   design = "gemini"
-#   critic = "ollama:qwen3.6:latest@low"
-#
+# [roles]                pins a role to an exact spec
 # [providers.<name>]     overrides: default_model, default_effort, timeout_ms,
 #                        tier (strong|balanced|local), relative_cost (0-10),
 #                        latency_class (fast|medium|slow)
@@ -538,6 +534,27 @@ export function upsertTomlKey(text, section, key, value) {
   return lines.join('\n');
 }
 
+/** Remove `key` inside `[section]` if present. Returns text unchanged if absent. */
+export function deleteTomlKey(text, section, key) {
+  const lines = String(text || '').split(/\r?\n/);
+  const header = `[${section}]`;
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === header) { start = i; break; }
+  }
+  if (start === -1) return String(text || '');
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\s*\[/.test(lines[i])) { end = i; break; }
+  }
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const keyRe = new RegExp('^\\s*' + escapedKey + '\\s*=');
+  for (let i = start + 1; i < end; i++) {
+    if (keyRe.test(lines[i])) { lines.splice(i, 1); return lines.join('\n'); }
+  }
+  return String(text || '');
+}
+
 /** Write a key into the project profile TOML (created from template if absent). */
 export function setProfileValue(section, key, value, root = process.cwd()) {
   const dir = resolveStateDir(root);
@@ -547,6 +564,17 @@ export function setProfileValue(section, key, value, root = process.cwd()) {
     ? fs.readFileSync(file, 'utf8')
     : PROFILE_TEMPLATE;
   fs.writeFileSync(file, upsertTomlKey(text, section, key, value), 'utf8');
+  loadProviderProfiles({ force: true });
+  return file;
+}
+
+/** Delete a key from the project profile TOML (no-op if file/key absent). */
+export function deleteProfileKey(section, key, root = process.cwd()) {
+  const dir = resolveStateDir(root);
+  const file = path.join(dir, 'xllm-providers.toml');
+  if (!fs.existsSync(file)) return file;
+  const text = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, deleteTomlKey(text, section, key), 'utf8');
   loadProviderProfiles({ force: true });
   return file;
 }

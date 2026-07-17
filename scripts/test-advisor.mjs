@@ -42,6 +42,8 @@ import {
   writeMultiIndex,
   ollamaBaseUrl,
   parseOllamaHttpResponse,
+  validateSetupPin,
+  applySetupPlan,
 } from './xllm-advisor.js';
 import fs from 'fs';
 import path from 'path';
@@ -2070,6 +2072,53 @@ test('--prompt-file: a 40KB prompt round-trips through the advisor (dry-run)', (
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Setup plan validation + atomic apply (Task 6)
+// ---------------------------------------------------------------------------
+
+const APPLY_INV = {
+  host_cli:'claude',
+  providers:{
+    codex:{ kind:'cloud', installed:true, healthy:true, tier:'strong', relative_cost:7 },
+    ollama:{ kind:'local', installed:true, healthy:true, tier:'local', relative_cost:0, models:['qwen3.6:14b'] },
+    gemini:{ kind:'cloud', installed:false, healthy:false, tier:'balanced', relative_cost:4 },
+  },
+};
+
+test('applySetupPlan writes pins and deletes OPEN keys atomically', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-apply-'));
+  try {
+    setProfileValue('roles', 'analysis', 'codex@high', tmp); // pre-existing pin
+    const plan = { pack:'balanced', roles:{ analysis:null, design:null, critic:'ollama:qwen3.6:14b@low' } };
+    const res = applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp });
+    const body = fs.readFileSync(path.join(tmp, '.xllm', 'xllm-providers.toml'), 'utf8');
+    assert.ok(!/analysis\s*=/.test(body), 'OPEN analysis key deleted');
+    assert.ok(/critic\s*=\s*"ollama:qwen3.6:14b@low"/.test(body), 'critic pinned');
+    assert.ok(res.deleted.includes('analysis') && res.written.includes('critic'));
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
+});
+
+test('applySetupPlan rejects a pin to a non-READY provider with zero writes', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-apply2-'));
+  try {
+    const plan = { pack:'balanced', roles:{ analysis:'gemini@high', design:null, critic:null } };
+    assert.throws(() => applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp }), /not READY|gemini/);
+    assert.ok(!fs.existsSync(path.join(tmp, '.xllm', 'xllm-providers.toml')), 'no file written on validation failure');
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
+});
+
+test('applySetupPlan skip clears all posture role keys', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-apply3-'));
+  try {
+    setProfileValue('roles', 'analysis', 'codex@high', tmp);
+    setProfileValue('roles', 'critic', 'ollama:qwen3.6:14b@low', tmp);
+    const plan = { pack:'skip', roles:{ analysis:null, design:null, critic:null } };
+    applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp });
+    const body = fs.readFileSync(path.join(tmp, '.xllm', 'xllm-providers.toml'), 'utf8');
+    assert.ok(!/analysis\s*=/.test(body) && !/critic\s*=/.test(body), 'posture pins cleared');
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
 });
 
 console.log(`\n${passed} tests passed`);

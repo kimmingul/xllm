@@ -488,11 +488,7 @@ export function loadProviderProfiles({ force = false } = {}) {
 const PROFILE_TEMPLATE = `# xllm provider profile (project-local)
 # Managed by \`xllm profile set-role\` / \`set-default\`; hand-edits are preserved.
 #
-# [roles]                pins a role to an exact spec, e.g.
-#   analysis = "codex@high"
-#   design = "gemini"
-#   critic = "ollama:qwen3.6:latest@low"
-#
+# [roles]                pins a role to an exact spec
 # [providers.<name>]     overrides: default_model, default_effort, timeout_ms,
 #                        tier (strong|balanced|local), relative_cost (0-10),
 #                        latency_class (fast|medium|slow)
@@ -581,6 +577,52 @@ export function deleteProfileKey(section, key, root = process.cwd()) {
   fs.writeFileSync(file, deleteTomlKey(text, section, key), 'utf8');
   loadProviderProfiles({ force: true });
   return file;
+}
+
+const SETUP_ROLE_KEYS = ['analysis', 'design', 'critic'];
+
+/** Validate one resolved pin against inventory. Returns {ok, error?}. */
+export function validateSetupPin(spec, role, inventory) {
+  if (!SETUP_ROLE_KEYS.includes(role)) return { ok: false, error: `unknown role: ${role}` };
+  const parsed = parseProviderSpec(spec);
+  if (!parsed) return { ok: false, error: `invalid spec: ${spec}` };
+  const p = inventory.providers?.[parsed.provider];
+  if (!p) return { ok: false, error: `unknown provider: ${parsed.provider}` };
+  if (!(p.installed && p.healthy)) return { ok: false, error: `provider not READY: ${parsed.provider}` };
+  if (parsed.provider === inventory.host_cli) return { ok: false, error: `host vendor excluded: ${parsed.provider}` };
+  if (parsed.model && p.kind === 'local' && Array.isArray(p.models) && !p.models.includes(parsed.model)) {
+    return { ok: false, error: `local model not pulled: ${parsed.model}` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Validate the whole plan (pins + overrides) against inventory, then — only if
+ * apply — write pins and DELETE keys for OPEN (null) roles. Atomic: any
+ * validation error throws before a single write.
+ */
+export function applySetupPlan(plan, { inventory, apply = false, root = process.cwd() } = {}) {
+  const errors = [];
+  for (const role of SETUP_ROLE_KEYS) {
+    const spec = plan.roles[role];
+    if (spec == null) continue; // OPEN
+    const v = validateSetupPin(spec, role, inventory);
+    if (!v.ok) errors.push(`${role}: ${v.error}`);
+  }
+  if (errors.length) {
+    if (apply) throw new Error(`setup validation failed (no changes written): ${errors.join('; ')}`);
+    return { written: [], deleted: [], errors };
+  }
+  const written = [];
+  const deleted = [];
+  if (apply) {
+    for (const role of SETUP_ROLE_KEYS) {
+      const spec = plan.roles[role];
+      if (spec == null) { deleteProfileKey('roles', role, root); deleted.push(role); }
+      else { setProfileValue('roles', role, spec, root); written.push(role); }
+    }
+  }
+  return { written, deleted, errors: [] };
 }
 
 /**

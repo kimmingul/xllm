@@ -70,6 +70,8 @@ Commands:
   discipline show|install|remove [--target <path>]
                      Process-discipline block for CLAUDE.md/AGENTS.md
                      (≤25 lines, idempotent marker block, opt-in via setup)
+  setup [pack] [--apply]  Resolve inventory→role pins (posture packs); preview unless --apply
+                          packs: balanced(default)|quality|frugal|local|skip; --role R=SPEC --json --sensitive
   smoke [--live]     Dry smoke or live READY provider
   list               List providers JSON
   pick <role> <task> Auto model/effort for a role (see xllm-routing)
@@ -197,6 +199,9 @@ switch (cmd) {
   case 'infer':
   case 'roles':
     run(routing, [cmd, ...rest]);
+    break;
+  case 'setup':
+    run(advisor, ['--setup', ...rest]);
     break;
   default:
     if (rest.length >= 1) {

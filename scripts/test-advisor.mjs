@@ -2138,4 +2138,19 @@ test('--setup balanced --json previews without writing', () => {
   } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
 });
 
+// ---------------------------------------------------------------------------
+// xllm.mjs setup subcommand (Task 8)
+// ---------------------------------------------------------------------------
+
+test('xllm.mjs setup subcommand forwards to advisor --setup', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-mjs-'));
+  try {
+    const res = spawnSync(process.execPath,
+      [path.join(root, 'scripts', 'xllm.mjs'), 'setup', 'skip', '--json'],
+      { encoding:'utf8', env:{ ...process.env, XLLM_STATE_DIR: tmp } });
+    assert.strictEqual(res.status, 0, res.stderr);
+    assert.strictEqual(JSON.parse(res.stdout).pack, 'skip');
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
+});
+
 console.log(`\n${passed} tests passed`);

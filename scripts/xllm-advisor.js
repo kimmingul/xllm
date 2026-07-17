@@ -1360,6 +1360,8 @@ Usage:
   node scripts/xllm-advisor.js --set-role <role> <spec>   (project role pin)
   node scripts/xllm-advisor.js --set-default <key> <value>
   node scripts/xllm-advisor.js --clean-artifacts [--older-than=DAYS]
+  node scripts/xllm-advisor.js --setup <pack> [--apply] [--role R=SPEC] [--json] [--sensitive auto|yes|no]
+                       (posture packs: balanced|quality|frugal|local|skip; preview unless --apply)
   node scripts/xllm-advisor.js --discipline show|install|remove [--target <path>]
                        (≤25-line process-discipline block for CLAUDE.md/AGENTS.md;
                         idempotent marker block, explicit opt-in — preview with show)
@@ -1771,6 +1773,19 @@ export function buildInventory({
     /* inventory is best-effort cache */
   }
   return { ...inv, cached: false, path: file };
+}
+
+export function formatSetupPlanHuman(plan, { apply = false, applied = {} } = {}) {
+  const lines = [`setup pack: ${plan.pack}${apply ? ' (applied)' : ' (preview — nothing written)'}`, ''];
+  for (const role of ['analysis', 'design', 'critic']) {
+    const spec = plan.roles[role];
+    const ev = plan.evidence?.[role] || {};
+    lines.push(`  ${role.padEnd(9)} ${spec ? spec : 'OPEN (measured routing)'}${ev.basis ? `   · ${ev.basis}` : ''}`);
+  }
+  if (plan.warnings?.length) { lines.push('', 'warnings:'); for (const w of plan.warnings) lines.push(`  ⚠ ${w}`); }
+  if (apply) lines.push('', `written: ${(applied.written || []).join(', ') || '-'}   deleted: ${(applied.deleted || []).join(', ') || '-'}`);
+  else lines.push('', 'apply with:  node scripts/xllm.mjs setup ' + plan.pack + ' --apply');
+  return lines.join('\n');
 }
 
 /**
@@ -2312,6 +2327,8 @@ function parseArgs(argv) {
     noArtifacts: false,
     propose: false,
     refresh: false,
+    apply: false,
+    json: false,
   };
   let olderThan = null;
   let promptFilePath = null;
@@ -2333,6 +2350,10 @@ function parseArgs(argv) {
       flags.propose = true;
     } else if (a === '--refresh') {
       flags.refresh = true;
+    } else if (a === '--apply') {
+      flags.apply = true;
+    } else if (a === '--json') {
+      flags.json = true;
     } else if (/^--older-than=\d+$/.test(a)) {
       olderThan = Number(a.split('=')[1]);
     } else {
@@ -2399,6 +2420,21 @@ function parseArgs(argv) {
     return { mode: 'discipline', action, target: ti !== -1 ? args[ti + 1] : null, flags };
   }
   if (args[0] === '--help' || args[0] === '-h') return { mode: 'help', flags };
+
+  if (args[0] === '--setup') {
+    const pack = args[1] && !args[1].startsWith('--') ? args[1] : 'balanced';
+    const overrides = {};
+    let sensitive = 'auto';
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--role' && args[i + 1]) {
+        const [r, ...rest] = args[++i].split('=');
+        overrides[r] = rest.join('=');
+      } else if (args[i] === '--sensitive' && args[i + 1]) {
+        sensitive = args[++i];
+      }
+    }
+    return { mode: 'setup', pack, overrides, sensitive, flags };
+  }
 
   if (args[0] === '--dry-run') {
     const spec = parseProviderSpec(args[1]);
@@ -2529,6 +2565,25 @@ async function main() {
   if (parsed.mode === 'set-default') {
     const file = setProfileValue('defaults', parsed.key, parsed.value);
     console.log(`${file}: defaults.${parsed.key} = "${parsed.value}"`);
+    process.exit(0);
+  }
+
+  if (parsed.mode === 'setup') {
+    const { resolveSetupPlan } = await import('./xllm-routing.js');
+    const inv = buildInventory({});
+    const sensitive = parsed.sensitive === 'auto' ? 'no' : parsed.sensitive; // bare CLI has no host skim
+    const plan = resolveSetupPlan(inv, {
+      pack: parsed.pack, host: inv.host_cli, overrides: parsed.overrides, sensitive,
+    });
+    let applied = { written: [], deleted: [], errors: [] };
+    if (parsed.flags.apply) {
+      applied = applySetupPlan(plan, { inventory: inv, apply: true });
+    }
+    if (parsed.flags.json) {
+      console.log(JSON.stringify({ ...plan, applied, apply: !!parsed.flags.apply }, null, 2));
+    } else {
+      console.log(formatSetupPlanHuman(plan, { apply: !!parsed.flags.apply, applied }));
+    }
     process.exit(0);
   }
 

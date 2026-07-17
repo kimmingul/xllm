@@ -2121,4 +2121,21 @@ test('applySetupPlan skip clears all posture role keys', () => {
   } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
 });
 
+// ---------------------------------------------------------------------------
+// CLI dispatch: --setup (Task 7)
+// ---------------------------------------------------------------------------
+
+test('--setup balanced --json previews without writing', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-cli-'));
+  try {
+    const res = spawnSync(process.execPath,
+      [path.join(root, 'scripts', 'xllm-advisor.js'), '--setup', 'skip', '--json'],
+      { encoding:'utf8', env:{ ...process.env, XLLM_STATE_DIR: tmp } });
+    assert.strictEqual(res.status, 0, res.stderr);
+    const plan = JSON.parse(res.stdout);
+    assert.strictEqual(plan.pack, 'skip');
+    assert.ok(!fs.existsSync(path.join(tmp, 'xllm-providers.toml')), 'preview writes nothing');
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
+});
+
 console.log(`\n${passed} tests passed`);

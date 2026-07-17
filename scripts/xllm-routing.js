@@ -817,7 +817,32 @@ export function resolveSetupPlan(inventory, { pack = 'balanced', host = null, ov
   }
 
   if (pack === 'local') {
-    throw new Error(`setup pack 'local' not yet implemented`);
+    const locals = setupLocals(inv);
+    if (!locals.length) {
+      warnings.push('no local model pulled — `local` pack unsatisfiable; run `ollama pull <model>` (or install lmstudio/lemonade), or use `skip`');
+      for (const r of SETUP_ROLES) evidence[r] = { routing_mode:'open', basis:'local_unsatisfiable' };
+      return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
+    }
+    const byBig = [...locals].sort(setupSizeDesc);
+    const bySmall = [...locals].sort(setupSizeAsc);
+    const analysis = byBig[0];
+    const critic = bySmall[0];
+    // design: prefer a different runtime, else a different model spec, else reuse
+    const design = locals.find((c) => c.runtime !== analysis.runtime)
+      || locals.find((c) => c.spec !== analysis.spec) || analysis;
+    roles.analysis = setupLocalSpec(analysis, 'medium');
+    roles.design = setupLocalSpec(design, 'low');
+    roles.critic = setupLocalSpec(critic, 'low');
+    const label = (c) => c.cap.billions != null ? `${c.cap.billions}B` : 'size_unknown';
+    evidence.analysis = { routing_mode:'pinned', basis:'most_capable_local', size: label(analysis) };
+    evidence.design = { routing_mode:'pinned', basis: design.runtime !== analysis.runtime ? 'cross_runtime' : 'different_model', size: label(design) };
+    evidence.critic = { routing_mode:'pinned', basis:'smallest_local', size: label(critic) };
+    if (locals.length === 1) warnings.push('single_model: only one local model — all roles share it (no decorrelation)');
+    // capability-floor visibility for judgment role critic; analysis/design get a soft warn if tiny
+    for (const [r, c] of [['analysis', analysis], ['design', design], ['critic', critic]]) {
+      if (c.cap.size_class === 'tiny') warnings.push(`capability floor: ${r} local is ${c.cap.billions}B (tiny) — low confidence on judgment`);
+    }
+    return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
   }
 
   throw new Error(`unknown setup pack: ${pack}`);

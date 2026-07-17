@@ -1667,6 +1667,35 @@ test('pick includes cost metadata and low intensity prefers cheap', () => {
   assert.strictEqual(p.pinned, false);
 });
 
+// Fixture: two local models
+const INV_LOCAL2 = { host_cli:'claude', providers:{
+  ollama:{ kind:'local', installed:true, healthy:true, tier:'local', relative_cost:0, models:['qwen3.6:14b','llama3.2:3b'] } } };
+// Fixture: one local model
+const INV_LOCAL1 = { host_cli:'claude', providers:{
+  ollama:{ kind:'local', installed:true, healthy:true, tier:'local', relative_cost:0, models:['qwen3.6:14b'] } } };
+// Fixture: no local models (unhealthy)
+const INV_LOCAL0 = { host_cli:'claude', providers:{
+  ollama:{ kind:'local', installed:true, healthy:false, tier:'local', relative_cost:0, models:[] } } };
+
+test('setup local spreads across models and pins all three', () => {
+  const plan = resolveSetupPlan(INV_LOCAL2, { pack: 'local' });
+  assert.ok(/^ollama:qwen3.6:14b@medium$/.test(plan.roles.analysis), 'most-capable → analysis');
+  assert.ok(/^ollama:/.test(plan.roles.design) && plan.roles.design !== plan.roles.analysis, 'design a different local');
+  assert.ok(/^ollama:llama3.2:3b@low$/.test(plan.roles.critic), 'smallest → critic');
+});
+
+test('setup local with one model shares it and warns single_model', () => {
+  const plan = resolveSetupPlan(INV_LOCAL1, { pack: 'local' });
+  assert.ok(plan.roles.analysis && plan.roles.critic, 'roles pinned');
+  assert.ok(plan.warnings.some((w) => /single_model/.test(w)));
+});
+
+test('setup local with no local models is unsatisfiable → all OPEN + warn', () => {
+  const plan = resolveSetupPlan(INV_LOCAL0, { pack: 'local' });
+  assert.deepStrictEqual(plan.roles, { analysis:null, design:null, critic:null });
+  assert.ok(plan.warnings.some((w) => /no local|pull/.test(w)));
+});
+
 // ---------------------------------------------------------------------------
 // Process-discipline block (setup-distillation)
 // ---------------------------------------------------------------------------

@@ -119,6 +119,7 @@ Claude Code와 Codex는 동일한 호스트 중립 스킬 7종을 `./skills/`에
 | `/xllm:exec` | 격리 클론에서 구현 위임 → 검증된 브랜치 | `scripts/xllm-exec.js` |
 | `/xllm:scribe` | 커밋/PR/릴리스 산문을 최저가 모델로 | `scripts/xllm-scribe.js` |
 | `/xllm:setup` | 머신 인벤토리 + 역할 핀 위저드 + 규율 블록 옵트인 | `scripts/xllm-advisor.js --inventory/--remember/--set-role/--discipline` |
+| `setup [pack]` | 인벤토리→역할 핀을 결정적으로 해석(포스처 팩); `--apply` 전엔 미리보기 | `scripts/xllm-advisor.js --setup` |
 
 Grok Build 어댑터는 별도 3종입니다: `/ask` · `/xllm` · `/xllm-setup` (`.grok/skills/`).
 

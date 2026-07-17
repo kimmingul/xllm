@@ -37,33 +37,41 @@ node <advisor.js> --remember
 Writes `.xllm/xllm-advisor-path` (legacy `.grok/` honored) and creates
 secret-redacting artifact dirs with a self-ignoring `.gitignore`.
 
-## Step 3 — Per-project advisor wizard (Q&A)
+## Step 3 — Per-project advisor wizard (posture packs)
 
-Goal: pin role → `provider[:model][@effort]` for THIS project.
+Resolve pins deterministically; the skill only renders and confirms.
 
-1. **Understand the project locally.** Look at languages, stack, and
-   security-sensitivity (auth/payment/crypto code) using your own file access.
-   **Never send repository contents to advisors during setup** — your analysis
-   stays local; only the resulting config is written.
-   If the project is empty, ask the user to describe what they intend to
-   build before recommending anything.
-2. **Draft recommendations** from the inventory: strong tier for
-   analysis/security, balanced for design, cheapest healthy local model for
-   critic/docs. Cross-vendor rule: never recommend the host's own vendor.
-3. **Ask the user** one focused question per role that matters (usually
-   analysis, design, critic). Use the host's native question UI — on Claude
-   Code, AskUserQuestion with your recommendation as the first option labeled
-   "(Recommended)"; elsewhere, a compact numbered list. Include a "skip
-   (use built-in routing)" option.
-4. **Persist each answer**:
+1. **Preview the recommended pack** (default `balanced`):
 
    ```bash
-   node <advisor.js> --set-role analysis codex@high
-   node <advisor.js> --set-role critic ollama:qwen3.6:latest@low
+   node <advisor.js> --setup balanced --json
    ```
 
-   Verify with `node <advisor.js> --profile-show`. Pinned roles override
-   built-in routing exactly (including effort — no intensity bumping).
+   The resolver returns `{ roles, warnings, evidence, recommended_packs }`.
+   `balanced` leaves analysis/design OPEN (measured routing) and pins at most a
+   free local critic — a pin FREEZES measured routing, so packs pin only genuine
+   constraints. `quality` = max-spend lock, `frugal` = cost lock, `local` =
+   offline lock, `skip` = clear pins.
+
+2. **Ask ONE question** using the host's UI, offering the first four of
+   `recommended_packs` (always include `skip`). On Claude Code use
+   AskUserQuestion with the resolver's top pack labeled "(Recommended)"; show the
+   effort legend (Quick=low / Standard=medium / Deep=high) and one-line role
+   glosses. Never invent cloud model names — cloud pins omit the model.
+
+3. **Show the resolved preview** (roles + warnings + which stay OPEN and why),
+   then on the user's accept:
+
+   ```bash
+   node <advisor.js> --setup <pack> --apply
+   ```
+
+   Partial tweak: `--role analysis=grok@high` (validated; one bad override writes
+   nothing). Reverting: `node <advisor.js> --setup skip --apply` clears the
+   posture pins. Verify with `node <advisor.js> --profile-show`.
+
+Never send repository contents to advisors during setup — your analysis stays
+local; only the resulting config is written.
 
 ## Step 4 — Process-discipline block (optional, explicit opt-in)
 

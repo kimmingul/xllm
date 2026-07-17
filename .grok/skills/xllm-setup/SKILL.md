@@ -41,21 +41,40 @@ Ensure:
 
 (`--remember` / `--doctor` also create these.)
 
-## 2.5 Project advisor wizard (optional)
+## 2.5 Project advisor wizard (posture packs — optional)
 
-Pin per-project roles interactively — recommend from the machine inventory
-(`node <advisor.js> --inventory`, 24h cache; `--refresh` to re-probe). Never
-send repository contents to advisors during setup; analyze locally, ask the
-user per role, then persist:
+Resolve pins deterministically; the skill only renders and confirms.
 
-```bash
-node <advisor.js> --set-role analysis codex@high
-node <advisor.js> --set-role critic ollama:qwen3.6:latest@low
-node <advisor.js> --profile-show
-```
+1. **Preview the recommended pack** (default `balanced`):
 
-Pinned roles override built-in routing exactly (effort included). If the
-project is empty, ask the user what they intend to build first.
+   ```bash
+   node <advisor.js> --setup balanced --json
+   ```
+
+   The resolver returns `{ roles, warnings, evidence, recommended_packs }`.
+   `balanced` leaves analysis/design OPEN (measured routing) and pins at most a
+   free local critic — a pin FREEZES measured routing, so packs pin only genuine
+   constraints. `quality` = max-spend lock, `frugal` = cost lock, `local` =
+   offline lock, `skip` = clear pins.
+
+2. **Ask ONE question**, offering the first four of `recommended_packs` (always
+   include `skip`). Show the effort legend (Quick=low / Standard=medium /
+   Deep=high) and one-line role glosses. Never invent cloud model names — cloud
+   pins omit the model.
+
+3. **Show the resolved preview** (roles + warnings + which stay OPEN and why),
+   then on the user's accept:
+
+   ```bash
+   node <advisor.js> --setup <pack> --apply
+   ```
+
+   Partial tweak: `--role analysis=grok@high` (validated; one bad override writes
+   nothing). Reverting: `node <advisor.js> --setup skip --apply` clears the
+   posture pins. Verify with `node <advisor.js> --profile-show`.
+
+Never send repository contents to advisors during setup; analyze locally, persist
+only the resulting config.
 
 ## 2.7 Process-discipline block (optional, explicit opt-in)
 

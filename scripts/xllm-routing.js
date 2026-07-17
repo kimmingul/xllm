@@ -774,15 +774,68 @@ export function resolveSetupPlan(inventory, { pack = 'balanced', host = null, ov
     return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
   }
 
-  if (pack === 'quality' || pack === 'frugal' || pack === 'local') {
-    throw new Error(`setup pack '${pack}' not yet implemented`);
+  if (pack === 'quality') {
+    const cloud = setupCloud(inv);
+    const a = setupStrongCloud(cloud);
+    if (a) { roles.analysis = setupCloudSpec(a, 'xhigh'); evidence.analysis = { routing_mode:'pinned', basis:'explicit_lock' }; }
+    const d = setupStrongCloud(cloud.filter((p) => !a || p.name !== a.name)) || a;
+    if (d) {
+      roles.design = setupCloudSpec(d, 'high');
+      evidence.design = { routing_mode:'pinned', basis:'explicit_lock' };
+      if (a && d.name === a.name) warnings.push('single_lab_collapse: only one strong lab READY — design reuses it (best available, not cross-lab)');
+    }
+    const strongCritic = setupStrongCloud(cloud);
+    if (strongCritic) { roles.critic = setupCloudSpec(strongCritic, 'medium'); evidence.critic = { routing_mode:'pinned', basis:'explicit_lock' }; }
+    else {
+      const locals = setupLocals(inv);
+      if (locals.length) { const c = [...locals].sort(setupSizeDesc)[0]; roles.critic = setupLocalSpec(c, 'medium'); evidence.critic = { routing_mode:'pinned', basis:'largest_local' }; }
+    }
+    if (!cloud.length) warnings.push('no non-host cloud READY — quality falls back to local; consider `local` pack');
+    return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
   }
+
+  if (pack === 'frugal') {
+    const cloud = setupCloud(inv);
+    const locals = setupLocals(inv);
+    const a = setupCheapest(cloud.filter((p) => p.tier === 'strong' || p.tier === 'balanced'));
+    if (a) { roles.analysis = setupCloudSpec(a, 'medium'); evidence.analysis = { routing_mode:'pinned', basis:'cost_lock' }; }
+    else if (locals.length) { const la = [...locals].sort(setupSizeDesc)[0]; roles.analysis = setupLocalSpec(la, 'medium'); evidence.analysis = { routing_mode:'pinned', basis:'cost_lock_local' }; }
+    if (locals.length) {
+      const cheapLocal = [...locals].sort(setupSizeAsc)[0];
+      roles.design = setupLocalSpec(cheapLocal, 'low'); evidence.design = { routing_mode:'pinned', basis:'local_cheap' };
+      roles.critic = setupLocalSpec(cheapLocal, 'low'); evidence.critic = { routing_mode:'pinned', basis:'local_cheap' };
+    } else {
+      evidence.design = { routing_mode:'open', basis:'open_no_local' };
+      evidence.critic = { routing_mode:'open', basis:'open_no_local' };
+      warnings.push('no local model → design & critic left to routing (frugal never pins a paid critic)');
+    }
+    return finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv);
+  }
+
+  if (pack === 'local') {
+    throw new Error(`setup pack 'local' not yet implemented`);
+  }
+
   throw new Error(`unknown setup pack: ${pack}`);
 }
 
 /** Apply --role overrides + sensitive policy, then return the plan object. */
 function finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv) {
-  // sensitive policy is layered in Task 3; overrides validated at apply time.
+  // sensitive policy: never freeze a paid critic on security-sensitive work, floor analysis effort
+  if (sensitive === 'yes') {
+    // never freeze a paid critic on security-sensitive work
+    if (roles.critic && !/^ollama:|^lmstudio(@|$)|^lemonade(@|$)/.test(roles.critic)) {
+      roles.critic = null;
+      evidence.critic = { routing_mode: 'open', basis: 'sensitive_no_paid_critic' };
+      warnings.push('sensitive=yes: refused a paid critic pin — left to routing');
+    }
+    // floor analysis effort to at least high
+    if (roles.analysis && /@(low|medium)$/.test(roles.analysis)) {
+      roles.analysis = roles.analysis.replace(/@(low|medium)$/, '@high');
+      evidence.analysis = { ...(evidence.analysis || {}), sensitive_bumped: true };
+    }
+  }
+  // overrides validated at apply time.
   for (const [r, spec] of Object.entries(overrides || {})) {
     if (SETUP_ROLES.includes(r)) {
       roles[r] = spec === null ? null : String(spec);

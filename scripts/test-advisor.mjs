@@ -1571,6 +1571,37 @@ test('SETUP_PACKS lists the five v1 packs', () => {
   assert.deepStrictEqual(SETUP_PACKS, ['balanced','quality','frugal','local','skip']);
 });
 
+// Fixture: no local models, cloud only
+const INV_NOLOCAL = {
+  host_cli: 'claude',
+  providers: {
+    codex:  { kind:'cloud', installed:true, healthy:true, tier:'strong',   relative_cost:7 },
+    gemini: { kind:'cloud', installed:true, healthy:true, tier:'balanced', relative_cost:4 },
+    claude: { kind:'cloud', installed:true, healthy:true, tier:'strong',   relative_cost:7 },
+  },
+};
+
+test('setup quality pins strong analysis at xhigh (lock, not measured)', () => {
+  const plan = resolveSetupPlan(INV_RICH, { pack: 'quality' });
+  assert.ok(/@xhigh$/.test(plan.roles.analysis), 'analysis @xhigh');
+  assert.ok(['codex@xhigh','grok@xhigh'].includes(plan.roles.analysis), 'analysis is a strong cloud, no model');
+  assert.strictEqual(plan.evidence.analysis.basis, 'explicit_lock');
+});
+
+test('setup frugal never pins a paid critic; prefers local, else OPEN', () => {
+  const rich = resolveSetupPlan(INV_RICH, { pack: 'frugal' });
+  assert.ok(/^ollama:/.test(rich.roles.critic), 'critic local when present');
+  const nolocal = resolveSetupPlan(INV_NOLOCAL, { pack: 'frugal' });
+  assert.strictEqual(nolocal.roles.critic, null, 'critic OPEN when no local (never paid)');
+  assert.ok(nolocal.warnings.some((w) => /critic/.test(w)));
+});
+
+test('setup sensitive=yes forbids paid critic and floors analysis effort', () => {
+  const plan = resolveSetupPlan(INV_NOLOCAL, { pack: 'quality', sensitive: 'yes' });
+  assert.ok(plan.roles.critic === null || /^ollama:/.test(plan.roles.critic), 'no paid critic pin');
+  assert.ok(/@(high|xhigh)$/.test(plan.roles.analysis), 'analysis effort >= high');
+});
+
 test('loadProviderProfiles propagates [roles] from TOML (CLI path)', () => {
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-roles-'));
   const file = path.join(tmp, 'p.toml');

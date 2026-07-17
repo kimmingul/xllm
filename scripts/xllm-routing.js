@@ -854,10 +854,10 @@ export function recommendPacks(inventory) {
   const locals = setupLocals(inventory);
   if (!cloud.length && !locals.length) return ['skip'];
   let order;
-  if (!cloud.length) order = ['local', 'frugal', 'skip', 'balanced'];
+  if (!cloud.length) order = ['local', 'frugal', 'balanced', 'skip'];
   else if (!locals.length) order = ['balanced', 'quality', 'frugal', 'skip'];
-  else order = ['balanced', 'quality', 'frugal', 'local'];
-  if (!order.includes('skip')) order = [...order.slice(0, 3), 'skip'];
+  else order = ['balanced', 'quality', 'frugal', 'local', 'skip'];
+  if (!order.includes('skip')) order.push('skip');
   return order;
 }
 

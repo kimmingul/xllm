@@ -1709,6 +1709,13 @@ test('recommendPacks surfaces local first when no non-host cloud', () => {
   assert.ok(r.includes('skip'));
 });
 
+test('recommendPacks keeps both local and skip for a rich inventory', () => {
+  const r = recommendPacks(INV_RICH);
+  assert.ok(r.includes('local'), 'local present for rich inventory');
+  assert.ok(r.includes('skip'), 'skip present');
+  assert.strictEqual(r[0], 'balanced', 'balanced first');
+});
+
 test('resolveSetupPlan includes recommended_packs', () => {
   const plan = resolveSetupPlan(INV_RICH, { pack: 'balanced' });
   assert.ok(Array.isArray(plan.recommended_packs) && plan.recommended_packs.includes('skip'));

@@ -1538,7 +1538,7 @@ test('pickAdvisorForRole critic escalates to cloud on high', () => {
 // --- setup packs ---
 // ---------------------------------------------------------------------------
 
-import { resolveSetupPlan, SETUP_PACKS } from './xllm-routing.js';
+import { resolveSetupPlan, SETUP_PACKS, recommendPacks } from './xllm-routing.js';
 
 // Fixture inventories for setup packs
 const INV_RICH = {
@@ -1694,6 +1694,24 @@ test('setup local with no local models is unsatisfiable → all OPEN + warn', ()
   const plan = resolveSetupPlan(INV_LOCAL0, { pack: 'local' });
   assert.deepStrictEqual(plan.roles, { analysis:null, design:null, critic:null });
   assert.ok(plan.warnings.some((w) => /no local|pull/.test(w)));
+});
+
+test('recommendPacks demotes local when no local models', () => {
+  const r = recommendPacks(INV_NOLOCAL);
+  assert.ok(r.includes('skip'), 'skip always present');
+  assert.ok(r.indexOf('local') === -1 || r.indexOf('local') > r.indexOf('balanced'), 'local not surfaced first');
+  assert.strictEqual(r[0], 'balanced');
+});
+
+test('recommendPacks surfaces local first when no non-host cloud', () => {
+  const r = recommendPacks(INV_LOCAL2);
+  assert.strictEqual(r[0], 'local');
+  assert.ok(r.includes('skip'));
+});
+
+test('resolveSetupPlan includes recommended_packs', () => {
+  const plan = resolveSetupPlan(INV_RICH, { pack: 'balanced' });
+  assert.ok(Array.isArray(plan.recommended_packs) && plan.recommended_packs.includes('skip'));
 });
 
 // ---------------------------------------------------------------------------

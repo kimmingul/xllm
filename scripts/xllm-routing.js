@@ -848,6 +848,19 @@ export function resolveSetupPlan(inventory, { pack = 'balanced', host = null, ov
   throw new Error(`unknown setup pack: ${pack}`);
 }
 
+/** Inventory-conditioned pack ordering for the skill's 4-option UI. skip always present. */
+export function recommendPacks(inventory) {
+  const cloud = setupCloud(inventory);
+  const locals = setupLocals(inventory);
+  if (!cloud.length && !locals.length) return ['skip'];
+  let order;
+  if (!cloud.length) order = ['local', 'frugal', 'skip', 'balanced'];
+  else if (!locals.length) order = ['balanced', 'quality', 'frugal', 'skip'];
+  else order = ['balanced', 'quality', 'frugal', 'local'];
+  if (!order.includes('skip')) order = [...order.slice(0, 3), 'skip'];
+  return order;
+}
+
 /** Apply --role overrides + sensitive policy, then return the plan object. */
 function finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, inv) {
   // sensitive policy: never freeze a paid critic on security-sensitive work, floor analysis effort
@@ -871,7 +884,7 @@ function finishSetupPlan(pack, roles, warnings, evidence, overrides, sensitive, 
       evidence[r] = { routing_mode: spec ? 'pinned' : 'open', basis: 'user_override' };
     }
   }
-  return { pack, roles, warnings, evidence };
+  return { pack, roles, warnings, evidence, recommended_packs: recommendPacks(inv) };
 }
 
 // ---------------------------------------------------------------------------

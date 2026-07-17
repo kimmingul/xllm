@@ -586,7 +586,7 @@ export function deleteProfileKey(section, key, root = process.cwd()) {
 const SETUP_ROLE_KEYS = ['analysis', 'design', 'critic'];
 
 /** Validate one resolved pin against inventory. Returns {ok, error?}. */
-export function validateSetupPin(spec, role, inventory) {
+export function validateSetupPin(spec, role, inventory, options = {}) {
   if (!SETUP_ROLE_KEYS.includes(role)) return { ok: false, error: `unknown role: ${role}` };
   const parsed = parseProviderSpec(spec);
   if (!parsed) return { ok: false, error: `invalid spec: ${spec}` };
@@ -597,6 +597,16 @@ export function validateSetupPin(spec, role, inventory) {
   if (parsed.model && p.kind === 'local' && Array.isArray(p.models) && !p.models.includes(parsed.model)) {
     return { ok: false, error: `local model not pulled: ${parsed.model}` };
   }
+  if (options.sensitive === 'yes') {
+    const prov = inventory.providers?.[parsed.provider];
+    const isLocal = prov && prov.kind === 'local';
+    if (role === 'critic' && !isLocal) {
+      return { ok: false, error: `sensitive=yes: paid critic pin not allowed (${spec})` };
+    }
+    if (role === 'analysis' && ['none', 'minimal', 'low', 'medium'].includes(parsed.effort)) {
+      return { ok: false, error: `sensitive=yes: analysis effort must be at least high (${spec})` };
+    }
+  }
   return { ok: true };
 }
 
@@ -605,12 +615,12 @@ export function validateSetupPin(spec, role, inventory) {
  * apply — write pins and DELETE keys for OPEN (null) roles. Atomic: any
  * validation error throws before a single write.
  */
-export function applySetupPlan(plan, { inventory, apply = false, root = process.cwd() } = {}) {
+export function applySetupPlan(plan, { inventory, apply = false, root = process.cwd(), sensitive = 'no' } = {}) {
   const errors = [];
   for (const role of SETUP_ROLE_KEYS) {
     const spec = plan.roles[role];
     if (spec == null) continue; // OPEN
-    const v = validateSetupPin(spec, role, inventory);
+    const v = validateSetupPin(spec, role, inventory, { sensitive });
     if (!v.ok) errors.push(`${role}: ${v.error}`);
   }
   if (errors.length) {
@@ -2569,22 +2579,27 @@ async function main() {
   }
 
   if (parsed.mode === 'setup') {
-    const { resolveSetupPlan } = await import('./xllm-routing.js');
-    const inv = buildInventory({});
-    const sensitive = parsed.sensitive === 'auto' ? 'no' : parsed.sensitive; // bare CLI has no host skim
-    const plan = resolveSetupPlan(inv, {
-      pack: parsed.pack, host: inv.host_cli, overrides: parsed.overrides, sensitive,
-    });
-    let applied = { written: [], deleted: [], errors: [] };
-    if (parsed.flags.apply) {
-      applied = applySetupPlan(plan, { inventory: inv, apply: true });
+    try {
+      const { resolveSetupPlan } = await import('./xllm-routing.js');
+      const inv = buildInventory({});
+      const sensitive = parsed.sensitive === 'auto' ? 'no' : parsed.sensitive; // bare CLI has no host skim
+      const plan = resolveSetupPlan(inv, {
+        pack: parsed.pack, host: inv.host_cli, overrides: parsed.overrides, sensitive,
+      });
+      let applied = { written: [], deleted: [], errors: [] };
+      if (parsed.flags.apply) {
+        applied = applySetupPlan(plan, { inventory: inv, apply: true, sensitive });
+      }
+      if (parsed.flags.json) {
+        console.log(JSON.stringify({ ...plan, applied, apply: !!parsed.flags.apply }, null, 2));
+      } else {
+        console.log(formatSetupPlanHuman(plan, { apply: !!parsed.flags.apply, applied }));
+      }
+      process.exit(0);
+    } catch (e) {
+      console.error(String(e?.message || e));
+      process.exit(1);
     }
-    if (parsed.flags.json) {
-      console.log(JSON.stringify({ ...plan, applied, apply: !!parsed.flags.apply }, null, 2));
-    } else {
-      console.log(formatSetupPlanHuman(plan, { apply: !!parsed.flags.apply, applied }));
-    }
-    process.exit(0);
   }
 
   if (parsed.mode === 'dry-run') {

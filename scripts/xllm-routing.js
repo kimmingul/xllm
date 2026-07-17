@@ -801,7 +801,10 @@ export function resolveSetupPlan(inventory, { pack = 'balanced', host = null, ov
     const cloud = setupCloud(inv);
     const locals = setupLocals(inv);
     const a = setupCheapest(cloud.filter((p) => p.tier === 'strong' || p.tier === 'balanced'));
-    if (a) { roles.analysis = setupCloudSpec(a, 'medium'); evidence.analysis = { routing_mode:'pinned', basis:'cost_lock' }; }
+    if (a) {
+      roles.analysis = setupCloudSpec(a, 'medium'); evidence.analysis = { routing_mode:'pinned', basis:'cost_lock' };
+      warnings.push('frugal pinned a paid analysis provider — this freezes cost/measurement for that role; use `skip` or `--role` to leave it OPEN');
+    }
     else if (locals.length) { const la = [...locals].sort(setupSizeDesc)[0]; roles.analysis = setupLocalSpec(la, 'medium'); evidence.analysis = { routing_mode:'pinned', basis:'cost_lock_local' }; }
     else { evidence.analysis = { routing_mode: 'open', basis: 'open_no_provider' }; }
     if (locals.length) {

@@ -2121,6 +2121,32 @@ test('applySetupPlan skip clears all posture role keys', () => {
   } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
 });
 
+test('applySetupPlan under sensitive=yes rejects a paid critic override with zero writes', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-sens1-'));
+  try {
+    const plan = { pack:'frugal', roles:{ analysis:null, design:null, critic:'codex@high' } };
+    assert.throws(() => applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp, sensitive: 'yes' }), /paid critic|sensitive/);
+    assert.ok(!fs.existsSync(path.join(tmp, '.xllm', 'xllm-providers.toml')), 'no write on rejection');
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
+});
+
+test('applySetupPlan under sensitive=yes rejects a below-high analysis override', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-sens2-'));
+  try {
+    const plan = { pack:'frugal', roles:{ analysis:'codex@low', design:null, critic:null } };
+    assert.throws(() => applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp, sensitive: 'yes' }), /at least high|sensitive/);
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
+});
+
+test('applySetupPlan under sensitive=yes still allows a local critic override', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-sens3-'));
+  try {
+    const plan = { pack:'frugal', roles:{ analysis:null, design:null, critic:'ollama:qwen3.6:14b@low' } };
+    const res = applySetupPlan(plan, { inventory: APPLY_INV, apply: true, root: tmp, sensitive: 'yes' });
+    assert.ok(res.written.includes('critic'), 'local critic allowed under sensitive');
+  } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
+});
+
 // ---------------------------------------------------------------------------
 // CLI dispatch: --setup (Task 7)
 // ---------------------------------------------------------------------------

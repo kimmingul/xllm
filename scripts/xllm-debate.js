@@ -30,7 +30,7 @@ import {
 import { appendLedger, ledgerPath } from './xllm-panel.js';
 import { extractJson, askStructured, adherenceSummary } from './xllm-structured.js';
 import { canonicalSpecKey } from './xllm-traits.js';
-import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
+import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta, questionWithContext } from './xllm-diff.js';
 
 export const MAX_CLAIMS = 8;
 
@@ -97,15 +97,28 @@ export function foreignClaims(capped, spec) {
   return capped.filter((c) => claimAuthorKey(c) !== mine);
 }
 
-export function buildDefendPrompt(claim, attacks) {
+/**
+ * question is the same promptQuestion R0/R1 saw (question + diff context when
+ * present) — without it the author defends code-review claims blind while the
+ * attackers argued from the diff, an asymmetry that favored refutation.
+ */
+export function buildDefendPrompt(claim, attacks, question = null) {
   const list = attacks
     .map((a) => `- [${a.attacker}] tier=${a.tier}: ${a.mechanism}${a.falsifier ? ` | falsifier: ${a.falsifier}` : ''}`)
     .join('\n');
+  const questionBlock = question
+    ? `QUESTION (as posed to every debater, including any code under review):
+<<<
+${question}
+>>>
+
+`
+    : '';
   return `You authored this claim: "${claim.text}"
 
 It is under HOSTILE attack. Do NOT preserve it out of consistency, and do NOT concede out of politeness. Answer the strongest attack.
 
-ATTACKS:
+${questionBlock}ATTACKS:
 ${list}
 
 Rules:
@@ -295,7 +308,7 @@ export async function runDebate({ specs, question, root = process.cwd(), context
     console.error('[debate] Need at least 2 debaters.');
     return { exitCode: 1 };
   }
-  const promptQuestion = context ? `${question}\n${context}` : question;
+  const promptQuestion = questionWithContext(question, context);
   // R0 — blind claims (sequential to avoid local/cloud contention). One
   // corrective retry per model via the shared structured layer.
   console.error('[debate] R0 blind claims…');
@@ -345,7 +358,7 @@ export async function runDebateOnClaims({
   const N = parsed.length;
   const id = debateId();
   const adherence = [...r0Adherence];
-  const promptQuestion = context ? `${question}\n${context}` : question;
+  const promptQuestion = questionWithContext(question, context);
 
   // R1 — refute (each provider attacks foreign claims only), with retry.
   console.error('[debate] R1 refute…');
@@ -375,7 +388,7 @@ export async function runDebateOnClaims({
     console.error(`[debate]   ${c.authorSpec} defends ${c.id}`);
     const r = await askStructured({
       spec: c.authorSpec,
-      prompt: buildDefendPrompt(c, atk),
+      prompt: buildDefendPrompt(c, atk, promptQuestion),
       parse: extractDefense,
       repairHint: 'end with exactly one fenced ```json block: {"response":"holds|amend|concede","amended_claim":null,"rebuttals":[{"attacker":"...","result":"holds","counter":"..."}]}',
     });

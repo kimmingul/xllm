@@ -26,7 +26,7 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
-import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
+import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta, PROMPT_FILE_THRESHOLD } from './xllm-diff.js';
 
 const VERSION = '0.26.0';
 const PRODUCT = 'xllm';
@@ -2652,10 +2652,10 @@ async function main() {
       console.error(`[multi] code context: ${diffContext.source} (${diffContext.bytes} bytes${diffContext.truncated ? ', truncated' : ''})`);
     }
     // Windows argv cap: a diff-laden prompt goes to children via a temp
-    // --prompt-file instead of argv (same 24KB threshold as the structured layer).
+    // --prompt-file instead of argv (shared threshold with the structured layer).
     let tmpPromptFile = null;
     let childPromptArgs = [fullPrompt];
-    if (fullPrompt.length > 24 * 1024) {
+    if (fullPrompt.length > PROMPT_FILE_THRESHOLD) {
       try {
         tmpPromptFile = path.join(
           os.tmpdir(),

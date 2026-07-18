@@ -41,7 +41,9 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
    - Advisor A (analysis): correctness, architecture, security, tests, risks.
    - Advisor B (design/UX): clarity, alternatives, edge cases, docs/UX.
    - Advisor C (optional): security-only or cheap local pass.
-3. **Run advisors** — prefer advisor script once per provider (parallel if tools allow):
+3. **Run advisors** — prefer advisor script once per provider (parallel if tools allow).
+   `<xllm.mjs>` below = `scripts/xllm.mjs` next to the `<advisor.js>` you already
+   resolved (same directory):
 
    ```bash
    node <advisor.js> codex@high "<analysis prompt>"
@@ -81,9 +83,7 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
 
 `/xllm` above runs the **roles** mode (parallel advisors, host synthesizes —
 coverage, **not measured**). For a measured spread or adversarial stress-test,
-drop to the review family directly. `<xllm.mjs>` = `scripts/xllm.mjs` next to
-the `<advisor.js>` you already resolved above (same directory) — resolve the
-advisor path first, then use its sibling `xllm.mjs`:
+drop to the review family directly (same `<xllm.mjs>` as step 3):
 
 ```bash
 node <xllm.mjs> review roles   p1,p2[,p3] "<prompt>"      # coverage — NOT measured
@@ -99,7 +99,8 @@ node <xllm.mjs> review council p1,p2[,p3] "<question>"    # blind → debate, hi
 | debate | adversarial — decisive falsifiers kill wrong claims | ~2–3× | being wrong is expensive |
 | council | independent divergence → hostile convergence | ~3–4× | the highest-stakes calls |
 
-Any mode accepts one diff source: `--staged | --base <ref> | --diff-file <path>`.
+Any mode accepts one diff source: `--staged | --base <ref> | --diff-file <path>`
+(`--base` is two-dot `git diff <ref>` — working tree vs ref, uncommitted included).
 `review stats` prints the pairwise agreement matrix (measured decorrelation);
 `review outcome <run-id> --adopted <spec|majority|minority|none> --helpful
 yes|no` records what the host adopted, feeding measured routing.

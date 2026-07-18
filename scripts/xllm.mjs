@@ -36,6 +36,7 @@ function run(script, args) {
     shell: false,
     cwd: process.cwd(),
     stdio: 'inherit',
+    windowsHide: true,
   });
   process.exit(res.status ?? 1);
 }

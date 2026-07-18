@@ -14,6 +14,15 @@ import { spawnSync } from 'child_process';
 
 export const DIFF_MAX_BYTES = 24 * 1024;
 
+/**
+ * Prompts longer than this (in CHARS — the unit of the Windows ~32K
+ * CreateProcess command-line cap) are handed to the advisor via --prompt-file
+ * instead of argv. Single source of truth for BOTH the structured layer and
+ * advisor --multi; lives here because this module is import-cycle-free
+ * (structured imports advisor's sibling path, advisor imports this).
+ */
+export const PROMPT_FILE_THRESHOLD = 24000;
+
 /** Extract --staged / --base <ref> / --diff-file <path> from argv. Pure. */
 export function parseDiffFlags(argv) {
   const rest = [];
@@ -22,10 +31,11 @@ export function parseDiffFlags(argv) {
     const a = argv[i];
     if (a === '--staged') diffOpts.staged = true;
     else if (a === '--base') {
-      if (!argv[i + 1]) return { error: '--base requires a ref' };
+      // git refs cannot start with '-', so a flag-like token is a missing value
+      if (!argv[i + 1] || argv[i + 1].startsWith('--')) return { error: '--base requires a ref' };
       diffOpts.base = argv[++i];
     } else if (a === '--diff-file') {
-      if (!argv[i + 1]) return { error: '--diff-file requires a path' };
+      if (!argv[i + 1] || argv[i + 1].startsWith('--')) return { error: '--diff-file requires a path' };
       diffOpts.diffFile = argv[++i];
     } else rest.push(a);
   }
@@ -49,23 +59,26 @@ function git(args, root) {
   });
 }
 
-/** Slice string by byte range, UTF-8-boundary-safe (strips replacement char artifacts). */
-function byteSlice(s, start, end) {
-  const buf = Buffer.from(s, 'utf8');
-  return buf.subarray(start, end).toString('utf8').replace(/^�+|�+$/g, '');
-}
-
-/** Head+tail truncation at the byte cap, UTF-8-accurate. Pure. */
+/**
+ * Head+tail truncation at the byte cap, UTF-8-accurate. Pure. Cut points are
+ * retreated to codepoint boundaries (continuation bytes are 0b10xxxxxx), so no
+ * partial character — and no replacement-char artifact — is ever emitted, and
+ * a genuine U+FFFD in the source survives. The marker reports the exact byte
+ * count removed, including any boundary retreat.
+ */
 export function truncateDiff(text, max = DIFF_MAX_BYTES) {
   const s = String(text || '');
-  const total = Buffer.byteLength(s, 'utf8');
+  const buf = Buffer.from(s, 'utf8');
+  const total = buf.length;
   if (total <= max) return { text: s, truncated: false };
-  const headBytes = Math.floor(max * 0.7);
-  const tailBytes = Math.floor(max * 0.2);
-  const head = byteSlice(s, 0, headBytes);
-  const tail = byteSlice(s, total - tailBytes, total);
+  let headEnd = Math.floor(max * 0.7);
+  while (headEnd > 0 && (buf[headEnd] & 0xc0) === 0x80) headEnd--;
+  let tailStart = total - Math.floor(max * 0.2);
+  while (tailStart < total && (buf[tailStart] & 0xc0) === 0x80) tailStart++;
+  const head = buf.subarray(0, headEnd).toString('utf8');
+  const tail = buf.subarray(tailStart).toString('utf8');
   return {
-    text: `${head}\n\n[... TRUNCATED ${total - headBytes - tailBytes} bytes ...]\n\n${tail}`,
+    text: `${head}\n\n[... TRUNCATED ${tailStart - headEnd} bytes ...]\n\n${tail}`,
     truncated: true,
   };
 }
@@ -92,9 +105,9 @@ export function collectReviewDiff(diffOpts, root = process.cwd()) {
       truncated: t.truncated,
     };
   }
-  if (git(['rev-parse', '--git-dir'], root).status !== 0) {
-    return { error: 'not a git repository' };
-  }
+  const probe = git(['rev-parse', '--git-dir'], root);
+  if (probe.error) return { error: 'git binary not found on PATH' };
+  if (probe.status !== 0) return { error: 'not a git repository' };
   if (diffOpts.base && git(['rev-parse', '--verify', '--quiet', diffOpts.base], root).status !== 0) {
     return { error: `unknown ref: ${diffOpts.base}` };
   }
@@ -128,6 +141,11 @@ export function buildReviewContext(diff) {
     diff.body,
     '```',
   ].join('\n');
+}
+
+/** The question advisors actually see: question + optional diff context. Pure. */
+export function questionWithContext(question, context) {
+  return context ? `${question}\n${context}` : question;
 }
 
 /** Persistable metadata — never the body. Pure. */

@@ -46,6 +46,7 @@ import {
   applySetupPlan,
 } from './xllm-advisor.js';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -1344,6 +1345,15 @@ test('debate prompts force hostility + evidence typing', () => {
   assert.ok(/concede/.test(dp) && /holds/.test(dp));
 });
 
+test('buildDefendPrompt shows the author the question/diff context (R0/R1 symmetry)', () => {
+  const q = 'Is this safe?\n```diff\n+const marker = unsafeParse(input);\n```';
+  const dp = buildDefendPrompt({ text: 'x' }, [{ attacker: 'grok', tier: 'soft', mechanism: 'm' }], q);
+  assert.ok(dp.includes('+const marker = unsafeParse(input);'), 'diff context missing from defend prompt');
+  // without a question the prompt stays claim+attacks only (backward compatible)
+  const bare = buildDefendPrompt({ text: 'x' }, [{ attacker: 'grok', tier: 'soft', mechanism: 'm' }]);
+  assert.ok(!bare.includes('QUESTION'));
+});
+
 test('parseDebateRunArgs extracts specs/question and diff flags', () => {
   const p = parseDebateRunArgs(['a,b', 'this', 'claim', '--base', 'v0.25.0']);
   assert.deepStrictEqual(p.specs, ['a', 'b']);
@@ -2241,7 +2251,20 @@ import {
   buildReviewContext,
   diffMeta,
   DIFF_MAX_BYTES,
+  PROMPT_FILE_THRESHOLD as DIFF_PROMPT_FILE_THRESHOLD,
+  questionWithContext,
 } from './xllm-diff.js';
+
+test('questionWithContext appends the diff context only when present', () => {
+  assert.strictEqual(questionWithContext('q', null), 'q');
+  assert.strictEqual(questionWithContext('q', ''), 'q');
+  assert.strictEqual(questionWithContext('q', 'ctx'), 'q\nctx');
+});
+
+test('PROMPT_FILE_THRESHOLD has a single source of truth (xllm-diff, re-exported by structured)', () => {
+  assert.strictEqual(typeof DIFF_PROMPT_FILE_THRESHOLD, 'number');
+  assert.strictEqual(DIFF_PROMPT_FILE_THRESHOLD, PROMPT_FILE_THRESHOLD);
+});
 
 test('parseDiffFlags extracts each source and preserves rest', () => {
   const a = parseDiffFlags(['p1,p2', 'question', 'words', '--staged']);
@@ -2258,6 +2281,13 @@ test('parseDiffFlags rejects multiple sources and missing values', () => {
   assert.ok(parseDiffFlags(['--staged', '--base', 'main']).error);
   assert.ok(parseDiffFlags(['--base']).error);
   assert.ok(parseDiffFlags(['--diff-file']).error);
+});
+
+test('parseDiffFlags treats a flag-like token after --base/--diff-file as a missing value', () => {
+  const a = parseDiffFlags(['--base', '--tiebreak']);
+  assert.ok(a.error && a.error.includes('--base requires a ref'), `got: ${a.error}`);
+  const b = parseDiffFlags(['--diff-file', '--staged']);
+  assert.ok(b.error && b.error.includes('--diff-file requires a path'), `got: ${b.error}`);
 });
 
 test('hasDiffSource false on empty opts, true per source', () => {
@@ -2282,6 +2312,20 @@ test('truncateDiff is byte-accurate for multi-byte UTF-8 (CJK)', () => {
   assert.ok(!big.text.includes('�'));
 });
 
+test('truncateDiff preserves genuine U+FFFD at slice edges and reports exact removed bytes', () => {
+  const input = '�ab' + '한'.repeat(DIFF_MAX_BYTES) + 'yz�';
+  const big = truncateDiff(input);
+  assert.strictEqual(big.truncated, true);
+  // a real U+FFFD in the source must survive (only cut artifacts may vanish)
+  assert.ok(big.text.startsWith('�ab'), 'genuine leading U+FFFD stripped');
+  assert.ok(big.text.endsWith('yz�'), 'genuine trailing U+FFFD stripped');
+  // the marker's byte count must equal exactly what was removed
+  const m = big.text.match(/\n\n\[\.\.\. TRUNCATED (\d+) bytes \.\.\.\]\n\n/);
+  assert.ok(m, 'marker missing');
+  const kept = Buffer.byteLength(big.text, 'utf8') - Buffer.byteLength(m[0], 'utf8');
+  assert.strictEqual(Number(m[1]), Buffer.byteLength(input, 'utf8') - kept);
+});
+
 test('collectReviewDiff reads --diff-file fixture; errors on empty/missing', () => {
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-diff-'));
   try {
@@ -2295,6 +2339,22 @@ test('collectReviewDiff reads --diff-file fixture; errors on empty/missing', () 
     assert.ok(collectReviewDiff({ staged: false, base: null, diffFile: f }).error);
     assert.ok(collectReviewDiff({ staged: false, base: null, diffFile: path.join(tmp, 'nope') }).error);
   } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectReviewDiff distinguishes missing git binary from not-a-repo', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'xllm-norepo-'));
+  const savedPath = process.env.PATH;
+  try {
+    const noRepo = collectReviewDiff({ staged: true, base: null, diffFile: null }, tmp);
+    assert.strictEqual(noRepo.error, 'not a git repository');
+    process.env.PATH = '';
+    const noGit = collectReviewDiff({ staged: true, base: null, diffFile: null }, tmp);
+    assert.ok(noGit.error && noGit.error !== 'not a git repository', `got: ${noGit.error}`);
+    assert.ok(/git/i.test(noGit.error) && /found|PATH/i.test(noGit.error), `got: ${noGit.error}`);
+  } finally {
+    process.env.PATH = savedPath;
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });

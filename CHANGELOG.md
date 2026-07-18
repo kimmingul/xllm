@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased (v0.27.0 예정) — review-family polish
+
+v0.26.0 최종 리뷰 이월분 10건 전부 구현 (docs/review-polish-backlog.md 결정 기록 참조).
+
+### Changed
+- **R2 defend 대칭화** — debate의 `buildDefendPrompt`가 R0/R1과 동일한
+  promptQuestion(질문 + diff 컨텍스트)을 방어자에게도 제공. 코드 리뷰 debate에서
+  저자가 코드 없이 방어하던 비대칭 제거 (R2 토큰 비용은 diff 크기만큼 증가).
+- **prompt-file 임계값 단일화** — `PROMPT_FILE_THRESHOLD = 24000`이 무의존 모듈
+  `xllm-diff.js`로 이동(structured가 re-export); advisor `--multi`의 `24 * 1024`
+  리터럴(24576)이 공유 상수로 교체되어 드리프트 소멸.
+- **truncateDiff 경계 재구현** — U+FFFD 스트립 대신 절단점을 UTF-8 코드포인트
+  경계로 후퇴. 원본에 있던 U+FFFD는 보존되고, TRUNCATED 마커가 정확한 제거
+  바이트 수를 표기.
+- **에러 UX** — `--base --tiebreak`류 플래그형 값은 "requires a ref" 에러;
+  git 바이너리 부재는 not-a-repo와 구분된 메시지.
+- **`--base <ref>`는 two-dot 확정 (사용자 판정)** — `git diff <ref>` 워킹트리
+  비교(미커밋 포함) 유지, merge-base 삼점 비교 아님을 README/스킬에 명시.
+  시맨틱 변경 없음.
+- 소형: `xllm.mjs` spawn에 `windowsHide` 통일, `.grok` 스킬 플레이스홀더 정의
+  순서 교정, `questionWithContext()` 헬퍼로 합성 중복 제거.
+
+`npm run ci` green (182 tests). CLI 표면/프로토콜 변경 없음(프롬프트 내용과
+에러 메시지만 개선) — 라이브 e2e는 릴리스 전 debate 1회로 defend 컨텍스트
+전달을 확인 예정.
+
 ## 0.26.0 — 2026-07-18
 
 ### Added — `review` dispatcher: one noun, four deliberation modes

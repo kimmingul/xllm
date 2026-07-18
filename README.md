@@ -189,7 +189,9 @@ node <plugin-root>/scripts/xllm.mjs …      # 플러그인 설치본에서
 - **긴 프롬프트** — Windows argv ~32KB 한계가 있습니다. `--prompt-file <경로>`를 쓰세요
   (review 계열은 24KB 초과 시 자동으로 파일 경유).
 - **diff 입력** — 어느 심의 모드에서든 `--staged | --base <ref> | --diff-file <path>` 중 하나로
-  diff를 넣을 수 있습니다. git으로 결정적으로 수집되어 크기 상한 후 어드바이저에 전달되며,
+  diff를 넣을 수 있습니다. `--base <ref>`는 `git diff <ref>`(two-dot) — **워킹트리 대 ref** 비교라
+  미커밋 변경까지 포함합니다(merge-base 삼점 비교가 아님; 커밋된 브랜치 diff만 원하면 커밋 후 사용).
+  git으로 결정적으로 수집되어 크기 상한 후 어드바이저에 전달되며,
   **절대 저장되지 않습니다**(원장/인덱스는 source/stat/bytes/truncated 메타데이터만 남김; 단 어드바이저별 응답 아티팩트에는 프롬프트 전문이 남는다: `ask`와 동일하며 `--no-artifacts`로 생략 가능 — roles 한정; blind/debate/council은 구조화 파싱이 아티팩트를 사용).
 
 ### 의견 — `ask`
@@ -341,7 +343,7 @@ discipline show|install|remove [--target <path>]
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 176개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 182개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)

@@ -20,16 +20,19 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import process from 'process';
 
+import { PROMPT_FILE_THRESHOLD } from './xllm-diff.js';
+
 const ADVISOR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'xllm-advisor.js');
 
 /**
- * Prompts longer than this are handed to the advisor via --prompt-file
- * instead of argv: Windows caps the whole CreateProcess command line at
- * ~32K chars, and this caller→advisor hop would otherwise fail before the
- * advisor can even pick stdin delivery for the provider. Cross-platform for
- * determinism (a temp file is also less exposed than a process list entry).
+ * Re-exported from xllm-diff (single source of truth): prompts longer than
+ * this are handed to the advisor via --prompt-file instead of argv — Windows
+ * caps the whole CreateProcess command line at ~32K chars, and this
+ * caller→advisor hop would otherwise fail before the advisor can even pick
+ * stdin delivery for the provider. Cross-platform for determinism (a temp
+ * file is also less exposed than a process list entry).
  */
-export const PROMPT_FILE_THRESHOLD = 24000;
+export { PROMPT_FILE_THRESHOLD };
 
 // ---------------------------------------------------------------------------
 // Robust JSON extraction

@@ -47,6 +47,9 @@ persisted (ledger/index record source/stat/bytes only):
 --staged | --base <ref> | --diff-file <path>
 ```
 
+`--base <ref>` is two-dot (`git diff <ref>`): working tree vs ref, so
+uncommitted changes are included — NOT a merge-base (three-dot) branch diff.
+
 ## Contract
 
 - Advisors are read-only; your own vendor is refused; nothing is auto-applied.

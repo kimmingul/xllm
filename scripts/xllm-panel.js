@@ -42,7 +42,7 @@ import {
   adherenceSummary,
   rawFromArtifact,
 } from './xllm-structured.js';
-import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
+import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta, questionWithContext } from './xllm-diff.js';
 
 // rawFromArtifact now lives in the shared structured layer; re-export for
 // callers (e.g. xllm-debate) that imported it from here.
@@ -243,7 +243,7 @@ export async function runPanel({
     return { exitCode: 1 };
   }
 
-  const prompt = buildPanelPrompt(context ? `${question}\n${context}` : question);
+  const prompt = buildPanelPrompt(questionWithContext(question, context));
 
   // Ask each panelist for a structured verdict via the shared layer: one
   // corrective retry before counting a non-compliant model as an abstention.

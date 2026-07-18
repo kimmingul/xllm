@@ -28,7 +28,7 @@ import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
 
-const VERSION = '0.25.0';
+const VERSION = '0.26.0';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 

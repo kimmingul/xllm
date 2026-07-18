@@ -341,7 +341,7 @@ discipline show|install|remove [--target <path>]
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 163개 (라이브 LLM 불필요)
+npm test          # 단위 테스트 176개 (라이브 LLM 불필요)
 npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
 npm run ci        # check + test + smoke + bench selftest
 npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)

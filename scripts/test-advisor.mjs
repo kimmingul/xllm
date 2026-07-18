@@ -597,6 +597,29 @@ test('writeMultiIndex writes md with synthesis contract and json sidecar', () =>
   }
 });
 
+test('writeMultiIndex marks roles output non-measured and records diff meta only', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-multi-'));
+  try {
+    const r = writeMultiIndex({
+      prompt: 'q',
+      results: [
+        { spec: 'a', code: 0, artifact: null },
+        { spec: 'b', code: 0, artifact: null },
+      ],
+      diffContext: { source: 'staged', stat: '1 file', bytes: 10, truncated: false },
+      root: tmp,
+    });
+    const j = JSON.parse(fs.readFileSync(r.jsonPath, 'utf8'));
+    assert.strictEqual(j.measurement, false);
+    assert.strictEqual(j.diff_context.source, 'staged');
+    assert.strictEqual('body' in j.diff_context, false);
+    const md = fs.readFileSync(r.mdPath, 'utf8');
+    assert.ok(/Measurement: none/.test(md));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Proposal mode (improvement 3)
 // ---------------------------------------------------------------------------

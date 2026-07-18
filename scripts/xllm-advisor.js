@@ -22,9 +22,11 @@
 
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
+import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
 
 const VERSION = '0.25.0';
 const PRODUCT = 'xllm';
@@ -1282,6 +1284,7 @@ export function writeMultiIndex({
   results,
   propose = false,
   root = process.cwd(),
+  diffContext = null,
 }) {
   const dir = path.join(ensureArtifactDirs(root), 'xllm');
   const base = `multi-${slugify(prompt)}-${ts()}`;
@@ -1298,6 +1301,11 @@ export function writeMultiIndex({
         advisor_version: VERSION,
         task,
         propose,
+        // Epistemology firewall (umbrella-5): roles/multi output is coverage,
+        // not measurement — no ledger, no pairwise agreement. Only `review
+        // blind` / council phase-1 produce measured agreement.
+        measurement: false,
+        ...(diffContext ? { diff_context: diffContext } : {}),
         failures: failed,
         results: results.map((r) => ({
           spec: r.spec,
@@ -1321,6 +1329,8 @@ export function writeMultiIndex({
       `- Created at: ${new Date().toISOString()}`,
       `- Providers: ${results.map((r) => r.spec).join(', ')}`,
       `- Failures: ${failed}`,
+      `- Measurement: none — coverage mode; the consensus labels below are the host's synthesis, not measured agreement (use \`review blind\` for measured agreement)`,
+      ...(diffContext ? [`- Code context: ${diffContext.source} (${diffContext.bytes} bytes${diffContext.truncated ? ', truncated' : ''}) — diff body not persisted`] : []),
       `- Machine-readable: ${jsonPath}`,
       '',
       '## Results',
@@ -2453,11 +2463,16 @@ function parseArgs(argv) {
     return { mode: 'dry-run', ...spec, prompt, flags };
   }
   if (args[0] === '--multi') {
+    const dr = parseDiffFlags(args.slice(2));
+    if (dr.error) {
+      console.error(`[multi] ${dr.error}`);
+      process.exit(1);
+    }
     const list = (args[1] || '')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const prompt = filePrompt ?? args.slice(2).join(' ').trim();
+    const prompt = filePrompt ?? dr.rest.join(' ').trim();
     if (list.length < 2 || !prompt) {
       console.error('--multi requires at least two providers and a prompt');
       usage();
@@ -2470,7 +2485,7 @@ function parseArgs(argv) {
       }
       return p;
     });
-    return { mode: 'multi', providers, prompt, flags };
+    return { mode: 'multi', providers, prompt, diffOpts: dr.diffOpts, flags };
   }
 
   const spec = parseProviderSpec(args[0]);
@@ -2624,12 +2639,41 @@ async function main() {
     if (parsed.flags.noArtifacts) childFlags.push('--no-artifacts');
     if (parsed.flags.propose) childFlags.push('--propose');
 
+    let diffContext = null;
+    let fullPrompt = parsed.prompt;
+    if (hasDiffSource(parsed.diffOpts)) {
+      const diff = collectReviewDiff(parsed.diffOpts);
+      if (diff.error) {
+        console.error(`[multi] ${diff.error}`);
+        process.exit(1);
+      }
+      fullPrompt = `${parsed.prompt}\n${buildReviewContext(diff)}`;
+      diffContext = diffMeta(diff);
+      console.error(`[multi] code context: ${diffContext.source} (${diffContext.bytes} bytes${diffContext.truncated ? ', truncated' : ''})`);
+    }
+    // Windows argv cap: a diff-laden prompt goes to children via a temp
+    // --prompt-file instead of argv (same 24KB threshold as the structured layer).
+    let tmpPromptFile = null;
+    let childPromptArgs = [fullPrompt];
+    if (fullPrompt.length > 24 * 1024) {
+      try {
+        tmpPromptFile = path.join(
+          os.tmpdir(),
+          `xllm-multi-prompt-${process.pid}-${Date.now().toString(36)}.txt`
+        );
+        fs.writeFileSync(tmpPromptFile, fullPrompt, 'utf8');
+        childPromptArgs = ['--prompt-file', tmpPromptFile];
+      } catch {
+        tmpPromptFile = null; // best-effort: fall back to argv
+      }
+    }
+
     const runOne = (p) =>
       new Promise((resolve) => {
         console.error(`[multi] running ${p.spec}...`);
         const child = spawn(
           process.execPath,
-          [self, ...childFlags, p.spec, parsed.prompt],
+          [self, ...childFlags, p.spec, ...childPromptArgs],
           { env: process.env, windowsHide: true }
         );
         let out = '';
@@ -2648,6 +2692,13 @@ async function main() {
       });
 
     const raw = await Promise.all(parsed.providers.map(runOne));
+    if (tmpPromptFile) {
+      try {
+        fs.unlinkSync(tmpPromptFile);
+      } catch {
+        /* best-effort */
+      }
+    }
     const results = raw.map((r) => {
       const artifact = r.code === 0 && r.out ? r.out.split(/\r?\n/).pop() : null;
       const patchMatch = (r.err || '').match(/patch: (.+\.patch)/);
@@ -2667,6 +2718,7 @@ async function main() {
       prompt: parsed.prompt,
       results,
       propose: parsed.flags.propose,
+      diffContext,
     });
     console.log(index.mdPath);
     process.exit(failed > 0 && failed === results.length ? 1 : 0);

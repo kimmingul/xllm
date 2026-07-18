@@ -60,4 +60,4 @@ evidence; never present it as success.
 - Multi-task orchestration, loops, teams → host-native agents compose
   multiple exec calls; xllm deliberately ships only this one primitive.
 - Same-vendor parallel work → host-native subagents.
-- Opinion or review only → `ask`/`multi`. A static small change → `propose`.
+- Opinion or review only → `ask`/`review roles`. A static small change → `propose`.

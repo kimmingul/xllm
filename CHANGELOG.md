@@ -48,8 +48,7 @@
 required. Protocol-level pieces of this release (review dispatcher, diff
 collector, discipline v2 auto-upgrade) shipped with live e2e in their
 originating commits, per project convention; this entry is the docs sweep
-that catches README/docs/Pages/CHANGELOG up to the shipped surface. Manifests
-still report 0.25.0 — the version bump lands in a follow-up release commit.
+that catches README/docs/Pages/CHANGELOG up to the shipped surface.
 
 ## 0.25.0 — 2026-07-17
 

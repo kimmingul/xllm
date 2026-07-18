@@ -10,7 +10,7 @@ Canonical docs:
 
 ```bash
 node scripts/xllm-advisor.js codex "Review this change"
-node scripts/xllm.mjs multi codex,gemini "Security + UX review"
+node scripts/xllm.mjs review roles codex,gemini "Security + UX review"
 node scripts/xllm.mjs doctor
 ```
 

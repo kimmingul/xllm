@@ -57,7 +57,7 @@ MSG=$(node <xllm-scribe.js> commit) && git commit -m "$MSG"
 
 - push / tag creation → pure git commands; no model needed at all.
 - Release strategy, breaking-change judgment, "should we ship" → that is
-  analysis, not scribing; use `ask`/`multi` with a strong model.
+  analysis, not scribing; use `ask`/`review roles` with a strong model.
 - If no advisor is healthy: on Claude Code, spawn a host-native cheap-model
   subagent instead (Agent tool with `model: haiku` — pass it the same
   collector output and template contract); otherwise write the prose yourself.

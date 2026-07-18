@@ -20,9 +20,7 @@
   ],
   "skills": [
     "./skills/ask/",
-    "./skills/multi/",
-    "./skills/debate/",
-    "./skills/council/",
+    "./skills/review/",
     "./skills/exec/",
     "./skills/scribe/",
     "./skills/setup/"

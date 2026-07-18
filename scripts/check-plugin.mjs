@@ -138,10 +138,21 @@ ok(pkg.version === plugin.version, `package.json version matches plugin.json (${
   ok(xEntry?.source?.url === './', 'codex adapter: marketplace self-hosts plugin at ./');
   // Shared skills must not be Claude-only: advisor resolution has to work on
   // hosts without CLAUDE_PLUGIN_ROOT (Codex resolves relative to the SKILL.md).
-  for (const s of ['ask', 'multi', 'setup']) {
+  for (const s of ['ask', 'review', 'setup']) {
     const body = fs.readFileSync(path.join(root, 'skills', s, 'SKILL.md'), 'utf8');
     ok(/plugin.root|plugin-root/i.test(body), `shared skill ${s} documents non-Claude plugin-root resolution`);
   }
+}
+
+// umbrella-5: collapsed skills must not resurface; review skill stays ≤80 lines
+for (const gone of ['multi', 'debate', 'council']) {
+  ok(!fs.existsSync(path.join(root, 'skills', gone)), `collapsed skill dir absent (skills/${gone})`);
+}
+{
+  const reviewLines = fs
+    .readFileSync(path.join(root, 'skills', 'review', 'SKILL.md'), 'utf8')
+    .split('\n').length;
+  ok(reviewLines <= 80, `review skill ≤ 80 lines (${reviewLines})`);
 }
 
 // Shipped surface must not re-advertise removed grok-xllm-era features

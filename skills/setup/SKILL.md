@@ -5,7 +5,7 @@ description: >
   machine for installed advisor CLIs and local models, then run a short Q&A to
   pin which provider+model+effort each role should use here, with recommended
   defaults. Use for "set up xllm", "xllm doctor", "configure advisors for this
-  project", or when the ask or multi skills cannot find providers.
+  project", or when the ask or review skills cannot find providers.
 ---
 
 # setup — Machine inventory + per-project advisor wizard (xllm)

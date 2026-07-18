@@ -15,18 +15,20 @@
   boundaries (CJK-safe), sent to advisors, and **never persisted**: the
   ledger and run index carry only `source`/`stat`/`bytes`/`truncated`
   metadata, never the diff body.
-- **Epistemology firewall.** `review roles` is coverage — parallel advisors +
-  host synthesis — not measurement; its index JSON now carries
-  `measurement: false`. Only `review blind`/`review council`/`review stats`
-  write the append-only ledger and speak measured pairwise agreement. Docs
-  and skill copy must never describe `roles`/`multi` output as "measured" or
-  "consensus-measured".
+- **Epistemology firewall.** Two orthogonal claims, kept separate on purpose:
+  원장 기록(append-only ledger writes)은 `review blind`/`review debate`/
+  `review council`(+ `review outcome` 레코드) 몫이며, `review roles`는 절대
+  기록하지 않습니다. 측정된 쌍별 일치(measured agreement)를 말하는 것은
+  `review blind`/`review council`(1단계)/`review stats`뿐 — `review roles`의
+  라벨은 합성(coverage)일 뿐이라 index JSON에 `measurement: false`가 명시됩니다.
+  Docs and skill copy must never describe `roles`/`multi` output as "measured"
+  or "consensus-measured".
 - **Discipline block v2.** The CLAUDE.md/AGENTS.md process-discipline block
   speaks review-family nouns; `xllm discipline install` re-run auto-upgrades
   any existing `<!-- xllm:discipline vN --> ... <!-- /xllm:discipline -->`
   block in place, regardless of prior version.
 
-### Changed
+### Changed — skills collapsed 7→5, old nouns aliased, docs aligned to `review`
 - **Skills collapsed 7→5**: `ask`, `review`, `exec`, `scribe`, `setup`. The
   `multi`/`debate`/`council` skill directories are gone; `/xllm:review` in
   Claude Code and Codex covers all four deliberation modes (`skills/review/`,
@@ -38,7 +40,7 @@
   (`review roles`/`blind`/`debate`/`council`); concept names (panel, debate,
   council) are unchanged in prose — only the invoked command notation moved.
 
-### Removed
+### Removed — nothing; old nouns stay reachable as aliases this release
 - Nothing. All old nouns remain reachable as aliases this release; no
   behavior was dropped.
 

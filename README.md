@@ -190,7 +190,7 @@ node <plugin-root>/scripts/xllm.mjs …      # 플러그인 설치본에서
   (review 계열은 24KB 초과 시 자동으로 파일 경유).
 - **diff 입력** — 어느 심의 모드에서든 `--staged | --base <ref> | --diff-file <path>` 중 하나로
   diff를 넣을 수 있습니다. git으로 결정적으로 수집되어 크기 상한 후 어드바이저에 전달되며,
-  **절대 저장되지 않습니다**(원장/인덱스는 source/stat/bytes/truncated 메타데이터만 남김; 단 어드바이저별 응답 아티팩트에는 프롬프트 전문이 남는다: `ask`와 동일하며 `--no-artifacts`로 생략 가능).
+  **절대 저장되지 않습니다**(원장/인덱스는 source/stat/bytes/truncated 메타데이터만 남김; 단 어드바이저별 응답 아티팩트에는 프롬프트 전문이 남는다: `ask`와 동일하며 `--no-artifacts`로 생략 가능 — roles 한정; blind/debate/council은 구조화 파싱이 아티팩트를 사용).
 
 ### 의견 — `ask`
 

@@ -1233,6 +1233,7 @@ import {
   buildDefendPrompt,
   foreignClaims,
   claimAuthorKey,
+  parseDebateRunArgs,
 } from './xllm-debate.js';
 
 const claim = { id: 'C0-1', author: 'claude:opus', authorSpec: 'claude:opus', text: 'X is unsafe' };
@@ -1318,6 +1319,14 @@ test('debate prompts force hostility + evidence typing', () => {
   assert.ok(/HOSTILE/.test(rp) && /Default to REFUTE/.test(rp) && /decisive/.test(rp));
   const dp = buildDefendPrompt({ text: 'x' }, [{ attacker: 'grok', tier: 'soft', mechanism: 'm' }]);
   assert.ok(/concede/.test(dp) && /holds/.test(dp));
+});
+
+test('parseDebateRunArgs extracts specs/question and diff flags', () => {
+  const p = parseDebateRunArgs(['a,b', 'this', 'claim', '--base', 'v0.25.0']);
+  assert.deepStrictEqual(p.specs, ['a', 'b']);
+  assert.strictEqual(p.question, 'this claim');
+  assert.strictEqual(p.diffOpts.base, 'v0.25.0');
+  assert.ok(parseDebateRunArgs(['a,b', 'q', '--staged', '--diff-file', 'x']).error);
 });
 
 // ---------------------------------------------------------------------------

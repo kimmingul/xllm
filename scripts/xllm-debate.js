@@ -30,6 +30,7 @@ import {
 import { appendLedger, ledgerPath } from './xllm-panel.js';
 import { extractJson, askStructured, adherenceSummary } from './xllm-structured.js';
 import { canonicalSpecKey } from './xllm-traits.js';
+import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
 
 export const MAX_CLAIMS = 8;
 
@@ -279,12 +280,22 @@ export function capClaims(claims, parsed) {
   return capped;
 }
 
-export async function runDebate({ specs, question, root = process.cwd() }) {
+/** CLI arg parser for `run`. Pure. */
+export function parseDebateRunArgs(argv) {
+  const d = parseDiffFlags(argv);
+  if (d.error) return { error: d.error };
+  const specs = (d.rest[0] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const question = d.rest.slice(1).join(' ').trim();
+  return { specs, question, diffOpts: d.diffOpts };
+}
+
+export async function runDebate({ specs, question, root = process.cwd(), context = null, contextMeta = null }) {
   const parsed = parseDebaters(specs);
   if (parsed.length < 2) {
     console.error('[debate] Need at least 2 debaters.');
     return { exitCode: 1 };
   }
+  const promptQuestion = context ? `${question}\n${context}` : question;
   // R0 — blind claims (sequential to avoid local/cloud contention). One
   // corrective retry per model via the shared structured layer.
   console.error('[debate] R0 blind claims…');
@@ -295,7 +306,7 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
     console.error(`[debate]   ${p.spec}`);
     const r = await askStructured({
       spec: p.spec,
-      prompt: buildClaimsPrompt(question),
+      prompt: buildClaimsPrompt(promptQuestion),
       parse: (raw) => {
         const c = extractClaims(raw);
         return c && c.length ? c : null;
@@ -312,7 +323,7 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
     console.error('[debate] no claims extracted — advisors did not emit the claims block.');
     return { exitCode: 1 };
   }
-  return runDebateOnClaims({ question, parsed, capped, root, r0Adherence: adherence });
+  return runDebateOnClaims({ question, parsed, capped, root, r0Adherence: adherence, context, contextMeta });
 }
 
 /**
@@ -321,10 +332,20 @@ export async function runDebate({ specs, question, root = process.cwd() }) {
  * `council` (claims surfaced by an independent panel). panelRunId links the
  * ledger record back to the originating panel.
  */
-export async function runDebateOnClaims({ question, parsed, capped, root = process.cwd(), panelRunId = null, r0Adherence = [] }) {
+export async function runDebateOnClaims({
+  question,
+  parsed,
+  capped,
+  root = process.cwd(),
+  panelRunId = null,
+  r0Adherence = [],
+  context = null,
+  contextMeta = null,
+}) {
   const N = parsed.length;
   const id = debateId();
   const adherence = [...r0Adherence];
+  const promptQuestion = context ? `${question}\n${context}` : question;
 
   // R1 — refute (each provider attacks foreign claims only), with retry.
   console.error('[debate] R1 refute…');
@@ -335,7 +356,7 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
     console.error(`[debate]   ${p.spec} attacks ${foreign.length}`);
     const r = await askStructured({
       spec: p.spec,
-      prompt: buildRefutePrompt(question, foreign),
+      prompt: buildRefutePrompt(promptQuestion, foreign),
       parse: extractAttacks,
       repairHint: 'end with exactly one fenced ```json block: {"attacks":[{"claim_id":"...","stance":"refute","mechanism":"...","falsifier":"...","tier":"decisive"}]}',
     });
@@ -378,6 +399,7 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
       panel_run_id: panelRunId,
       created_at: new Date().toISOString(),
       question: redactSecrets(question),
+      ...(contextMeta ? { diff_context: contextMeta } : {}),
       debaters: parsed.map((p) => p.spec),
       claims: results.map((r) => ({
         id: r.id,
@@ -408,6 +430,7 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
       `- Run id: ${id} (ledger: ${ledgerPath(root)})`,
       `- Debaters: ${parsed.map((p) => p.spec).join(', ')}  (N=${N})`,
       `- Question: ${redactSecrets(question)}`,
+      ...(contextMeta ? [`- Code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''}) — diff body not persisted`] : []),
       '',
       '> Status is a protocol outcome, not truth. SURVIVED = withstood hostile',
       '> refutation; it is not proof. Nothing is auto-applied — you decide.',
@@ -446,18 +469,30 @@ export async function runDebateOnClaims({ question, parsed, capped, root = proce
 async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === 'run') {
-    const specs = (argv[1] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const question = argv.slice(2).join(' ').trim();
-    if (specs.length < 2 || !question) {
-      console.error('Usage: xllm-debate run p1,p2[,p3] "<question>"');
+    const p = parseDebateRunArgs(argv.slice(1));
+    if (p.error || p.specs.length < 2 || !p.question) {
+      if (p.error) console.error(`[debate] ${p.error}`);
+      console.error('Usage: xllm-debate run p1,p2[,p3] "<question>" [--staged|--base <ref>|--diff-file <path>]');
       process.exit(1);
     }
-    const r = await runDebate({ specs, question });
+    let context = null;
+    let contextMeta = null;
+    if (hasDiffSource(p.diffOpts)) {
+      const diff = collectReviewDiff(p.diffOpts);
+      if (diff.error) {
+        console.error(`[debate] ${diff.error}`);
+        process.exit(1);
+      }
+      context = buildReviewContext(diff);
+      contextMeta = diffMeta(diff);
+      console.error(`[debate] code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''})`);
+    }
+    const r = await runDebate({ specs: p.specs, question: p.question, context, contextMeta });
     process.exit(r.exitCode);
   }
   console.error(`xllm debate — adversarial multi-LLM review (models refute each other)
 Usage:
-  node scripts/xllm-debate.js run p1,p2[,p3] "<question>"
+  node scripts/xllm-debate.js run p1,p2[,p3] "<question>" [--staged|--base <ref>|--diff-file <path>]
 
 R0 blind claims → R1 refute (foreign only) → R2 defend → mechanical
 resolution (SURVIVED / KILLED / UNRESOLVED). Only a decisive falsifier kills;

@@ -42,6 +42,7 @@ import {
   adherenceSummary,
   rawFromArtifact,
 } from './xllm-structured.js';
+import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
 
 // rawFromArtifact now lives in the shared structured layer; re-export for
 // callers (e.g. xllm-debate) that imported it from here.
@@ -204,12 +205,30 @@ function panelId() {
   );
 }
 
+/** CLI arg parser for `run` — shared with council. Pure. */
+export function parsePanelRunArgs(argv) {
+  const d = parseDiffFlags(argv);
+  if (d.error) return { error: d.error };
+  const rest = d.rest;
+  const tiebreak = rest.includes('--tiebreak');
+  const readyArg = rest.find((a) => a.startsWith('--ready='));
+  const readyProviders = readyArg
+    ? readyArg.slice('--ready='.length).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    : null;
+  const positional = rest.filter((a) => a !== '--tiebreak' && !a.startsWith('--ready='));
+  const specs = (positional[0] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const question = positional.slice(1).join(' ').trim();
+  return { specs, question, tiebreak, readyProviders, diffOpts: d.diffOpts };
+}
+
 export async function runPanel({
   specs,
   question,
   root = process.cwd(),
   tiebreak = false,
   readyProviders = null,
+  context = null,
+  contextMeta = null,
 }) {
   const parsed = specs.map((s) => {
     const p = parseProviderSpec(s);
@@ -224,7 +243,7 @@ export async function runPanel({
     return { exitCode: 1 };
   }
 
-  const prompt = buildPanelPrompt(question);
+  const prompt = buildPanelPrompt(context ? `${question}\n${context}` : question);
 
   // Ask each panelist for a structured verdict via the shared layer: one
   // corrective retry before counting a non-compliant model as an abstention.
@@ -295,6 +314,7 @@ export async function runPanel({
     run_id: id,
     created_at: new Date().toISOString(),
     question: redactSecrets(question),
+    ...(contextMeta ? { diff_context: contextMeta } : {}),
     panelists: panelists.map((p) => ({
       spec: p.spec,
       provider: p.provider,
@@ -441,6 +461,7 @@ export async function runPanel({
       '',
       `- Run id: ${id} (ledger: ${ledgerPath(root)})`,
       `- Question: ${redactSecrets(question)}`,
+      ...(contextMeta ? [`- Code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''}) — diff body not persisted`] : []),
       '',
       '## Ledger (truth — the summary below may not override this)',
       '',
@@ -468,7 +489,7 @@ export async function runPanel({
       '  unanimous can still be wrong.',
       '- On split: the Tiebreak section above names the measured-decorrelation',
       '  pick — spend it with `--tiebreak`; never hand-pick by lineage.',
-      `- Afterwards record what you did: \`xllm panel outcome ${id} --adopted <spec|majority|minority|none> --helpful yes|no\``,
+      `- Afterwards record what you did: \`xllm review outcome ${id} --adopted <spec|majority|minority|none> --helpful yes|no\``,
       '',
       '## Contract adherence (structured-output health)',
       '',
@@ -563,28 +584,37 @@ async function main() {
   }
 
   if (cmd === 'run') {
-    const rest = argv.slice(1);
-    const tiebreak = rest.includes('--tiebreak');
-    const readyArg = rest.find((a) => a.startsWith('--ready='));
-    const readyProviders = readyArg
-      ? readyArg.slice('--ready='.length).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-      : null;
-    const positional = rest.filter((a) => a !== '--tiebreak' && !a.startsWith('--ready='));
-    const specs = (positional[0] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const question = positional.slice(1).join(' ').trim();
-    if (specs.length < 2 || !question) {
-      console.error('Usage: xllm-panel run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]');
+    const p = parsePanelRunArgs(argv.slice(1));
+    if (p.error || p.specs.length < 2 || !p.question) {
+      if (p.error) console.error(`[panel] ${p.error}`);
+      console.error('Usage: xllm-panel run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>]');
       process.exit(1);
     }
-    const r = await runPanel({ specs, question, tiebreak, readyProviders });
+    let context = null;
+    let contextMeta = null;
+    if (hasDiffSource(p.diffOpts)) {
+      const diff = collectReviewDiff(p.diffOpts);
+      if (diff.error) {
+        console.error(`[panel] ${diff.error}`);
+        process.exit(1);
+      }
+      context = buildReviewContext(diff);
+      contextMeta = diffMeta(diff);
+      console.error(`[panel] code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''})`);
+    }
+    const r = await runPanel({ specs: p.specs, question: p.question, tiebreak: p.tiebreak, readyProviders: p.readyProviders, context, contextMeta });
     process.exit(r.exitCode);
   }
 
   console.error(`xllm panel — blind same-prompt panel + agreement ledger
 Usage:
-  node scripts/xllm-panel.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
+  node scripts/xllm-panel.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>]
   node scripts/xllm-panel.js stats [--json]                # pairwise agreement matrix
   node scripts/xllm-panel.js outcome <run-id> --adopted <…> --helpful yes|no
+
+--staged/--base/--diff-file attach a code diff to the prompt (review family);
+the diff body is never persisted — only source/stat/bytes/truncated land in
+the ledger and md index as diff_context / "Code context".
 
 On a SPLIT the ledger's measured agreement picks an unconsulted tiebreaker
 (suggestion is always free and recorded; the one extra blind call runs only

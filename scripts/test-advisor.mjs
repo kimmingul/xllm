@@ -935,7 +935,18 @@ import {
   readLedger,
   ledgerStats,
   ledgerPath,
+  parsePanelRunArgs,
 } from './xllm-panel.js';
+
+test('parsePanelRunArgs parses specs/question/flags incl. diff flags anywhere', () => {
+  const p = parsePanelRunArgs(['a,b', 'is', 'it', 'safe?', '--tiebreak', '--staged', '--ready=x,y']);
+  assert.deepStrictEqual(p.specs, ['a', 'b']);
+  assert.strictEqual(p.question, 'is it safe?');
+  assert.strictEqual(p.tiebreak, true);
+  assert.deepStrictEqual(p.readyProviders, ['x', 'y']);
+  assert.strictEqual(p.diffOpts.staged, true);
+  assert.ok(parsePanelRunArgs(['a,b', 'q', '--staged', '--base', 'main']).error);
+});
 
 test('buildPanelPrompt appends the blind verdict protocol', () => {
   const p = buildPanelPrompt('Is eval safe?');

@@ -488,6 +488,30 @@
          decorrelation. The dividend lives in the mid-tier decorrelated regime — and only
          measurement tells you which panel you hold.</p>
     </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act nine — three light models on one GPU: the largest dividend yet</h3>
+      <p>Every dividend so far came from <em>cloud</em> models, and the SOTA-heavy panels recovered
+         the least. So we went the other way: three genuinely light models whose weights fit on one
+         consumer GPU — ornith (5.6GB) · gemma4 (9.6GB) · qwen3-coder (18GB) — all raw
+         HTTP completion, hard set, run 3×. A full run takes ~10 minutes and costs nothing.</p>
+      <table class="bt">
+        <tr><th>Run</th><th>ornith · qwen3-coder · gemma4</th><th>best single → union</th><th>dividend</th></tr>
+        <tr><td>1</td><td>15 · 13 · 8</td><td>15 → 19 / 21</td><td><b>+4</b></td></tr>
+        <tr><td>2</td><td>15 · 15 · 9</td><td>15 → 19 / 21</td><td><b>+4</b></td></tr>
+        <tr><td>3</td><td>14 · 11 · 7</td><td>14 → 16 / 21</td><td><b>+2</b></td></tr>
+      </table>
+      <p class="quote">Mean dividend <b>+3.33</b> — the largest measured in the benchmark's history —
+         at mean pairwise agreement <b>0.609</b>, the lowest ever. Across the three runs the union
+         covered all 21 seeded defects with zero permanent blind spots; the 5.6GB model caught the
+         double-fire bug that every frontier model had missed.</p>
+      <p style="margin-top:18px">The decorrelation–dividend curve is now four points and strictly
+         monotonic: agreement 0.841 → dividend +0.33 (frontier trio) · 0.735 → +2.0 · 0.691 → +2.33 ·
+         <b>0.609 → +3.33 (this panel)</b>. The weaker and more different the members, the more the
+         ensemble recovers — three free local models reached a union within one defect of a single
+         frontier model. What diversity cannot buy at the frontier, it pays handsomely at the
+         light-local end — and the panel measures which regime you are in.</p>
+    </div>
   </div>
 </section>
 

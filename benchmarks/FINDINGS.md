@@ -374,3 +374,68 @@ cross-vendor one, and only measurement can tell you which panel you have.
 frontier trio might diverge (or converge) differently — this is a low-effort
 snapshot. codex:gpt-5.6-luna@low was the weakest (15.3) but not decorrelated
 enough to lift the union off claude's ceiling. Single set, deterministic-regex.
+
+## 2026-07-18 — light TRULY-local trio: the largest dividend measured yet
+
+**Motivation (user hypothesis).** Every prior dividend came from *cloud* models
+— even the "free local" panels ran on ollama-cloud endpoints. The SOTA-heavy
+panels showed the least recovery (act eight: frontier trio, dividend 0.33).
+Hypothesis: push further down the capability axis to genuinely light models
+running **in local VRAM**, and the dividend should grow further. Trio:
+`ollama:ornith:latest` (5.6GB, ~9B), `ollama:gemma4:latest` (9.6GB),
+`ollama:qwen3-coder:30b` (18GB) — all weight-local, all `http-completion`
+(same-surface, no CLI-harness confound), hard set, single mode, run 3×.
+Zero provider errors across all 54 calls; a full 18-call run takes ~10 min
+on one consumer GPU and costs nothing.
+
+**Detection (per-model over 3 runs):**
+
+| model | runs | mean |
+|-------|------|------|
+| ornith:latest (5.6GB) | 15 · 15 · 14 | 14.7 |
+| qwen3-coder:30b (18GB) | 13 · 15 · 11 | 13.0 |
+| gemma4:latest (9.6GB) | 8 · 9 · 7 | 8.0 |
+
+**Dividend = [+4, +4, +2], mean 3.33 (σ=0.94) — the largest mean dividend in
+the benchmark's history** (previous best: the lineage panel's 2.33). Per-run
+union 19 · 19 · 16; across the 3 runs the union covered **all 21 seeded
+defects**, with **zero permanent shared blind spots**.
+
+**The decorrelation-dividend curve, now four points, strictly monotonic:**
+
+| panel | mean pairwise agreement | mean dividend |
+|-------|------------------------|---------------|
+| frontier trio @low (act 8) | 0.841 | +0.33 |
+| balanced cloud trio (act 6) | 0.735 | +2.0 |
+| nemotron family + gpt-oss (act 7) | 0.691 | +2.33 |
+| **light local trio (this act)** | **0.609** | **+3.33** |
+
+Pairwise means here: ornith↔gemma4 **0.524** (the most decorrelated pair ever
+measured, beating super↔nano's 0.603), ornith↔qwen3-coder 0.635,
+gemma4↔qwen3-coder 0.667. Less capability overlap → less error correlation →
+more union recovery, exactly as ensemble theory predicts.
+
+**The deepest blind spot fell to a 5.6GB model.** `h6 double-fire` — missed by
+codex, grok, gemma4:cloud, glm-5.2 and nemotron across earlier acts — was
+caught by **ornith:latest in 2 of 3 runs** (and by qwen3-coder:30b once).
+Whatever ornith's lineage, its error profile is simply *different* — and the
+union harvests that difference.
+
+**A nuance that refines act six.** ornith was best-single in every run (no rank
+rotation — a stable "dominator" by rank), yet the dividend still hit +4. The
+no-dominator condition is really a *low-ceiling* condition: what matters is not
+whether some member ranks first every time, but whether the best member leaves
+enough headroom (ornith's 15/21 leaves 6) AND the others decorrelate hard
+enough to fill it. Rank stability with a low ceiling still pays.
+
+**Reading — the user's hypothesis is confirmed, and it completes the arc.**
+On this hard set, dividend is a monotonically *decreasing* function of panel
+capability: the more SOTA the panel, the less diversity buys; three light
+models that fit on one consumer GPU produced union 19/21 — within one defect
+of a frontier single (claude 19.3, grok 20) — **for zero incremental cost and
+~10 minutes wall-clock**. Honest bounds: run 3 dipped to +2 (union 16; h6
+went uncaught by everyone that run) so σ is no longer zero — light models are
+individually noisier; gemma4:latest is weak alone (8/21) and earns its seat
+purely through decorrelation; single set, deterministic-regex grading; ornith
+is an untracked community model — treat its identity as "measured error
+profile", not pedigree.

@@ -613,6 +613,50 @@ super↔nano 0.603** — **같은 랩**(둘 다 NVIDIA nemotron)입니다. 크�
 **역상관**입니다. 배당은 프론티어 크로스-벤더가 아니라 중형 탈상관 영역에 살고, 어느 패널을
 쥐었는지는 오직 측정만이 알려줍니다.
 
+### 9막 — 진짜 로컬 경량 트리오: 역대 최대 배당 (2026-07-18 · 3회 반복)
+
+지금까지의 배당은 전부 *클라우드* 모델에서 나왔습니다("무료 로컬" 패널조차 ollama-cloud
+엔드포인트). SOTA에 가까운 패널일수록 회수가 적었으니(8막 프론티어 트리오 +0.33), 능력 축을
+더 내려 **소비자 GPU 한 장의 VRAM에 올라가는 진짜 경량 로컬 모델**로 내려가면 배당이 더
+커져야 합니다. 검증했습니다: `ornith:latest`(5.6GB, ~9B) · `gemma4:latest`(9.6GB) ·
+`qwen3-coder:30b`(18GB) — 전부 가중치 로컬, 전부 `http-completion`(동일 표면), hard-set 3회.
+에러 0/54콜, 1회 실행 ~10분, 비용 0원.
+
+| 실행 | ornith (5.6GB) | qwen3-coder (18GB) | gemma4 (9.6GB) | 최고 단일 | 합집합 | 배당 |
+|------|--------|---------|----------|-----------|--------|------|
+| 1 | 15 | 13 | 8 | 15 | 19/21 | **+4** |
+| 2 | 15 | 15 | 9 | 15 | 19/21 | **+4** |
+| 3 | 14 | 11 | 7 | 14 | 16/21 | **+2** |
+
+**배당 = [+4, +4, +2], 평균 3.33 — 벤치 역사상 최대**(종전 최고: 7막 2.33). 3회 누적 합집합은
+**21개 결함 전부**, 영구 공동 맹점 **0개**. 그리고 **탈상관–배당 곡선이 4개 점으로 단조
+증가함이 확인됐습니다**:
+
+| 패널 | 평균 쌍별 일치율 | 평균 배당 |
+|------|-----------------|-----------|
+| 프론티어 3종 @low (8막) | 0.841 | +0.33 |
+| 대등 클라우드 3종 (6막) | 0.735 | +2.0 |
+| nemotron 계열 + gpt-oss (7막) | 0.691 | +2.33 |
+| **경량 로컬 3종 (이번)** | **0.609** | **+3.33** |
+
+쌍별로는 ornith↔gemma4 **0.524** — 역대 가장 탈상관된 쌍(종전 super↔nano 0.603을 경신).
+능력 겹침이 적을수록 오류 상관이 낮고, 낮을수록 합집합 회수가 큽니다 — 앙상블 이론의 예측
+그대로입니다.
+
+**최심층 맹점이 5.6GB 모델에게 뚫렸습니다.** codex·grok·gemma4:cloud·glm-5.2·nemotron이
+전부 놓치던 `h6 double-fire`를 **ornith가 3회 중 2회** 잡았습니다(qwen3-coder도 1회). 계보가
+무엇이든 오류 프로파일이 *다르면* 합집합이 그 차이를 수확합니다. 한 가지 정련: ornith는 매
+실행 최고 단일이었지만(순위 회전 없음) 배당은 +4까지 나왔습니다 — 6막의 "무지배자" 조건의
+본질은 순위가 아니라 **낮은 천장**입니다(ornith 15/21은 여지 6을 남기고, 나머지가 강하게
+탈상관하며 그 여지를 채움).
+
+**사용자 가설의 확인이자 아크의 완성입니다.** 이 hard-set에서 배당은 패널 능력의 단조 감소
+함수입니다: SOTA일수록 다양성이 사줄 게 없고, 소비자 GPU 한 장에 들어가는 경량 3종이
+합집합 19/21 — 프론티어 단일(claude 19.3, grok 20)과 결함 1개 차이 — 을 **추가 비용 0원,
+~10분**에 냈습니다. 정직한 한계: 3회차가 +2로 꺼져(σ=0.94) 6막의 σ=0과 달리 경량 모델은
+개별 노이즈가 큽니다; gemma4:latest는 단독 8/21로 약하며 순전히 탈상관으로 자리값을 합니다;
+ornith는 커뮤니티 모델이라 정체성은 "측정된 오류 프로파일"로만 취급해야 합니다.
+
 ### 측정 표면 태그 (모델 vs 하네스 교락)
 
 이제 모든 결과가 각 프로바이더의 측정 표면을 기록합니다: `cli-agentic`(자체 도구·추론을 돌릴 수
@@ -629,6 +673,7 @@ npm run bench:live                                                              
 node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks               # 어려운 세트 (single+panel)
 node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks --modes debate       # 심의 채점
 node scripts/xllm-bench.js run --providers grok,ollama:gemma4:cloud,ollama:nemotron-3-super:cloud --tasks-file hard-tasks --modes single   # 4모델 패널
+node scripts/xllm-bench.js run --providers ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b --tasks-file hard-tasks --modes single   # 경량 로컬 트리오 (9막)
 ```
 
 원시 실행 JSON은 gitignore, 요약은 커밋 — 전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) ·

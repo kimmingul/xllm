@@ -2224,6 +2224,13 @@ test('truncateDiff caps at byte limit with marker', () => {
   assert.ok(Buffer.byteLength(big.text, 'utf8') < DIFF_MAX_BYTES + 200);
 });
 
+test('truncateDiff is byte-accurate for multi-byte UTF-8 (CJK)', () => {
+  const big = truncateDiff('한'.repeat(DIFF_MAX_BYTES)); // 3 bytes/char → ~72KB
+  assert.strictEqual(big.truncated, true);
+  assert.ok(Buffer.byteLength(big.text, 'utf8') < DIFF_MAX_BYTES + 200);
+  assert.ok(!big.text.includes('�'));
+});
+
 test('collectReviewDiff reads --diff-file fixture; errors on empty/missing', () => {
   const tmp = fs.mkdtempSync(path.join(root, 'tmp-diff-'));
   try {

@@ -49,14 +49,23 @@ function git(args, root) {
   });
 }
 
-/** Head+tail truncation at the byte cap (same shape as scribe's). Pure. */
+/** Slice string by byte range, UTF-8-boundary-safe (strips replacement char artifacts). */
+function byteSlice(s, start, end) {
+  const buf = Buffer.from(s, 'utf8');
+  return buf.subarray(start, end).toString('utf8').replace(/^�+|�+$/g, '');
+}
+
+/** Head+tail truncation at the byte cap, UTF-8-accurate. Pure. */
 export function truncateDiff(text, max = DIFF_MAX_BYTES) {
   const s = String(text || '');
-  if (Buffer.byteLength(s, 'utf8') <= max) return { text: s, truncated: false };
-  const head = s.slice(0, Math.floor(max * 0.7));
-  const tail = s.slice(-Math.floor(max * 0.2));
+  const total = Buffer.byteLength(s, 'utf8');
+  if (total <= max) return { text: s, truncated: false };
+  const headBytes = Math.floor(max * 0.7);
+  const tailBytes = Math.floor(max * 0.2);
+  const head = byteSlice(s, 0, headBytes);
+  const tail = byteSlice(s, total - tailBytes, total);
   return {
-    text: `${head}\n\n[... TRUNCATED ${s.length - head.length - tail.length} chars ...]\n\n${tail}`,
+    text: `${head}\n\n[... TRUNCATED ${total - headBytes - tailBytes} bytes ...]\n\n${tail}`,
     truncated: true,
   };
 }

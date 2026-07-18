@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.27.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.28.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -230,8 +230,8 @@ node scripts/xllm.mjs review debate ollama:llama3.2,ollama:gemma4 "이 인증 �
 node scripts/xllm.mjs review council codex,grok,gemini "결제 웹훅을 재설계해야 하는가?" --tiebreak
 ```
 
-> 구 명칭 `multi`/`panel`/`debate`/`council`은 CLI alias로 **v0.27.x까지** 그대로 동작합니다
-> (v0.28.0에서 제거 예정) — 새 스크립트/문서는 `review <mode>`로 쓰세요.
+> 구 명칭 `multi`/`panel`/`debate`/`council` 톱레벨 명령은 **v0.28.0에서 제거**되었습니다 —
+> `review <mode>`로 쓰세요 (구 명칭 입력 시 대체 명령을 알려주는 에러가 납니다).
 
 - **roles** — 커버리지 모드(구 `multi`): 프로바이더별 자식 프로세스로 병렬 실행 후, 어드바이저별
   아티팩트 목록을 담은 인덱스(`.md`)와 기계 판독용 `.json` 사이드카를 생성합니다. 종합은 합의 깊이

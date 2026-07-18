@@ -6,7 +6,7 @@
  *   node scripts/xllm.mjs remember
  *   node scripts/xllm.mjs doctor
  *   node scripts/xllm.mjs ask <provider> "<prompt>"
- *   node scripts/xllm.mjs review roles p1,p2 "<prompt>"   (multi/panel/debate/council are aliases)
+ *   node scripts/xllm.mjs review roles p1,p2 "<prompt>"
  *   node scripts/xllm.mjs smoke [--live]
  */
 
@@ -23,9 +23,6 @@ const exec = path.join(__dirname, 'xllm-exec.js');
 const scribe = path.join(__dirname, 'xllm-scribe.js');
 const contracts = path.join(__dirname, 'xllm-contracts.js');
 const review = path.join(__dirname, 'xllm-review.js');
-const panel = path.join(__dirname, 'xllm-panel.js');
-const debate = path.join(__dirname, 'xllm-debate.js');
-const council = path.join(__dirname, 'xllm-council.js');
 const traits = path.join(__dirname, 'xllm-traits.js');
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -56,7 +53,6 @@ Commands:
   review stats [--json]          Pairwise agreement matrix (measured decorrelation)
   review outcome <id> …          Record what the host adopted
     diff input for any mode: --staged | --base <ref> | --diff-file <path>
-    (old nouns multi/panel/debate/council remain aliases through v0.27.x)
   traits [--json]        Evidence-based provider trait profiles (measured, gated, never lore)
   propose <p> <change>   Read-only change proposal → artifact + .patch (host applies)
   exec <p> <task>        Isolated executor: ephemeral clone → verified ref + evidence
@@ -122,14 +118,21 @@ switch (cmd) {
     }
     run(advisor, rest);
     break;
+  // Old review nouns: aliased through v0.27.x, removed in v0.28.0. A clear
+  // tombstone beats falling through to the advisor ("Unknown provider: multi").
   case 'multi':
-    if (rest.length < 2) {
-      console.error('Usage: xllm multi p1,p2 <prompt>');
-      process.exit(1);
-    }
-    console.error("[xllm] note: 'multi' is now 'review roles' (alias through v0.27.x)");
-    run(advisor, ['--multi', ...rest]);
-    break;
+  case 'panel':
+  case 'debate':
+  case 'council': {
+    const replacement = {
+      multi: 'review roles',
+      panel: 'review blind|stats|outcome',
+      debate: 'review debate',
+      council: 'review council',
+    }[cmd];
+    console.error(`[xllm] '${cmd}' was removed in v0.28.0 — use '${replacement}'`);
+    process.exit(1);
+  }
   case 'smoke':
     run(smoke, rest);
     break;
@@ -148,18 +151,6 @@ switch (cmd) {
     break;
   case 'review':
     run(review, rest);
-    break;
-  case 'panel':
-    console.error("[xllm] note: 'panel' is now 'review blind|stats|outcome' (alias through v0.27.x)");
-    run(panel, rest);
-    break;
-  case 'debate':
-    console.error("[xllm] note: 'debate' is now 'review debate' (alias through v0.27.x)");
-    run(debate, rest);
-    break;
-  case 'council':
-    console.error("[xllm] note: 'council' is now 'review council' (alias through v0.27.x)");
-    run(council, rest);
     break;
   case 'traits':
     run(traits, rest);

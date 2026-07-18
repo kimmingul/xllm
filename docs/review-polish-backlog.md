@@ -29,10 +29,12 @@
 10. ✅ promptQuestion 합성 중복 → `questionWithContext()` 헬퍼(xllm-diff.js),
     debate×2 + panel×1 교체.
 
-## 예약 (v0.28.0)
+## 예약 (v0.28.0) — 완료
 
-- 구 명칭 alias 제거: `multi`/`panel`/`debate`/`council` 톱레벨 케이스 + xllm.mjs 도움말의
-  유예 문구 + README/docs의 "v0.27.x까지" 언급 일괄 정리. discipline 블록은 v2 그대로 유효.
+- ✅ 구 명칭 alias 제거 (2026-07-18): `multi`/`panel`/`debate`/`council` 톱레벨 케이스를
+  대체 명령을 알려주는 톰스톤 에러(exit 1)로 교체 + xllm.mjs/xllm-review.js 도움말의
+  유예 문구 + README/docs/.grok 스킬의 유예 언급 일괄 정리. check-plugin 잔재 가드에
+  alias-유예 문구 금지 패턴 추가(재유입 방지). discipline 블록은 v2 그대로 유효.
 
 ## 참고 (별도 트랙, polish 아님)
 

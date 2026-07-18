@@ -156,11 +156,12 @@ for (const gone of ['multi', 'debate', 'council']) {
 }
 
 // Shipped surface must not re-advertise removed grok-xllm-era features
-// (/ralph and /team skills removed in v0.20.0; pick-team removed after v0.21.1).
-// Historical records are exempt: CHANGELOG, FINDINGS, docs/*-design.md, and
-// diversity-roadmap.md (transcribed debate records are append-only evidence).
+// (/ralph and /team skills removed in v0.20.0; pick-team removed after v0.21.1)
+// nor claim the old review nouns are still aliases (dropped in v0.28.0).
+// Historical records are exempt: CHANGELOG, FINDINGS, docs/*-design.md,
+// docs/*-plan.md, docs/*-backlog.md, and diversity-roadmap.md.
 {
-  const forbidden = [/\/ralph\b/, /\/team\b/, /pick-team/];
+  const forbidden = [/\/ralph\b/, /\/team\b/, /pick-team/, /alias(es)?\s+through\s+v0\.27\.x/i, /v0\.27\.x까지/];
   const shipped = ['README.md'];
   const collectMd = (dir) => {
     const abs = path.join(root, dir);
@@ -175,7 +176,13 @@ for (const gone of ['multi', 'debate', 'council']) {
   collectMd('skills');
   collectMd(path.join('.grok', 'skills'));
   for (const e of fs.readdirSync(path.join(root, 'docs'))) {
-    if (e.endsWith('.md') && !e.endsWith('-design.md') && e !== 'diversity-roadmap.md') {
+    if (
+      e.endsWith('.md') &&
+      !e.endsWith('-design.md') &&
+      !e.endsWith('-plan.md') &&
+      !e.endsWith('-backlog.md') &&
+      e !== 'diversity-roadmap.md'
+    ) {
       shipped.push(path.join('docs', e));
     }
   }

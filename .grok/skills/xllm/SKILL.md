@@ -76,8 +76,8 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
    advisors are abstentions, never support. Consensus is confidence metadata,
    not truth. For split claims prefer one tiebreaker from an unconsulted
    vendor. `review roles` (built on `--multi`, still the underlying advisor
-   flag — old nouns `multi`/`panel`/`debate`/`council` remain CLI aliases
-   through v0.27.x) also writes a machine-readable `.json` sidecar.
+   flag; the old top-level nouns were removed in v0.28.0) also writes a
+   machine-readable `.json` sidecar.
 
 ## Deliberation modes
 

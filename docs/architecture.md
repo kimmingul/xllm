@@ -48,8 +48,8 @@
    <state>/panel-ledger.jsonl                      (append-only verdict ledger; blind/debate/council only)
 ```
 
-Old top-level nouns `multi`/`panel`/`debate`/`council` remain CLI aliases through v0.27.x
-(dropping in v0.28.0); `review roles` is the coverage mode (not measured — `measurement: false`
+Old top-level nouns `multi`/`panel`/`debate`/`council` were removed in v0.28.0;
+`review roles` is the coverage mode (not measured — `measurement: false`
 in its index JSON), `review blind`/`review debate`/`review council` write the ledger.
 
 ## The measurement loop

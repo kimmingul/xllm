@@ -8,8 +8,8 @@
  *   council → council run      (blind → debate pipeline)
  *   stats   → panel stats      · outcome → panel outcome
  *
- * Old top-level nouns (multi/panel/debate/council) stay CLI aliases through
- * v0.27.x. Epistemology firewall: only blind/council write the ledger and
+ * Old top-level nouns (multi/panel/debate/council) were removed in v0.28.0.
+ * Epistemology firewall: only blind/council write the ledger and
  * speak measured agreement; roles output carries measurement: false.
  */
 
@@ -33,7 +33,7 @@ Diff input (any deliberation mode; collected deterministically, never persisted)
 
 roles = coverage (synthesis labels, NOT measured) · blind = measured panel
 (ledger + pairwise agreement) · debate = adversarial refutation · council =
-blind→debate. Old nouns multi/panel/debate/council remain aliases through v0.27.x.`;
+blind→debate.`;
 
 const MODE_TARGETS = {
   roles: { script: 'advisor', prefix: ['--multi'] },

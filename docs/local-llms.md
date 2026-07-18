@@ -18,8 +18,6 @@ node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "Analyze authenti
 node scripts/xllm.mjs review debate ollama:llama3.2,ollama:gemma4 "Is this cache design safe under concurrency?"
 ```
 
-Old nouns `multi`/`panel`/`debate`/`council` remain CLI aliases through v0.27.x.
-
 Or via the host skills: `/xllm:ask`, `/xllm:review` (Claude Code / Codex) · `/ask`, `/xllm`
 (Grok Build).
 

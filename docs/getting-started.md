@@ -59,8 +59,7 @@ node scripts/xllm.mjs ask codex@high "이 설계를 리뷰해줘"
 node scripts/xllm.mjs review blind codex,grok "이 캐시 설계가 동시성에 안전한가?"
 ```
 
-전체 명령(심의 `review roles`/`blind`/`debate`/`council`, 산문 `scribe`, 계측 `traits` 등 —
-구 명칭 `multi`/`panel`/`debate`/`council`은 v0.27.x까지 CLI alias)은
+전체 명령(심의 `review roles`/`blind`/`debate`/`council`, 산문 `scribe`, 계측 `traits` 등)은
 [README 명령 레퍼런스](../README.md#명령-레퍼런스)를 보세요.
 
 ## 4. 에스컬레이션 사다리

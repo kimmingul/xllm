@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.28.0 — 2026-07-18 — 구 명칭 alias 제거 (예고된 제거)
+
+### Removed
+- **`multi`/`panel`/`debate`/`council` 톱레벨 명령 제거** — v0.26.0에서 예고한
+  대로(alias 유예는 v0.27.x까지) 네 구 명칭이 더 이상 동작하지 않습니다.
+  입력하면 대체 명령을 알려주는 톰스톤 에러로 즉시 종료(exit 1)합니다:
+  `multi`→`review roles`, `panel`→`review blind|stats|outcome`,
+  `debate`→`review debate`, `council`→`review council`.
+  advisor 내부 `--multi` 플래그는 `review roles`의 구현 기반으로 유지됩니다
+  (사용자 표면 아님). discipline 블록은 v2 그대로 유효.
+
+### Changed
+- README/docs/스킬의 alias 유예 문구 일괄 삭제; `check-plugin` 잔재 가드에
+  alias-유예 문구 금지 패턴 추가(문서 재유입 방지, 역사 기록 문서는 예외).
+
+`npm run ci` green (182 tests). 라이브 LLM 경로 변경 없음(디스패치 케이스
+삭제만) — 톰스톤 4종 exit 1 + `review stats`/`review` usage 동작을 결정적
+CLI 실행으로 확인.
+
 ## 0.27.0 — 2026-07-18 — review-family polish
 
 v0.26.0 최종 리뷰 이월분 10건 전부 구현 (docs/review-polish-backlog.md 결정 기록 참조).

@@ -20,9 +20,10 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import process from 'process';
 import { ensureArtifactDirs, redactSecrets, slugify } from './xllm-advisor.js';
-import { runPanel, ledgerPath } from './xllm-panel.js';
+import { runPanel, ledgerPath, parsePanelRunArgs } from './xllm-panel.js';
 import { parseDebaters, capClaims, runDebateOnClaims, MAX_CLAIMS } from './xllm-debate.js';
 import { canonicalSpecKey } from './xllm-traits.js';
+import { hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta } from './xllm-diff.js';
 
 /**
  * Bridge panel output → debate claims. Each panelist's key_claims become
@@ -85,6 +86,8 @@ export async function runCouncil({
   root = process.cwd(),
   tiebreak = false,
   readyProviders = null,
+  context = null,
+  contextMeta = null,
 }) {
   const parsed = parseDebaters(specs);
   if (parsed.length < 2) {
@@ -94,7 +97,7 @@ export async function runCouncil({
 
   // Phase 1 — independent panel (diversity measurement + blind claims).
   console.error('[council] phase 1/2 — panel (independent divergence)…');
-  const panel = await runPanel({ specs, question, root, tiebreak, readyProviders });
+  const panel = await runPanel({ specs, question, root, tiebreak, readyProviders, context, contextMeta });
   if (panel.exitCode !== 0) {
     console.error('[council] panel phase failed.');
     return { exitCode: 1 };
@@ -117,7 +120,7 @@ export async function runCouncil({
   }
 
   console.error(`[council] phase 2/2 — debate (adversarial convergence) over ${capped.length} claims…`);
-  const debate = await runDebateOnClaims({ question, parsed, capped, root, panelRunId: panel.id });
+  const debate = await runDebateOnClaims({ question, parsed, capped, root, panelRunId: panel.id, context, contextMeta });
   if (debate.exitCode !== 0) {
     console.error('[council] debate phase failed.');
     return { exitCode: 1, panel };
@@ -136,6 +139,7 @@ export async function runCouncil({
       '',
       `- Members: ${parsed.map((p) => p.spec).join(', ')}  (N=${parsed.length})`,
       `- Question: ${redactSecrets(question)}`,
+      ...(contextMeta ? [`- Code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''}) — diff body not persisted`] : []),
       `- Ledger: ${ledgerPath(root)}  (panel run ${panel.id} → debate)`,
       '',
       '> Two phases: independent panel (measures diversity) → adversarial debate',
@@ -197,25 +201,30 @@ export async function runCouncil({
 async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === 'run') {
-    const rest = argv.slice(1);
-    const tiebreak = rest.includes('--tiebreak');
-    const readyArg = rest.find((a) => a.startsWith('--ready='));
-    const readyProviders = readyArg
-      ? readyArg.slice('--ready='.length).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-      : null;
-    const positional = rest.filter((a) => a !== '--tiebreak' && !a.startsWith('--ready='));
-    const specs = (positional[0] || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const question = positional.slice(1).join(' ').trim();
-    if (specs.length < 2 || !question) {
-      console.error('Usage: xllm-council run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]');
+    const p = parsePanelRunArgs(argv.slice(1));
+    if (p.error || p.specs.length < 2 || !p.question) {
+      if (p.error) console.error(`[council] ${p.error}`);
+      console.error('Usage: xllm-council run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>]');
       process.exit(1);
     }
-    const r = await runCouncil({ specs, question, tiebreak, readyProviders });
+    let context = null;
+    let contextMeta = null;
+    if (hasDiffSource(p.diffOpts)) {
+      const diff = collectReviewDiff(p.diffOpts);
+      if (diff.error) {
+        console.error(`[council] ${diff.error}`);
+        process.exit(1);
+      }
+      context = buildReviewContext(diff);
+      contextMeta = diffMeta(diff);
+      console.error(`[council] code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''})`);
+    }
+    const r = await runCouncil({ specs: p.specs, question: p.question, tiebreak: p.tiebreak, readyProviders: p.readyProviders, context, contextMeta });
     process.exit(r.exitCode);
   }
   console.error(`xllm council — panel (independent) → debate (adversarial), one pipeline
 Usage:
-  node scripts/xllm-council.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
+  node scripts/xllm-council.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>]
 
 Phase 1 panel measures diversity + surfaces blind claims; phase 2 debate
 stress-tests those claims (SURVIVED/KILLED/UNRESOLVED). On a phase-1 SPLIT

@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.24.4** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.27.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 

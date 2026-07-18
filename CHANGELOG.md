@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (v0.27.0 예정) — review-family polish
+## 0.27.0 — 2026-07-18 — review-family polish
 
 v0.26.0 최종 리뷰 이월분 10건 전부 구현 (docs/review-polish-backlog.md 결정 기록 참조).
 
@@ -23,8 +23,9 @@ v0.26.0 최종 리뷰 이월분 10건 전부 구현 (docs/review-polish-backlog.
   순서 교정, `questionWithContext()` 헬퍼로 합성 중복 제거.
 
 `npm run ci` green (182 tests). CLI 표면/프로토콜 변경 없음(프롬프트 내용과
-에러 메시지만 개선) — 라이브 e2e는 릴리스 전 debate 1회로 defend 컨텍스트
-전달을 확인 예정.
+에러 메시지만 개선). 라이브 e2e: gemma4:cloud×glm-5.2:cloud debate 2회
+(--diff-file) — R2 defend가 diff 컨텍스트 포함 프롬프트로 실제 발화, 전
+단계 first-try 계약 준수, 저자 concede에 의한 KILLED 1건(정당한 판정) 확인.
 
 ## 0.26.0 — 2026-07-18
 

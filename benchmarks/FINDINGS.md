@@ -439,3 +439,62 @@ individually noisier; gemma4:latest is weak alone (8/21) and earns its seat
 purely through decorrelation; single set, deterministic-regex grading; ornith
 is an untracked community model — treat its identity as "measured error
 profile", not pedigree.
+
+## 2026-07-18 — council, measured for the first time: aggressive kills, zero discrimination
+
+**Setup.** The last unmeasured deliberation mode. `--modes council` runs the
+full two-phase protocol (blind panel → adversarial debate over the panel's
+claims) per hard task and grades the SURVIVING claims, same instrument as the
+act-five debate measurement. Same light local trio as the previous act
+(ornith 5.6GB · gemma4 9.6GB · qwen3-coder 30b), run as 6 per-task chunks,
+~83 min total on one GPU, **zero task errors**. This yields two firsts at
+once: council's first measurement, and deliberation's first measurement at the
+light-local end (act five measured debate on a frontier pair).
+
+**Result (48 claims over 6 tasks, per-task cap 8):**
+
+| bucket | survived | rate |
+|--------|----------|------|
+| grounded (real-defect) claims | 9/18 | 0.500 |
+| surplus claims | 15/30 | 0.500 |
+| **quality discrimination** | | **0.000** |
+
+Per-task discrimination swung wildly (−0.33 · +0.07 · +0.33 · −0.27 · −0.17 ·
++0.67) and netted to exactly zero. Tallies: 24 SURVIVED · 23 KILLED · 1
+UNRESOLVED.
+
+**The contrast with act five is the finding.** The frontier pair barely killed
+(6/48, 12.5%) and preserved grounded claims at 0.87; the light trio killed
+**aggressively** (23/48, 48%) — and killed *blind*: grounded and surplus
+claims died at identical rates. Two opposite failure modes, one conclusion:
+
+| regime | kill rate | grounded survival | discrimination |
+|--------|-----------|-------------------|----------------|
+| frontier debate (act 5) | 12.5% | 0.87 | −0.01 |
+| light-local council (this act) | 48% | 0.50 | 0.00 |
+
+Strong aligned models produce few confident-wrong claims to kill (deliberation
+has nothing to do); light decorrelated models refute everything indiscriminately
+(deliberation does a lot, none of it quality-tracking). On this instrument the
+"plausible-but-wrong claims die, correct ones survive" story now has measured
+support in NEITHER regime.
+
+**Deliberation costs recall — use the blind panel for detection.** Council's
+surviving claims covered only **8/21** seeded defects, versus **19/21 per run**
+for the *same trio* in blind single mode. Half the real detections entered the
+debate and died there (grounded survival 0.50), and the 8-claim cap compresses
+coverage further. For light local models the practical routing is now
+measured, not aesthetic: `review blind` (union, dividend +3.33) for finding
+defects; council's adversarial phase subtracts recall without adding measured
+precision. h6 was the exception that keeps the mechanism honest: both grounded
+h6 claims (double-fire, no-cleanup) survived with +0.67 discrimination — when
+light models DO hold a real claim under attack, it can work; it just does not
+work on average.
+
+**Honest bounds.** Single run per task (council is ~8× a single call — n=1 per
+cell); surplus ≠ false (unseeded real defects land in surplus, so
+discrimination is a lower bound); the 8-claim round-robin cap means coverage
+loss is partly protocol shape, not only kill behavior; claims are the panel's
+distilled verdicts, not full defect lists, so grounded-claim counts (18/48)
+undercount what the models actually detected. And this is one trio — a
+mid-tier cloud council might land anywhere between the two measured extremes.

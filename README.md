@@ -657,6 +657,43 @@ super↔nano 0.603** — **같은 랩**(둘 다 NVIDIA nemotron)입니다. 크�
 개별 노이즈가 큽니다; gemma4:latest는 단독 8/21로 약하며 순전히 탈상관으로 자리값을 합니다;
 ornith는 커뮤니티 모델이라 정체성은 "측정된 오류 프로파일"로만 취급해야 합니다.
 
+### 10막 — council 첫 측정: 공격적으로 죽이지만, 품질은 못 가린다 (2026-07-18)
+
+마지막 미측정 심의 모드였던 council(블라인드 패널 → 그 주장들에 대한 적대 debate)을 9막과
+같은 경량 로컬 트리오로 hard-set 6과제에서 측정했습니다(태스크당 청크, ~83분, 에러 0).
+council의 첫 측정이자, 심의(deliberation)의 경량-로컬 극단 첫 측정입니다(5막은 프론티어 쌍).
+
+| 버킷 | 생존 | 비율 |
+|------|------|------|
+| grounded (참 결함) 주장 | 9 / 18 | 0.500 |
+| surplus 주장 | 15 / 30 | 0.500 |
+| **품질 판별** | | **0.000** |
+
+태스크별 판별은 −0.33 ~ +0.67로 요동치다 정확히 0으로 상쇄됐습니다. **5막과의 대조가 곧
+발견입니다**:
+
+| 영역 | kill 비율 | grounded 생존 | 판별 |
+|------|-----------|---------------|------|
+| 프론티어 debate (5막) | 12.5% | 0.87 | −0.01 |
+| 경량 로컬 council (이번) | **48%** | 0.50 | 0.00 |
+
+강하고 정렬된 모델은 죽일 만한 확신-오류를 거의 안 만들고(심의가 할 일이 없음), 경량
+탈상관 모델은 **무차별로 반박해 절반을 죽이는데 grounded와 surplus가 같은 비율로**
+죽습니다(심의가 많이 일하지만 품질을 추적하지 않음). "그럴듯한 오류는 죽고 옳은 주장은
+살아남는다"는 이야기는 이 계측기에서 **양 극단 어느 쪽에서도** 실측 근거가 없습니다.
+
+**심의는 재현율을 깎습니다 — 검출은 블라인드 패널로.** council의 생존 주장이 커버한 시딩
+결함은 **8/21** — 같은 트리오의 블라인드 single 합집합 **19/21**의 절반 이하입니다(참 검출의
+절반이 debate에서 죽었고, 태스크당 8주장 캡이 커버리지를 더 압축). 경량 로컬 모델의 실용
+라우팅이 이제 측정으로 결정됩니다: **결함을 찾을 땐 `review blind`(배당 +3.33), council의
+적대 단계는 측정된 정밀도를 더하지 못한 채 재현율만 뺍니다.** 예외가 메커니즘을 정직하게
+지켜줍니다: h6에선 grounded 두 주장(double-fire·no-cleanup)이 공격을 버텨 +0.67 판별 —
+경량 모델도 진짜 주장을 방어해낼 때는 작동하지만, 평균적으로는 아닙니다.
+
+정직한 한계: 태스크당 1회(council은 단일 호출의 ~8배 비용), surplus ≠ 거짓(판별은 하한),
+8주장 캡은 프로토콜 형태의 손실, 그리고 이것은 하나의 트리오 — 중형 클라우드 council은 두
+측정 극단 사이 어딘가일 수 있습니다.
+
 ### 측정 표면 태그 (모델 vs 하네스 교락)
 
 이제 모든 결과가 각 프로바이더의 측정 표면을 기록합니다: `cli-agentic`(자체 도구·추론을 돌릴 수
@@ -674,6 +711,7 @@ node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks   
 node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks --modes debate       # 심의 채점
 node scripts/xllm-bench.js run --providers grok,ollama:gemma4:cloud,ollama:nemotron-3-super:cloud --tasks-file hard-tasks --modes single   # 4모델 패널
 node scripts/xllm-bench.js run --providers ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b --tasks-file hard-tasks --modes single   # 경량 로컬 트리오 (9막)
+node scripts/xllm-bench.js run --providers ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b --tasks-file hard-tasks --modes council --tasks h3-cache-lru   # council 채점 (10막, 태스크당 청크 권장)
 ```
 
 원시 실행 JSON은 gitignore, 요약은 커밋 — 전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) ·

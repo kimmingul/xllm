@@ -8,7 +8,7 @@ node scripts/xllm.mjs doctor
 node scripts/xllm-advisor.js ollama:qwen3.6:latest "Review scripts/xllm-advisor.js for security risks. Bullet list only."
 node scripts/xllm-advisor.js codex "Review scripts/xllm-advisor.js for security risks and quoting bugs. Bullet list only."
 
-node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "Security review of the advisor script; bullets only."
+node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "Security review of the advisor script; bullets only."
 ```
 
 ## In Grok session

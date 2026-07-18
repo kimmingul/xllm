@@ -55,15 +55,15 @@ node scripts/xllm.mjs exec codex@high "X를 구현해줘" --test-cmd "npm test"
 
 | 기능 | 설명 |
 |------|------|
-| **블라인드 패널 (`panel`)** | 동일 프롬프트를 N개 모델에 블라인드로 보내 **다양성을 측정**. 구조화 판정이 산문보다 먼저 append-only 원장에 기록되고, 누적 쌍별 일치 행렬을 제공. |
+| **블라인드 패널 (`review blind`)** | 동일 프롬프트를 N개 모델에 블라인드로 보내 **다양성을 측정**. 구조화 판정이 산문보다 먼저 append-only 원장에 기록되고, 누적 쌍별 일치 행렬을 제공. |
 | **측정 타이브레이커** | 패널이 **split**이면 원장의 실측 일치율이 가장 낮은 **미참여** 프로바이더를 자동 선정(혈통 아님) — 제안은 항상 무료 기록, 실제 추가 호출은 `--tiebreak` 옵트인. 타이브레이크의 쌍별 행이 다시 원장에 쌓여 **다음 선정의 근거**가 됨(측정→라우팅 루프 폐쇄). |
 | **특성 프로파일 (`traits`)** | 원장·벤치마크·계약 캐시에서 **실측 특성만** 파생(손으로 쓴 모델 인상론 금지, 표본 수 상시 노출). 판단 역할 라우팅은 시딩 결함 검출률의 **Wilson 95% 하한**을 공유 결함셋 게이트(과제≥4·기회≥12·+0.10) 하에 소비 — 측정이 tier/비용 경계를 넘을 수 있음. 증거 없으면 기존 라우팅과 비트 동일. `--no-traits`로 비활성. |
-| **적대적 검토 (`debate`)** | 모델들이 서로 **반박**해 틀린 주장을 죽이고 **품질로 수렴**. 정체성은 provider가 아닌 **모델 단위** — 같은 로컬 런타임의 다른 모델(예: ollama의 llama↔gemma)도 서로 공격. decisive falsifier만 KILL, 단순 이견은 UNRESOLVED. judge LLM 없는 기계적 판정. 이 기능 자체가 xllm 적대 방식으로 설계됨. |
-| **2단계 파이프라인 (`council`)** | `panel`(독립 발산) → `debate`(적대 수렴)을 한 명령으로. 독립적으로 도출된 주장을 반박 검증 → survived/killed/unresolved. 최고 중요도 결정용. |
+| **적대적 검토 (`review debate`)** | 모델들이 서로 **반박**해 틀린 주장을 죽이고 **품질로 수렴**. 정체성은 provider가 아닌 **모델 단위** — 같은 로컬 런타임의 다른 모델(예: ollama의 llama↔gemma)도 서로 공격. decisive falsifier만 KILL, 단순 이견은 UNRESOLVED. judge LLM 없는 기계적 판정. 이 기능 자체가 xllm 적대 방식으로 설계됨. |
+| **2단계 파이프라인 (`review council`)** | `review blind`(독립 발산) → `review debate`(적대 수렴)을 한 명령으로. 독립적으로 도출된 주장을 반박 검증 → survived/killed/unresolved. 최고 중요도 결정용. |
 | **합의 깊이 종합** | 주장별로 만장일치/다수결/의견분열/단일출처 라벨. 실패 어드바이저는 기권. 합의는 신뢰도 메타데이터이지 진리가 아님. |
 | **비용 인지 라우팅** | 가벼운 일은 무료 로컬·low effort, 무거운 판단은 strong tier. 초소형 로컬 모델은 판단 역할 투표권 거부(능력 하한). |
 | **scribe** | 커밋 메시지·PR 본문·릴리스 노트를 가장 싼 healthy 모델이 작성, 결정적 검증. 기계적 작업에 SOTA 요금을 쓰지 않음. |
-| **구조화 출력 견고성** | 검토 계열(panel/debate/council)의 JSON 계약 파싱을 견고한 단일 추출기로 통합(맨 JSON·트레일링 콤마·줄바꿈 래핑 처리) + 비준수 시 1회 교정 재시도. 프로바이더별 **계약 준수도**(first/retry/failed) 리포트로 약한·로컬 모델도 안정 참여. |
+| **구조화 출력 견고성** | `review`(roles/blind/debate/council) 계열의 JSON 계약 파싱을 견고한 단일 추출기로 통합(맨 JSON·트레일링 콤마·줄바꿈 래핑 처리) + 비준수 시 1회 교정 재시도. 프로바이더별 **계약 준수도**(first/retry/failed) 리포트로 약한·로컬 모델도 안정 참여. |
 | **계약 플로어** | 설치된 CLI의 플래그를 프로브해 버전 드리프트 감지, 실패 분류, transient만 재시도. |
 | **read-only 안전 모델** | 샌드박스 탈출·승인 우회 없음. 동일 벤더 중첩 거부. 세션 env 스트리핑. 아티팩트 시크릿 마스킹. |
 
@@ -106,16 +106,14 @@ grok plugin install kimmingul/xllm --trust
 
 ### 설치 후 — 호스트 안에서 부르는 법
 
-Claude Code와 Codex는 동일한 호스트 중립 스킬 7종을 `./skills/`에서 공유합니다. Claude Code에서는
+Claude Code와 Codex는 동일한 호스트 중립 스킬 5종을 `./skills/`에서 공유합니다. Claude Code에서는
 `/xllm:<스킬>` 슬래시 커맨드 또는 자연어("codex한테 이 설계 물어봐줘")로 트리거되며, 각 스킬은
 아래 명령 레퍼런스의 스크립트를 실행합니다.
 
 | 스킬 | 하는 일 | 실행하는 스크립트 |
 |------|---------|-------------------|
 | `/xllm:ask` | 외부 어드바이저 1명의 의견 (read-only) | `scripts/xllm-advisor.js` |
-| `/xllm:multi` | 병렬 다중 어드바이저 + 합의 깊이 종합 | `scripts/xllm-advisor.js --multi` |
-| `/xllm:debate` | 적대적 상호 반박 → survived/killed/unresolved | `scripts/xllm-debate.js` |
-| `/xllm:council` | panel(독립) → debate(적대) 2단계 파이프라인 | `scripts/xllm-council.js` |
+| `/xllm:review` | roles(커버리지)·blind(측정 패널)·debate(적대)·council(blind→debate) 4모드 심의 | `scripts/xllm-review.js` |
 | `/xllm:exec` | 격리 클론에서 구현 위임 → 검증된 브랜치 | `scripts/xllm-exec.js` |
 | `/xllm:scribe` | 커밋/PR/릴리스 산문을 최저가 모델로 | `scripts/xllm-scribe.js` |
 | `/xllm:setup` | 머신 인벤토리 + 역할 핀 위저드 + 규율 블록 옵트인 | `scripts/xllm-advisor.js --inventory/--remember/--set-role/--discipline` |
@@ -183,64 +181,76 @@ node <plugin-root>/scripts/xllm.mjs …      # 플러그인 설치본에서
 - **스펙 문법** — `provider[:model][@effort]`. 예: `codex@high`, `claude:opus@medium`,
   `grok:grok-4@high`, `ollama:qwen3.6:latest`. 프로젝트 프로파일: `.xllm/xllm-providers.toml`.
 - **출력 규약** — 실행 결과의 **마지막 stdout 줄이 아티팩트/인덱스 경로**입니다
-  (`.xllm/artifacts/…`). 심의 계열(panel/debate/council)의 구조화 판정은 산문보다 먼저
+  (`.xllm/artifacts/…`). `review`의 blind/debate/council(roles 제외) 구조화 판정은 산문보다 먼저
   `.xllm/panel-ledger.jsonl`(append-only)에 기록됩니다.
-- **안전 플래그** (ask/multi) — `--allow-write`(어드바이저 파일 쓰기 옵트인) ·
+- **안전 플래그** (ask/review roles) — `--allow-write`(어드바이저 파일 쓰기 옵트인) ·
   `--allow-self`(동일 벤더 중첩 해제) · `--no-artifacts`(아티팩트 미저장).
   셋 모두 사용자의 명시적 요청 없이는 쓰지 않는 것이 규약입니다.
 - **긴 프롬프트** — Windows argv ~32KB 한계가 있습니다. `--prompt-file <경로>`를 쓰세요
-  (panel/debate/council은 24KB 초과 시 자동으로 파일 경유).
+  (review 계열은 24KB 초과 시 자동으로 파일 경유).
+- **diff 입력** — 어느 심의 모드에서든 `--staged | --base <ref> | --diff-file <path>` 중 하나로
+  diff를 넣을 수 있습니다. git으로 결정적으로 수집되어 크기 상한 후 어드바이저에 전달되며,
+  **절대 저장되지 않습니다**(원장/인덱스는 source/stat/bytes/truncated 메타데이터만 남김).
 
-### 의견 — `ask` · `multi`
+### 의견 — `ask`
 
 ```text
 ask   <spec> "<prompt>"  [--propose] [--prompt-file <path>] [--allow-write] [--allow-self] [--no-artifacts]
-multi p1,p2[,p3] "<prompt>"  [--propose] [동일 플래그]
 ```
 
 ```bash
 node scripts/xllm.mjs ask codex@high "이 마이그레이션 설계의 위험을 짚어줘"
-node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "advisor 스크립트 보안 리뷰"
 ```
 
 - `ask`는 어드바이저 1명의 진짜 답을 `.xllm/artifacts/ask/…` 아티팩트로 남깁니다(프롬프트+출력,
   시크릿 마스킹). 어드바이저는 이 대화를 볼 수 없으므로 필요한 컨텍스트만 프롬프트에 담으세요.
-- `multi`는 프로바이더별 자식 프로세스로 병렬 실행 후, 어드바이저별 아티팩트 목록을 담은
-  인덱스(`.md`)와 기계 판독용 `.json` 사이드카를 생성합니다. 종합은 합의 깊이 라벨
-  (만장일치/다수결/split/단일출처)로 하며, 실패한 어드바이저는 지지가 아닌 **기권**으로 칩니다.
 - `--propose`를 붙이면 의견 대신 **unified diff**를 받습니다 — `artifacts/proposals/`에 `.patch`
   사이드카로 저장되고, 아무것도 적용되지 않습니다.
+- 병렬 다중 어드바이저 + 합의 깊이 종합은 이제 `review roles` — 아래 참고.
 
-### 심의 — `panel` · `debate` · `council`
+### 심의 — `review` (`roles`·`blind`·`debate`·`council`)
 
 ```text
-panel run p1,p2[,p3] "<질문>"  [--tiebreak] [--ready=a,b,c]
-panel stats                                  쌍별 일치 행렬 (실측 탈상관 + tiebreak 행 합산)
-panel outcome <run-id> --adopted <spec|majority|minority|none> --helpful yes|no
-debate run p1,p2[,p3] "<질문/주장>"
-council run p1,p2[,p3] "<질문>"  [--tiebreak] [--ready=a,b,c]
+review roles   p1,p2[,p3] "<prompt>"   [--propose] [--prompt-file <path>] [--allow-write] [--allow-self] [--no-artifacts]
+review blind   p1,p2[,p3] "<질문>"      [--tiebreak] [--ready=a,b,c]
+review debate  p1,p2[,p3] "<질문/주장>"
+review council p1,p2[,p3] "<질문>"      [--tiebreak] [--ready=a,b,c]
+review stats [--json]                  쌍별 일치 행렬 (실측 탈상관 + tiebreak 행 합산)
+review outcome <run-id> --adopted <spec|majority|minority|none> --helpful yes|no
+
+diff 입력(위 모든 모드): --staged | --base <ref> | --diff-file <path>
 ```
 
 ```bash
-node scripts/xllm.mjs panel run codex,grok,gemini "이 캐시 설계가 동시성에 안전한가?"
-node scripts/xllm.mjs debate run ollama:llama3.2,ollama:gemma4 "이 인증 흐름은 토큰 재사용에 취약하다"
-node scripts/xllm.mjs council run codex,grok,gemini "결제 웹훅을 재설계해야 하는가?" --tiebreak
+node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "advisor 스크립트 보안 리뷰"
+node scripts/xllm.mjs review blind codex,grok,gemini "이 캐시 설계가 동시성에 안전한가?" --tiebreak
+node scripts/xllm.mjs review debate ollama:llama3.2,ollama:gemma4 "이 인증 흐름은 토큰 재사용에 취약하다" --staged
+node scripts/xllm.mjs review council codex,grok,gemini "결제 웹훅을 재설계해야 하는가?" --tiebreak
 ```
 
-- **panel** — 모든 패널리스트가 **동일 프롬프트를 블라인드로** 받고 구조화 판정
+> 구 명칭 `multi`/`panel`/`debate`/`council`은 CLI alias로 **v0.27.x까지** 그대로 동작합니다
+> (v0.28.0에서 제거 예정) — 새 스크립트/문서는 `review <mode>`로 쓰세요.
+
+- **roles** — 커버리지 모드(구 `multi`): 프로바이더별 자식 프로세스로 병렬 실행 후, 어드바이저별
+  아티팩트 목록을 담은 인덱스(`.md`)와 기계 판독용 `.json` 사이드카를 생성합니다. 종합은 합의 깊이
+  라벨(만장일치/다수결/split/단일출처)로 하며, 실패한 어드바이저는 지지가 아닌 **기권**으로 칩니다.
+  **측정이 아니라 커버리지입니다** — 인덱스 JSON에 `measurement: false`가 명시되고, "측정됨"이나
+  "consensus-measured" 같은 표현은 쓰지 않습니다. 측정된 일치율이 필요하면 `blind`를 쓰세요.
+- **blind** — 모든 패널리스트가 **동일 프롬프트를 블라인드로** 받고 구조화 판정
   (approve/reject/mixed + 핵심 주장)을 반환합니다. 원장이 산문보다 먼저 기록되며, 요약은 원장과
   모순될 수 없습니다. split이면 코어가 **원장의 실측 일치율이 가장 낮은 미참여 프로바이더**를
   무료로 선정·기록하고, `--tiebreak`을 줬을 때만 실제 추가 호출을 지불합니다(벤더를 손으로 고르지
-  않는 것이 규약; `--ready=`는 가용 프로바이더 제약일 뿐). 실행 후 `panel outcome`으로 무엇을
+  않는 것이 규약; `--ready=`는 가용 프로바이더 제약일 뿐). 실행 후 `review outcome`으로 무엇을
   채택했는지 기록하면 측정→라우팅 루프가 이어집니다.
 - **debate** — R0 블라인드 주장 → R1 상호 반박(구체적 메커니즘+falsifier, decisive/soft 태그) →
   R2 저자 방어 → **기계적 판정**(judge LLM 없음, 순서 불변). 저자가 못 막은 decisive falsifier만
   주장을 KILL하고, 단순 이견은 UNRESOLVED입니다. 정체성은 모델 단위 — 같은 ollama 위의
   llama↔gemma도 서로 공격합니다.
-- **council** — panel(독립 발산) → debate(적대 수렴)을 한 명령으로. 1단계가 split이면 타이브레이커
+- **council** — blind(독립 발산) → debate(적대 수렴)을 한 명령으로. 1단계가 split이면 타이브레이커
   주장이 2단계에 **저자로만** 참여합니다(원 멤버 주장을 밀어내지 않음, 토론자 아님).
-- **비용 감각** — `ask` < `panel` < `debate`(~2–3×) < `council`(~3–4×). SURVIVED는 "적대적 검증을
-  통과했다"는 프로토콜 결과이지 증명이 아니며, 중요한 것은 직접 재검증하세요.
+- **비용 감각** — `ask`/`review roles` < `review blind` < `review debate`(~2–3×) <
+  `review council`(~3–4×). SURVIVED는 "적대적 검증을 통과했다"는 프로토콜 결과이지 증명이 아니며,
+  중요한 것은 직접 재검증하세요.
 
 ### 변경 위임 — `propose` · `exec`
 
@@ -341,8 +351,8 @@ npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바
 
 ```text
 .claude-plugin/ .codex-plugin/ .agents/   3개 호스트 매니페스트
-skills/                                    Claude Code + Codex 공유 스킬 7종
-scripts/  xllm-advisor.js  xllm-exec.js  xllm-scribe.js
+skills/                                    Claude Code + Codex 공유 스킬 5종
+scripts/  xllm-advisor.js  xllm-exec.js  xllm-scribe.js  xllm-review.js  xllm-diff.js
           xllm-panel.js  xllm-debate.js  xllm-council.js  xllm-contracts.js  xllm-bench.js
           xllm-structured.js  xllm-routing.js  xllm-traits.js  xllm.mjs
 benchmarks/  tasks/  FINDINGS.md            시딩 결함 벤치마크

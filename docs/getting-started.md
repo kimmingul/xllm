@@ -48,18 +48,19 @@ READY 상태의 어드바이저가 **최소 1개** 필요합니다. 설치 상�
 호스트 안에서 스킬로:
 
 ```text
-/xllm:ask    codex에게 scripts/xllm-advisor.js를 5줄로 요약해달라고 해줘
-/xllm:multi  ollama:qwen3.6:latest와 codex에게 advisor 스크립트 보안 리뷰를 받아줘
+/xllm:ask     codex에게 scripts/xllm-advisor.js를 5줄로 요약해달라고 해줘
+/xllm:review  ollama:qwen3.6:latest와 codex에게 advisor 스크립트 보안 리뷰를 받아줘
 ```
 
 CLI로 직접:
 
 ```bash
 node scripts/xllm.mjs ask codex@high "이 설계를 리뷰해줘"
-node scripts/xllm.mjs panel run codex,grok "이 캐시 설계가 동시성에 안전한가?"
+node scripts/xllm.mjs review blind codex,grok "이 캐시 설계가 동시성에 안전한가?"
 ```
 
-전체 명령(심의 `panel`/`debate`/`council`, 산문 `scribe`, 계측 `traits` 등)은
+전체 명령(심의 `review roles`/`blind`/`debate`/`council`, 산문 `scribe`, 계측 `traits` 등 —
+구 명칭 `multi`/`panel`/`debate`/`council`은 v0.27.x까지 CLI alias)은
 [README 명령 레퍼런스](../README.md#명령-레퍼런스)를 보세요.
 
 ## 4. 에스컬레이션 사다리

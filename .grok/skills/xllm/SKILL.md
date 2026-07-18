@@ -139,7 +139,7 @@ Prefer:
 ```bash
 node scripts/xllm-advisor.js <spec> "<prompt>"
 # or
-node scripts/xllm.mjs review roles p1,p2 "<prompt>"
+node <xllm.mjs> review roles p1,p2 "<prompt>"
 ```
 
 Never hand-roll provider CLI flags when the advisor script exists.

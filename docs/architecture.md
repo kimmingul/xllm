@@ -23,38 +23,46 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │  Host session (Claude Code · Codex · Grok Build)             │
-│  shared skills: ask multi debate council exec scribe setup   │
+│  shared skills: ask review exec scribe setup                 │
 │  (Grok Build adapter: ask · xllm · xllm-setup)               │
 └──────────────────────────────┬───────────────────────────────┘
                                │  shell: node scripts/xllm.mjs <command>
                                ▼
-   ┌───────────────┬───────────────────┬──────────────┬─────────────────┐
-   ▼               ▼                   ▼              ▼                 ▼
- xllm-advisor   xllm-panel          xllm-exec      xllm-scribe     xllm-bench
- (ask · multi   xllm-debate         (ephemeral     (cheap git      xllm-traits
-  · propose)    xllm-council         clone)         prose)         xllm-routing
-   │               │                   │              │
-   └───────────────┴─────────┬─────────┴──────────────┘
-                             ▼
+   ┌───────────────┬────────────────────┬──────────────┬─────────────────┐
+   ▼               ▼                    ▼              ▼                 ▼
+ xllm-advisor   xllm-review          xllm-exec      xllm-scribe     xllm-bench
+ (ask · propose) (roles·blind·        (ephemeral     (cheap git      xllm-traits
+                  debate·council;      clone)         prose)         xllm-routing
+                  dispatches to
+                  xllm-panel/-debate/
+                  -council; diff via
+                  xllm-diff.js)
+   │               │                    │              │
+   └───────────────┴──────────┬─────────┴──────────────┘
+                              ▼
    cloud CLIs: codex · claude · gemini · grok · antigravity · cursor
    local runtimes: ollama (HTTP :11434) · lmstudio (HTTP) · lemonade
-                             │
-                             ▼
-   <state>/artifacts/{ask,xllm,proposals,exec}     (xllm = multi-run indexes)
-   <state>/panel-ledger.jsonl                      (append-only verdict ledger)
+                              │
+                              ▼
+   <state>/artifacts/{ask,xllm,proposals,exec}     (xllm = review roles indexes)
+   <state>/panel-ledger.jsonl                      (append-only verdict ledger; blind/debate/council only)
 ```
+
+Old top-level nouns `multi`/`panel`/`debate`/`council` remain CLI aliases through v0.27.x
+(dropping in v0.28.0); `review roles` is the coverage mode (not measured — `measurement: false`
+in its index JSON), `review blind`/`review debate`/`review council` write the ledger.
 
 ## The measurement loop
 
 Evidence is written once, derived many times, and finally *routes*:
 
 ```text
-panel / debate / council ──► <state>/panel-ledger.jsonl ──┐
-seeded-defect bench ──────► benchmarks/results/*.json ────┼──► xllm-traits ──► xllm-routing
-contract probes ──────────► contract cache ───────────────┘    Wilson 95% LCB,   pick
-                                                               sample sizes      (gates: tasks ≥ 4 ·
-                                                               always visible     opportunities ≥ 12 ·
-                                                                                  margin +0.10)
+review blind / debate / council ──► <state>/panel-ledger.jsonl ──┐
+seeded-defect bench ─────────────► benchmarks/results/*.json ────┼──► xllm-traits ──► xllm-routing
+contract probes ─────────────────► contract cache ───────────────┘    Wilson 95% LCB,   pick
+                                                                      sample sizes      (gates: tasks ≥ 4 ·
+                                                                      always visible     opportunities ≥ 12 ·
+                                                                                         margin +0.10)
 ```
 
 What the benchmark measures is what the router does. With no evidence, routing stays
@@ -65,9 +73,9 @@ gitignored; notable findings are transcribed to [benchmarks/FINDINGS.md](../benc
 
 | Layer | Surface | Depends on |
 |-------|---------|------------|
-| L0 | `xllm-advisor.js` — the one door | Node ≥ 18 + provider CLIs / local runtimes |
-| L1 | `ask` · `multi` · `propose` | L0 |
-| L2 | `panel` · `debate` · `council` | L0 + structured-output extractor + ledger |
+| L0 | `xllm-advisor.js` — the one door; `xllm-diff.js` — deterministic diff collector (`--staged`/`--base`/`--diff-file`) | Node ≥ 18 + provider CLIs / local runtimes / git |
+| L1 | `ask` · `review roles` · `propose` | L0 |
+| L2 | `review blind` · `review debate` · `review council` | L0 + structured-output extractor + ledger |
 | L2 | `scribe` | L0 + deterministic collectors/validators |
 | L3 | `exec` | L0 + separate-`.git` clone + OS sandbox (codex/claude only, fail-closed) |
 | — | `bench` · `traits` · `pick` | ledger + results (read-only derivation) |

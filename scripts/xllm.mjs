@@ -81,7 +81,7 @@ Commands:
   infer <task>       Infer intensity low|medium|high
   roles              List routing roles
 
-Safety flags (ask/multi): --allow-write --allow-self --no-artifacts
+Safety flags (ask/review roles): --allow-write --allow-self --no-artifacts
 
 Examples:
   node scripts/xllm.mjs remember

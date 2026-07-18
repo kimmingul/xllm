@@ -1,6 +1,7 @@
 # Design — superpowers absorption & surface consolidation
 
-> Status: **converged, not yet implemented.** Adversarial review per project convention
+> Status: **converged; umbrella-5 implemented in v0.26.0 (전체판, user-ratified 2026-07-18).**
+> Adversarial review per project convention
 > (codex@high × grok@high, 3 rounds, final round anchored to verified code facts).
 > Raw artifacts live under `.xllm/artifacts/` (gitignored); this doc transcribes the evidence.
 > Date: 2026-07-13 · Base: v0.21.1

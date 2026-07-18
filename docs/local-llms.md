@@ -14,11 +14,13 @@ Local models are first-class advisors — same artifact contract as cloud CLIs.
 
 ```bash
 node scripts/xllm.mjs ask ollama:qwen3.6:latest "Review this function"
-node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "Analyze authentication changes"
-node scripts/xllm.mjs debate run ollama:llama3.2,ollama:gemma4 "Is this cache design safe under concurrency?"
+node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "Analyze authentication changes"
+node scripts/xllm.mjs review debate ollama:llama3.2,ollama:gemma4 "Is this cache design safe under concurrency?"
 ```
 
-Or via the host skills: `/xllm:ask`, `/xllm:multi` (Claude Code / Codex) · `/ask`, `/xllm`
+Old nouns `multi`/`panel`/`debate`/`council` remain CLI aliases through v0.27.x.
+
+Or via the host skills: `/xllm:ask`, `/xllm:review` (Claude Code / Codex) · `/ask`, `/xllm`
 (Grok Build).
 
 Identity is the **model**, not the provider: two models on the same local runtime

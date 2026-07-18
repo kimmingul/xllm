@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.26.0 — 2026-07-18
+
+### Added — `review` dispatcher: one noun, four deliberation modes
+`xllm review roles|blind|debate|council|stats|outcome` replaces the separate
+`multi`/`panel`/`debate`/`council` top-level nouns with a single dispatcher
+(`scripts/xllm-review.js`) that fans out to the existing mode scripts —
+`roles` shells to `xllm-advisor.js --multi`, `blind`/`stats`/`outcome` to
+`xllm-panel.js`, `debate` to `xllm-debate.js`, `council` to `xllm-council.js`.
+
+- **Diff input on any deliberation mode.** `--staged | --base <ref> |
+  --diff-file <path>` collects a diff deterministically via a new collector,
+  `scripts/xllm-diff.js` — size-capped, byte-accurate truncation on UTF-8
+  boundaries (CJK-safe), sent to advisors, and **never persisted**: the
+  ledger and run index carry only `source`/`stat`/`bytes`/`truncated`
+  metadata, never the diff body.
+- **Epistemology firewall.** `review roles` is coverage — parallel advisors +
+  host synthesis — not measurement; its index JSON now carries
+  `measurement: false`. Only `review blind`/`review council`/`review stats`
+  write the append-only ledger and speak measured pairwise agreement. Docs
+  and skill copy must never describe `roles`/`multi` output as "measured" or
+  "consensus-measured".
+- **Discipline block v2.** The CLAUDE.md/AGENTS.md process-discipline block
+  speaks review-family nouns; `xllm discipline install` re-run auto-upgrades
+  any existing `<!-- xllm:discipline vN --> ... <!-- /xllm:discipline -->`
+  block in place, regardless of prior version.
+
+### Changed
+- **Skills collapsed 7→5**: `ask`, `review`, `exec`, `scribe`, `setup`. The
+  `multi`/`debate`/`council` skill directories are gone; `/xllm:review` in
+  Claude Code and Codex covers all four deliberation modes (`skills/review/`,
+  ≤80 lines, enforced by `check-plugin`).
+- **Old nouns kept as CLI aliases through v0.27.x.** `xllm multi/panel/debate/
+  council …` still work and print a one-line deprecation note pointing at the
+  `review` equivalent; the aliases are dropped in v0.28.0, not this release.
+- README/docs/Pages command spelling aligned to the `review` family
+  (`review roles`/`blind`/`debate`/`council`); concept names (panel, debate,
+  council) are unchanged in prose — only the invoked command notation moved.
+
+### Removed
+- Nothing. All old nouns remain reachable as aliases this release; no
+  behavior was dropped.
+
+`npm run ci` green (176 tests) — check+test+smoke+bench selftest, no live LLM
+required. Protocol-level pieces of this release (review dispatcher, diff
+collector, discipline v2 auto-upgrade) shipped with live e2e in their
+originating commits, per project convention; this entry is the docs sweep
+that catches README/docs/Pages/CHANGELOG up to the shipped surface. Manifests
+still report 0.25.0 — the version bump lands in a follow-up release commit.
+
 ## 0.25.0 — 2026-07-17
 
 ### Feature — `setup` posture packs: one command pins advisors per project

@@ -2179,4 +2179,77 @@ test('xllm.mjs setup subcommand forwards to advisor --setup', () => {
   } finally { fs.rmSync(tmp, { recursive:true, force:true }); }
 });
 
+// ---------------------------------------------------------------------------
+// xllm-diff (review-family diff collector)
+// ---------------------------------------------------------------------------
+import {
+  parseDiffFlags,
+  hasDiffSource,
+  truncateDiff,
+  collectReviewDiff,
+  buildReviewContext,
+  diffMeta,
+  DIFF_MAX_BYTES,
+} from './xllm-diff.js';
+
+test('parseDiffFlags extracts each source and preserves rest', () => {
+  const a = parseDiffFlags(['p1,p2', 'question', 'words', '--staged']);
+  assert.strictEqual(a.diffOpts.staged, true);
+  assert.deepStrictEqual(a.rest, ['p1,p2', 'question', 'words']);
+  const b = parseDiffFlags(['--base', 'v0.25.0', 'x']);
+  assert.strictEqual(b.diffOpts.base, 'v0.25.0');
+  assert.deepStrictEqual(b.rest, ['x']);
+  const c = parseDiffFlags(['--diff-file', 'a.patch']);
+  assert.strictEqual(c.diffOpts.diffFile, 'a.patch');
+});
+
+test('parseDiffFlags rejects multiple sources and missing values', () => {
+  assert.ok(parseDiffFlags(['--staged', '--base', 'main']).error);
+  assert.ok(parseDiffFlags(['--base']).error);
+  assert.ok(parseDiffFlags(['--diff-file']).error);
+});
+
+test('hasDiffSource false on empty opts, true per source', () => {
+  assert.strictEqual(hasDiffSource(parseDiffFlags(['x']).diffOpts), false);
+  assert.strictEqual(hasDiffSource(parseDiffFlags(['--staged']).diffOpts), true);
+  assert.strictEqual(hasDiffSource(null), false);
+});
+
+test('truncateDiff caps at byte limit with marker', () => {
+  const small = truncateDiff('abc');
+  assert.strictEqual(small.truncated, false);
+  const big = truncateDiff('x'.repeat(DIFF_MAX_BYTES + 1000));
+  assert.strictEqual(big.truncated, true);
+  assert.ok(big.text.includes('TRUNCATED'));
+  assert.ok(Buffer.byteLength(big.text, 'utf8') < DIFF_MAX_BYTES + 200);
+});
+
+test('collectReviewDiff reads --diff-file fixture; errors on empty/missing', () => {
+  const tmp = fs.mkdtempSync(path.join(root, 'tmp-diff-'));
+  try {
+    const f = path.join(tmp, 'x.patch');
+    fs.writeFileSync(f, 'diff --git a/a b/a\n+hello\n', 'utf8');
+    const d = collectReviewDiff({ staged: false, base: null, diffFile: f });
+    assert.strictEqual(d.source, `file:${f}`);
+    assert.ok(d.body.includes('+hello'));
+    assert.strictEqual(d.truncated, false);
+    fs.writeFileSync(f, '', 'utf8');
+    assert.ok(collectReviewDiff({ staged: false, base: null, diffFile: f }).error);
+    assert.ok(collectReviewDiff({ staged: false, base: null, diffFile: path.join(tmp, 'nope') }).error);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('buildReviewContext fences the diff; diffMeta drops the body', () => {
+  const d = { source: 'staged', body: '+line', stat: '1 file changed', bytes: 5, truncated: false };
+  const ctx = buildReviewContext(d);
+  assert.ok(ctx.includes('```diff'));
+  assert.ok(ctx.includes('CODE UNDER REVIEW (staged)'));
+  assert.ok(ctx.includes('+line'));
+  const m = diffMeta(d);
+  assert.deepStrictEqual(m, { source: 'staged', stat: '1 file changed', bytes: 5, truncated: false });
+  assert.strictEqual('body' in m, false);
+});
+
 console.log(`\n${passed} tests passed`);

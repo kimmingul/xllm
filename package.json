@@ -15,7 +15,7 @@
     "advisor": "node scripts/xllm-advisor.js",
     "xllm": "node scripts/xllm.mjs",
     "test": "node scripts/test-advisor.mjs",
-    "check": "node --check scripts/xllm-traits.js && node --check scripts/xllm-structured.js && node --check scripts/xllm-council.js && node --check scripts/xllm-debate.js && node --check scripts/xllm-bench.js && node --check scripts/xllm-panel.js && node --check scripts/xllm-contracts.js && node --check scripts/xllm-scribe.js && node --check scripts/xllm-exec.js && node --check scripts/xllm-advisor.js && node --check scripts/xllm-doctor.js && node --check scripts/xllm-routing.js && node --check scripts/test-advisor.mjs && node --check scripts/check-plugin.mjs && node --check scripts/smoke.mjs && node --check scripts/xllm.mjs && node scripts/check-plugin.mjs",
+    "check": "node --check scripts/xllm-diff.js && node --check scripts/xllm-traits.js && node --check scripts/xllm-structured.js && node --check scripts/xllm-council.js && node --check scripts/xllm-debate.js && node --check scripts/xllm-bench.js && node --check scripts/xllm-panel.js && node --check scripts/xllm-contracts.js && node --check scripts/xllm-scribe.js && node --check scripts/xllm-exec.js && node --check scripts/xllm-advisor.js && node --check scripts/xllm-doctor.js && node --check scripts/xllm-routing.js && node --check scripts/test-advisor.mjs && node --check scripts/check-plugin.mjs && node --check scripts/smoke.mjs && node --check scripts/xllm.mjs && node scripts/check-plugin.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:live": "node scripts/smoke.mjs --live",
     "bench:selftest": "node scripts/xllm-bench.js grade-selftest",

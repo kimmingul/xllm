@@ -46,8 +46,8 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
    ```bash
    node <advisor.js> codex@high "<analysis prompt>"
    node <advisor.js> antigravity "<design prompt>"
-   # or --multi when the same prompt is acceptable (providers run in parallel):
-   node <advisor.js> --multi codex@high,antigravity "<shared prompt>"
+   # or review roles when the same prompt is acceptable (providers run in parallel):
+   node scripts/xllm.mjs review roles codex@high,antigravity "<shared prompt>"
    ```
 
    Advisors run **read-only by default** (`--allow-write` only on explicit user request).
@@ -73,7 +73,39 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
    unanimous = every successful advisor addressed AND supported it; failed
    advisors are abstentions, never support. Consensus is confidence metadata,
    not truth. For split claims prefer one tiebreaker from an unconsulted
-   vendor. The `--multi` index also writes a machine-readable `.json` sidecar.
+   vendor. `review roles` (built on `--multi`, still the underlying advisor
+   flag — old nouns `multi`/`panel`/`debate`/`council` remain CLI aliases
+   through v0.27.x) also writes a machine-readable `.json` sidecar.
+
+## Deliberation modes
+
+`/xllm` above runs the **roles** mode (parallel advisors, host synthesizes —
+coverage, **not measured**). For a measured spread or adversarial stress-test,
+drop to the review family directly:
+
+```bash
+node scripts/xllm.mjs review roles   p1,p2[,p3] "<prompt>"      # coverage — NOT measured
+node scripts/xllm.mjs review blind   p1,p2[,p3] "<question>"    # measured independent panel
+node scripts/xllm.mjs review debate  p1,p2[,p3] "<claim>"       # SURVIVED / KILLED / UNRESOLVED
+node scripts/xllm.mjs review council p1,p2[,p3] "<question>"    # blind → debate, highest stakes
+```
+
+| mode | epistemology | cost | reach for it when |
+|---|---|---|---|
+| roles | coverage — synthesis labels, **not measured** | 1× | advisors need different prompts (this skill's default) |
+| blind | measurement — identical blind prompt, ledgered | ~1× | you want the measured spread |
+| debate | adversarial — decisive falsifiers kill wrong claims | ~2–3× | being wrong is expensive |
+| council | independent divergence → hostile convergence | ~3–4× | the highest-stakes calls |
+
+Any mode accepts one diff source: `--staged | --base <ref> | --diff-file <path>`.
+`review stats` prints the pairwise agreement matrix (measured decorrelation);
+`review outcome <run-id> --adopted <spec|majority|minority|none> --helpful
+yes|no` records what the host adopted, feeding measured routing.
+
+Only blind/council/stats speak measured agreement — roles output is your
+synthesis, never a rate. SURVIVED ≠ proven; re-verify consequential claims.
+On a blind split, spend the measured tiebreaker (`--tiebreak`) — never
+hand-pick one by vendor pedigree.
 
 ## Provider syntax
 
@@ -105,7 +137,7 @@ Prefer:
 ```bash
 node scripts/xllm-advisor.js <spec> "<prompt>"
 # or
-node scripts/xllm.mjs multi p1,p2 "<prompt>"
+node scripts/xllm.mjs review roles p1,p2 "<prompt>"
 ```
 
 Never hand-roll provider CLI flags when the advisor script exists.

@@ -1408,7 +1408,7 @@ Env: XLLM_ADVISOR_PATH, XLLM_PLUGIN_ROOT, XLLM_PROVIDERS_PATH,
 // Process-discipline block (setup-distillation — docs/superpowers-absorption-design.md)
 // ---------------------------------------------------------------------------
 
-const DISCIPLINE_VERSION = 'v1';
+const DISCIPLINE_VERSION = 'v2';
 const DISCIPLINE_BEGIN = `<!-- xllm:discipline ${DISCIPLINE_VERSION} -->`;
 const DISCIPLINE_END = '<!-- /xllm:discipline -->';
 /** Hard cap, enforced in code: this block must never grow into an agent-OS. */
@@ -1421,9 +1421,9 @@ const DISCIPLINE_BODY = [
   '- 실행 증거 없이 "done"이라 주장하지 않는다 — 테스트/빌드 출력을 확인하고 인용한다.',
   '- 버그는 고치기 전에 근본 원인부터 찾는다(증상 패치 금지).',
   '- 병렬 작업·플랜·워크트리는 호스트 네이티브 기능을 쓴다; xllm은 오케스트레이션하지 않는다.',
-  '- 틀리면 비싼 결정만 크로스-벤더 심의로: `xllm panel`(측정) · `debate`(반박) · `council`(둘 다).',
-  '  panel stats의 쌍별 일치율이 낮은 곳이 다양성이 배당을 내는 곳이다.',
-  '- 리뷰 코멘트가 미심쩍으면 수용 전에 다른 벤더로 반박 검증(`xllm ask`/`debate`).',
+  '- 틀리면 비싼 결정만 크로스-벤더 심의로: `xllm review blind`(측정) · `review debate`(반박) · `review council`(둘 다).',
+  '  review stats의 쌍별 일치율이 낮은 곳이 다양성이 배당을 내는 곳이다.',
+  '- 리뷰 코멘트가 미심쩍으면 수용 전에 다른 벤더로 반박 검증(`xllm ask`/`review debate`).',
   '- 커밋/PR/릴리스 산문은 `xllm scribe`(최저가 모델); git 실행은 항상 사람이 한다.',
 ].join('\n');
 

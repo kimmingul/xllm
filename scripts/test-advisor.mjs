@@ -1807,8 +1807,16 @@ test('spliceDisciplineBlock upgrades an older block version', () => {
   const old = '# P\n\n<!-- xllm:discipline v0 -->\nold rules\n<!-- /xllm:discipline -->\n';
   const next = spliceDisciplineBlock(old);
   assert.ok(!next.includes('old rules'));
-  assert.ok(next.includes('xllm:discipline v1'));
+  assert.ok(next.includes('xllm:discipline v2'));
   assert.ok(next.startsWith('# P'));
+});
+
+test('discipline block v2 speaks review nouns', () => {
+  const b = disciplineBlock();
+  assert.ok(b.includes('xllm:discipline v2'));
+  assert.ok(b.includes('review blind'));
+  assert.ok(b.includes('review stats'));
+  assert.ok(!/`xllm panel`/.test(b));
 });
 
 test('removeDisciplineBlock removes cleanly and reports absence', () => {

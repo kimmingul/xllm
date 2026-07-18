@@ -2302,4 +2302,35 @@ test('buildReviewContext fences the diff; diffMeta drops the body', () => {
   assert.strictEqual('body' in m, false);
 });
 
+// ---------------------------------------------------------------------------
+// review dispatcher — one noun, four modes onto existing scripts (umbrella-5)
+// ---------------------------------------------------------------------------
+
+import { resolveReviewTarget } from './xllm-review.js';
+
+test('resolveReviewTarget maps modes onto existing scripts', () => {
+  assert.deepStrictEqual(resolveReviewTarget(['blind', 'a,b', 'q', '--staged']), {
+    script: 'panel',
+    args: ['run', 'a,b', 'q', '--staged'],
+  });
+  assert.deepStrictEqual(resolveReviewTarget(['roles', 'a,b', 'q']), {
+    script: 'advisor',
+    args: ['--multi', 'a,b', 'q'],
+  });
+  assert.strictEqual(resolveReviewTarget(['debate', 'a,b', 'q']).script, 'debate');
+  assert.strictEqual(resolveReviewTarget(['council', 'a,b', 'q']).script, 'council');
+  assert.deepStrictEqual(resolveReviewTarget(['stats', '--json']), {
+    script: 'panel',
+    args: ['stats', '--json'],
+  });
+  assert.strictEqual(resolveReviewTarget(['outcome', 'id1', '--adopted', 'none', '--helpful', 'yes']).script, 'panel');
+});
+
+test('resolveReviewTarget errors on unknown mode, usage on none', () => {
+  assert.ok(resolveReviewTarget(['bogus']).error);
+  assert.strictEqual(resolveReviewTarget([]).error, null);
+  assert.strictEqual(resolveReviewTarget([]).script, undefined);
+  assert.ok(resolveReviewTarget(['roles', 'a,b']).error); // roles needs a prompt
+});
+
 console.log(`\n${passed} tests passed`);

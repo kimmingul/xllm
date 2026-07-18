@@ -6,7 +6,7 @@
  *   node scripts/xllm.mjs remember
  *   node scripts/xllm.mjs doctor
  *   node scripts/xllm.mjs ask <provider> "<prompt>"
- *   node scripts/xllm.mjs multi p1,p2 "<prompt>"
+ *   node scripts/xllm.mjs review roles p1,p2 "<prompt>"   (multi/panel/debate/council are aliases)
  *   node scripts/xllm.mjs smoke [--live]
  */
 
@@ -22,6 +22,7 @@ const routing = path.join(__dirname, 'xllm-routing.js');
 const exec = path.join(__dirname, 'xllm-exec.js');
 const scribe = path.join(__dirname, 'xllm-scribe.js');
 const contracts = path.join(__dirname, 'xllm-contracts.js');
+const review = path.join(__dirname, 'xllm-review.js');
 const panel = path.join(__dirname, 'xllm-panel.js');
 const debate = path.join(__dirname, 'xllm-debate.js');
 const council = path.join(__dirname, 'xllm-council.js');
@@ -47,12 +48,14 @@ Commands:
   remember           Write xllm-advisor-path marker (.xllm/, legacy .grok/)
   doctor             Provider + path health (human)
   ask <p> <prompt>   Single advisor call (read-only by default; --allow-write to opt in)
-  multi p1,p2 <prompt>   Parallel multi-advisor run (index has consensus contract + JSON)
-  panel run p1,p2 <q>    BLIND independent panel → verdict ledger + agreement (measure diversity)
-  panel stats            Pairwise agreement matrix (measured decorrelation)
-  panel outcome <id> …   Record what the host adopted (decision-adoption loop)
-  debate run p1,p2 <q>   ADVERSARIAL: models refute each other → survived/killed/unresolved (maximize quality)
-  council run p1,p2 <q>  PIPELINE: panel (independent) → debate (adversarial), one command
+  review roles p1,p2 <prompt>    Parallel advisors + host synthesis (coverage — NOT measured)
+  review blind p1,p2 <q>         BLIND measured panel → ledger + agreement [--tiebreak] [--ready=]
+  review debate p1,p2 <q>        ADVERSARIAL refutation → survived/killed/unresolved
+  review council p1,p2 <q>       blind → debate pipeline (highest stakes)
+  review stats [--json]          Pairwise agreement matrix (measured decorrelation)
+  review outcome <id> …          Record what the host adopted
+    diff input for any mode: --staged | --base <ref> | --diff-file <path>
+    (old nouns multi/panel/debate/council remain aliases through v0.27.x)
   traits [--json]        Evidence-based provider trait profiles (measured, gated, never lore)
   propose <p> <change>   Read-only change proposal → artifact + .patch (host applies)
   exec <p> <task>        Isolated executor: ephemeral clone → verified ref + evidence
@@ -84,7 +87,8 @@ Examples:
   node scripts/xllm.mjs remember
   node scripts/xllm.mjs ask codex@high "ping"
   node scripts/xllm.mjs pick security "auth token refresh"
-  node scripts/xllm.mjs multi ollama:qwen3.6:latest,codex "review risks"
+  node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "review risks"
+  node scripts/xllm.mjs review blind codex,grok,gemini "이 캐시 설계가 안전한가?" --staged
   node scripts/xllm.mjs propose codex@high "add input validation to login()"
   node scripts/xllm.mjs profile set-role critic ollama:qwen3.6:latest@low
   node scripts/xllm.mjs clean --older-than=7
@@ -122,6 +126,7 @@ switch (cmd) {
       console.error('Usage: xllm multi p1,p2 <prompt>');
       process.exit(1);
     }
+    console.error("[xllm] note: 'multi' is now 'review roles' (alias through v0.27.x)");
     run(advisor, ['--multi', ...rest]);
     break;
   case 'smoke':
@@ -140,13 +145,19 @@ switch (cmd) {
   case 'contracts':
     run(contracts, rest);
     break;
+  case 'review':
+    run(review, rest);
+    break;
   case 'panel':
+    console.error("[xllm] note: 'panel' is now 'review blind|stats|outcome' (alias through v0.27.x)");
     run(panel, rest);
     break;
   case 'debate':
+    console.error("[xllm] note: 'debate' is now 'review debate' (alias through v0.27.x)");
     run(debate, rest);
     break;
   case 'council':
+    console.error("[xllm] note: 'council' is now 'review council' (alias through v0.27.x)");
     run(council, rest);
     break;
   case 'traits':

@@ -47,7 +47,7 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
    node <advisor.js> codex@high "<analysis prompt>"
    node <advisor.js> antigravity "<design prompt>"
    # or review roles when the same prompt is acceptable (providers run in parallel):
-   node scripts/xllm.mjs review roles codex@high,antigravity "<shared prompt>"
+   node <xllm.mjs> review roles codex@high,antigravity "<shared prompt>"
    ```
 
    Advisors run **read-only by default** (`--allow-write` only on explicit user request).
@@ -81,13 +81,15 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
 
 `/xllm` above runs the **roles** mode (parallel advisors, host synthesizes —
 coverage, **not measured**). For a measured spread or adversarial stress-test,
-drop to the review family directly:
+drop to the review family directly. `<xllm.mjs>` = `scripts/xllm.mjs` next to
+the `<advisor.js>` you already resolved above (same directory) — resolve the
+advisor path first, then use its sibling `xllm.mjs`:
 
 ```bash
-node scripts/xllm.mjs review roles   p1,p2[,p3] "<prompt>"      # coverage — NOT measured
-node scripts/xllm.mjs review blind   p1,p2[,p3] "<question>"    # measured independent panel
-node scripts/xllm.mjs review debate  p1,p2[,p3] "<claim>"       # SURVIVED / KILLED / UNRESOLVED
-node scripts/xllm.mjs review council p1,p2[,p3] "<question>"    # blind → debate, highest stakes
+node <xllm.mjs> review roles   p1,p2[,p3] "<prompt>"      # coverage — NOT measured
+node <xllm.mjs> review blind   p1,p2[,p3] "<question>"    # measured independent panel
+node <xllm.mjs> review debate  p1,p2[,p3] "<claim>"       # SURVIVED / KILLED / UNRESOLVED
+node <xllm.mjs> review council p1,p2[,p3] "<question>"    # blind → debate, highest stakes
 ```
 
 | mode | epistemology | cost | reach for it when |

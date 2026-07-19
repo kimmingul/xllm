@@ -479,6 +479,23 @@ has nothing to do); light decorrelated models refute everything indiscriminately
 "plausible-but-wrong claims die, correct ones survive" story now has measured
 support in NEITHER regime.
 
+**Addendum (2026-07-19) — the mid-tier cloud council lands at the frontier
+end, closing the triangle.** Same protocol, same chunking, on the act-six trio
+(gemma4:cloud · glm-5.2:cloud · nemotron-3-super:cloud), ~15 min, zero errors:
+grounded 22/25 = 0.88, surplus 21/23 = 0.913, discrimination **−0.033**, kill
+rate 5/48 = **10.4%**, survived-coverage 11/21 (blind union for this same trio:
+19–20/21). The open question — does mid-tier land between the extremes? — is
+answered: **no.** Kill behavior tracks capability, not decorrelation: capable
+models (frontier CLIs *and* mid-tier cloud) barely refute each other; only the
+light-local panel killed aggressively, and it killed blind. All three measured
+regimes now sit at discrimination ≈ 0:
+
+| regime | kill rate | grounded survival | discrimination | survived-coverage vs blind union |
+|--------|-----------|-------------------|----------------|----------------------------------|
+| frontier debate (act 5) | 12.5% | 0.87 | −0.01 | (not measured) |
+| mid-tier cloud council | 10.4% | 0.88 | −0.03 | 11/21 vs 19–20/21 |
+| light-local council (act 10) | 48% | 0.50 | 0.00 | 8/21 vs 19/21 |
+
 **Deliberation costs recall — use the blind panel for detection.** Council's
 surviving claims covered only **8/21** seeded defects, versus **19/21 per run**
 for the *same trio* in blind single mode. Half the real detections entered the

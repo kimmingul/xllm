@@ -537,6 +537,29 @@
          detections without adding measured precision. An honest instrument reports its negatives;
          this one just did.</p>
     </div>
+
+    <div class="finding" style="margin-top:26px">
+      <h3>Act eleven — high effort buys diversity, not skill</h3>
+      <p>Does the balanced panel's dividend grow at higher effort? Unanswerable until v0.29 taught
+         the ollama transport to forward <code>@effort</code> as the API's <code>think</code>
+         parameter. Then the act-six trio ran again at <code>@high</code>, three times.</p>
+      <table class="bt">
+        <tr><th></th><th>Default effort (act six)</th><th>@high (thinking on)</th></tr>
+        <tr><td>Dividend</td><td>+2 · +2 · +2 (mean 2.0)</td><td><b>+3 · +4 · +2 (mean 3.0)</b></td></tr>
+        <tr><td>Mean pairwise agreement</td><td>0.735</td><td><b>0.704</b></td></tr>
+        <tr><td>Best single per run</td><td>17 · 17 · 18</td><td>15 · 15 · 18</td></tr>
+        <tr><td>Union per run</td><td>19 · 19 · 20</td><td>18 · 19 · 20</td></tr>
+      </table>
+      <p class="quote">Thinking did not lift the ceiling — the union stayed flat and best-single
+         actually fell. What high effort bought was decorrelation: members diverged further,
+         headroom widened, and the union-over-best gap grew from +2 to +3. More effort made each
+         model noisier and the ensemble better.</p>
+      <p style="margin-top:18px">With five panels measured, the agreement→dividend relationship
+         stays strongly negative but gains an honest wrinkle: this panel (0.704 → +3.0)
+         out-dividends a more decorrelated one (0.691 → +2.33) because its best single left more
+         room to fill. Dividend = decorrelation × headroom — both drivers, measured: 0.841→+0.33 ·
+         0.735→+2.0 · 0.704→+3.0 · 0.691→+2.33 · 0.609→+3.33.</p>
+    </div>
   </div>
 </section>
 

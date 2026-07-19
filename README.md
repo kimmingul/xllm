@@ -697,6 +697,33 @@ mid-tier는 두 극단 사이가 아니라 **프론티어 쪽에 붙습니다** 
 8주장 캡은 프로토콜 형태의 손실, 그리고 이것은 하나의 트리오 — 중형 클라우드 council은 두
 측정 극단 사이 어딘가일 수 있습니다.
 
+### 11막 — 고효율은 실력이 아니라 다양성을 산다: 배당 +2 → +3 (2026-07-19)
+
+마지막 open item — "대등 mid-tier 패널의 +2가 고효율에서 더 커지는가" — 는 그동안 측정
+불가였습니다: ollama 전송이 `@effort`를 조용히 버렸기 때문입니다. v0.29의 effort→think
+매핑(라이브 검증: glm/gemma4/nemotron은 `think` 수용, llama3.2는 거부→think 없이 자동
+재시도)으로 실험이 가능해져, 6막 트리오를 `@high`로 hard-set 3회 재실행했습니다(에러 0).
+
+| | 6막 (기본 effort) | @high (thinking on) |
+|--|-------------------|---------------------|
+| 배당 | +2 · +2 · +2 (평균 2.0) | +3 · +4 · +2 (평균 **3.0**) |
+| 평균 쌍별 일치율 | 0.735 | **0.704** |
+| 실행별 최고 단일 | 17 · 17 · 18 | 15 · 15 · 18 |
+| 실행별 합집합 | 19 · 19 · 20 | 18 · 19 · 20 |
+
+**배당은 컸지만, "효율을 올리면 더 잘 찾는다"는 방식이 아니었습니다.** thinking은 천장을
+올리지 않았습니다 — 합집합은 그대로(18–20)이고 최고 단일은 오히려 **떨어졌습니다**(17→15).
+개별 모델은 더 시끄러워졌습니다(gemma4가 12·12·18로 ±6, 역대 최대 단일 모델 요동). 고효율이
+산 것은 **탈상관**입니다: 일치율 0.735→0.704, 최고-단일 여지 확대, 그 결과 합집합−최고 격차
+(=배당)가 2.0→3.0. 순위는 여전히 회전하고(각자 어느 실행에선 최고), 영구 맹점 0, 3회 누적
+합집합 21/21입니다.
+
+**곡선에 대한 정직한 주름 하나.** 5개 패널이 측정된 지금, 일치율→배당 관계는 강하게
+음(-)이지만 더 이상 *엄밀한* 단조는 아닙니다: 이 패널(0.704→+3.0)이 더 탈상관된 7막
+(0.691→+2.33)을 앞서는데, 최고 단일이 낮아(15 vs 17) 채울 여지가 더 컸기 때문입니다.
+3막이 말한 그대로 두 동인이 함께 작동합니다: **배당 = 탈상관 × 여지(headroom)**.
+5개 점: 0.841→+0.33 · 0.735→+2.0 · **0.704→+3.0** · 0.691→+2.33 · 0.609→+3.33.
+
 ### 측정 표면 태그 (모델 vs 하네스 교락)
 
 이제 모든 결과가 각 프로바이더의 측정 표면을 기록합니다: `cli-agentic`(자체 도구·추론을 돌릴 수
@@ -715,6 +742,7 @@ node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks --
 node scripts/xllm-bench.js run --providers grok,ollama:gemma4:cloud,ollama:nemotron-3-super:cloud --tasks-file hard-tasks --modes single   # 4모델 패널
 node scripts/xllm-bench.js run --providers ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b --tasks-file hard-tasks --modes single   # 경량 로컬 트리오 (9막)
 node scripts/xllm-bench.js run --providers ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b --tasks-file hard-tasks --modes council --tasks h3-cache-lru   # council 채점 (10막, 태스크당 청크 권장)
+node scripts/xllm-bench.js run --providers ollama:gemma4:cloud@high,ollama:glm-5.2:cloud@high,ollama:nemotron-3-super:cloud@high --tasks-file hard-tasks --modes single    # 고효율 패널 (11막, v0.29+ effort→think)
 ```
 
 원시 실행 JSON은 gitignore, 요약은 커밋 — 전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) ·

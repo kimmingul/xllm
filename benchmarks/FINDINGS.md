@@ -515,3 +515,38 @@ loss is partly protocol shape, not only kill behavior; claims are the panel's
 distilled verdicts, not full defect lists, so grounded-claim counts (18/48)
 undercount what the models actually detected. And this is one trio — a
 mid-tier cloud council might land anywhere between the two measured extremes.
+
+## 2026-07-19 — high effort buys diversity, not skill: the dividend grows to +3
+
+**Setup.** The last open item: does the balanced mid-tier panel's +2 dividend
+grow at higher effort? Blocked until now — the ollama transport silently
+dropped `@effort`. v0.29's effort→think mapping (live-verified: glm/gemma4/
+nemotron accept `think`; llama3.2 rejects it and triggers the no-think retry)
+made the experiment possible: the act-six trio re-run at `@high`, hard set,
+single mode, 3×, zero errors.
+
+**Result — dividend [+3, +4, +2], mean 3.0 (σ=0.82) vs act six's 2.0 (σ=0):**
+
+| | act 6 (default effort) | @high (thinking on) |
+|--|------------------------|---------------------|
+| dividend | +2 · +2 · +2 (mean 2.0) | +3 · +4 · +2 (mean **3.0**) |
+| mean pairwise agreement | 0.735 | **0.704** |
+| best single per run | 17 · 17 · 18 | 15 · 15 · 18 |
+| union per run | 19 · 19 · 20 | 18 · 19 · 20 |
+
+**The dividend grew — but not the way "more effort" suggests.** Thinking did
+NOT lift the ceiling: the union is flat (18–20 vs 19–20) and best-single
+actually *fell* (15/15/18 vs 17/17/18). Individual models got noisier —
+gemma4 swung 12 · 12 · 18 across runs (±6, the widest single-model swing
+measured). What high effort bought is *decorrelation*: mean agreement fell
+0.735 → 0.704, best-single headroom widened, and the union−best gap (the
+dividend) grew from 2.0 to 3.0. Rank still rotates (each model was best in
+some run); zero permanent blind spots; cross-run union 21/21.
+
+**An honest wrinkle for the curve.** With five panels measured, the
+agreement→dividend relationship is strongly negative but no longer *strictly*
+monotonic: this panel (0.704 → +3.0) out-dividends act seven's more
+decorrelated one (0.691 → +2.33), because its best-single is lower (15 vs 17)
+— more headroom to fill. Both drivers matter, exactly as act three said:
+dividend = decorrelation × headroom. The five points: 0.841→+0.33 ·
+0.735→+2.0 · **0.704→+3.0** · 0.691→+2.33 · 0.609→+3.33.

@@ -154,6 +154,99 @@ node scripts/xllm.mjs remember     # 마커 + 아티팩트 디렉토리 생성
 
 ---
 
+## 사용법
+
+### 기본 사용법 — 5분 온보딩
+
+설치 후 처음 쓰는 프로젝트라면 이 순서 그대로면 됩니다. 스펙 문법은 어디서나
+`provider[:model][@effort]` 하나이고(예: `codex@high`, `ollama:qwen3.6:latest`),
+모든 명령의 **마지막 stdout 줄이 결과 아티팩트 경로**입니다.
+
+```bash
+# 0. 이 머신에서 뭘 쓸 수 있는지 확인 (READY 프로바이더 + 추천 페어)
+node scripts/xllm.mjs doctor
+
+# 1. 프로젝트 1회 초기화 (경로 마커 + 역할 핀 미리보기; --apply 전엔 아무것도 안 바꿈)
+node scripts/xllm.mjs setup
+
+# 2. 다른 벤더의 의견 하나 받기 — 가장 기본 동작 (read-only)
+node scripts/xllm.mjs ask codex@high "이 마이그레이션 설계의 위험을 짚어줘"
+
+# 3. 여러 어드바이저를 병렬로 — 역할 분담 + 합의 깊이 종합
+node scripts/xllm.mjs review roles codex,grok "auth 모듈 보안 리뷰"
+
+# 4. 커밋 메시지는 무료 로컬 모델에게 (git 실행은 항상 당신이)
+MSG=$(node scripts/xllm.mjs scribe commit) && git commit -m "$MSG"
+```
+
+호스트 안에서는 스킬로 부릅니다 — Claude Code/Codex: `/xllm:ask`, `/xllm:review`,
+`/xllm:scribe`, `/xllm:setup` 또는 자연어("codex한테 이 설계 물어봐줘"). Grok Build:
+`/ask`, `/xllm`, `/xllm-setup`. 어드바이저는 **기본 read-only**라 트리를 건드리지 못하고,
+API 키 없이 **각 CLI의 기존 로그인**을 그대로 씁니다. 로컬 모델(ollama 등)이 있다면 비용 0으로
+같은 문법으로 참여합니다: `ask ollama:qwen3.6:latest "..."`.
+
+### 고급 사용법 — 측정 기반 워크플로
+
+**① 코드를 놓고 리뷰받기 (diff 입력).** 어느 심의 모드든 diff 소스를 하나 붙이면
+결정적으로 수집·상한 적용 후 어드바이저에게 전달됩니다(원장에는 메타데이터만):
+
+```bash
+node scripts/xllm.mjs review roles codex,grok "이 변경 리뷰" --staged        # git add 된 것
+node scripts/xllm.mjs review blind codex,grok,gemini "머지 안전?" --base main # 워킹트리 vs ref(two-dot)
+node scripts/xllm.mjs review debate a,b "이 diff는 회귀 없음" --diff-file x.patch
+```
+
+**② 측정 패널 루프 — 의견이 갈릴 때 세게 쓰는 길.** `blind`는 동일 프롬프트를 블라인드로
+보내 **일치율을 측정**하고 append-only 원장에 기록합니다. split이 나면 실측 일치율이 가장
+낮은 미참여 모델을 타이브레이커로 제안하고(`--tiebreak`으로 실행), 결과 채택까지 기록하면
+다음 라우팅의 근거가 됩니다:
+
+```bash
+node scripts/xllm.mjs review blind codex,grok,gemini "이 캐시 설계 안전?" --tiebreak
+node scripts/xllm.mjs review stats                # 누적 쌍별 일치 행렬 (실측 탈상관)
+node scripts/xllm.mjs review outcome <run-id> --adopted majority --helpful yes
+```
+
+**③ 적대 검증 — 어디에 쓰고, 어디엔 쓰지 말 것 (실측).** `debate`(상호 반박)와
+`council`(blind→debate)은 주장을 SURVIVED/KILLED/UNRESOLVED로 판정합니다. 우리 벤치마크
+실측(10막): **결함을 찾는 용도라면 blind가 우월**합니다(심의는 재현율을 깎음). debate/council은
+"이 주장이 공격을 버티는가"를 볼 때 — 즉 이미 세운 특정 주장·설계 결정의 스트레스 테스트에
+쓰세요. SURVIVED는 증명이 아니라 프로토콜 결과입니다.
+
+**④ 에스컬레이션 — 의견에서 구현까지.** `ask`(의견) → `propose`(정적 `.patch`, 아무것도 적용
+안 됨) → `exec`(격리 클론에서 편집·빌드·테스트 → 검증된 브랜치 반환, 당신 트리 불가침):
+
+```bash
+node scripts/xllm.mjs propose codex@high "login()에 입력 검증 추가"
+node scripts/xllm.mjs exec codex@high "X 구현" --test-cmd "npm test"
+```
+
+**⑤ 라우팅을 프로젝트에 맞추기.** `setup [pack]`(balanced/quality/frugal/local/skip)으로
+포스처를 고르거나 역할 단위로 핀 — 이후 스킬·라우팅이 자동으로 따릅니다. `traits`는 원장·벤치
+증거에서 실측 특성을 파생해(표본 수 노출) 판단 역할 라우팅에 반영됩니다:
+
+```bash
+node scripts/xllm.mjs setup frugal --apply
+node scripts/xllm.mjs profile set-role security codex@high
+node scripts/xllm.mjs traits
+```
+
+**⑥ 무료 로컬 트리오 레시피 (9막 실측).** VRAM에 올라가는 경량 모델 3개면 프론티어 단일과
+결함 1개 차이의 검출 union이 나옵니다(배당 +3.33, 비용 0) — 검출 목적이면 이것부터:
+
+```bash
+node scripts/xllm.mjs review blind ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b "이 diff의 결함 전부 나열" --staged
+```
+
+ollama 모델은 `@high`를 붙이면 thinking이 켜집니다(v0.29+, 미지원 모델은 자동 폴백).
+
+**⑦ 알아두면 좋은 함정.** Windows argv ~32KB — 긴 프롬프트는 `--prompt-file <경로>`(review
+계열은 24KB 초과 시 자동 파일 경유); grok/gemini는 argv 전달이라 회피 불가, codex/claude는
+stdin. 안전 플래그(`--allow-write`/`--allow-self`/`--no-artifacts`)는 명시적 요청 없이 쓰지
+않는 것이 규약. 상세 플래그는 아래 [명령 레퍼런스](#명령-레퍼런스) 참고.
+
+---
+
 ## 안전 모델
 
 경계는 프롬프트가 아니라 **실행 플래그와 샌드박스로** 강제됩니다.

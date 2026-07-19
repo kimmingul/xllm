@@ -182,6 +182,7 @@
       <a href="#benchmark">Benchmark</a>
       <a href="#safety">Safety</a>
       <a href="#install">Install</a>
+      <a href="#usage">Use</a>
       <a href="https://github.com/kimmingul/xllm">GitHub</a>
     </div>
   </div>
@@ -630,6 +631,61 @@ codex plugin add xllm@xllm</code></pre>
 
     <div style="text-align:center; margin-top:40px">
       <a class="btn" href="https://github.com/kimmingul/xllm">View on GitHub →</a>
+    </div>
+  </div>
+</section>
+
+<section id="usage">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>Use it</h2>
+      <p>Five minutes to a first opinion. One spec syntax everywhere —
+         <code>provider[:model][@effort]</code> — and every command prints its artifact path as
+         the last stdout line.</p>
+    </div>
+
+    <div class="card" style="max-width:760px; margin:0 auto;">
+      <div class="ico">🚀</div>
+      <h3>Basic — the five-minute path</h3>
+      <pre style="margin-top:12px"><code># 0. what can this machine run? (READY providers + a suggested pair)
+node scripts/xllm.mjs doctor
+
+# 1. once per project: path marker + role-pin preview (changes nothing until --apply)
+node scripts/xllm.mjs setup
+
+# 2. one authentic opinion from another vendor — read-only
+node scripts/xllm.mjs ask codex@high "review the risks in this migration"
+
+# 3. several advisors in parallel, with consensus-depth synthesis
+node scripts/xllm.mjs review roles codex,grok "security review of the auth module"
+
+# 4. commit prose from a free local model — you run git, always
+MSG=$(node scripts/xllm.mjs scribe commit) &amp;&amp; git commit -m "$MSG"</code></pre>
+      <p style="margin-top:14px; margin-bottom:0">Inside a host, the same flows are skills:
+         <code>/xllm:ask</code>, <code>/xllm:review</code>, <code>/xllm:scribe</code>,
+         <code>/xllm:setup</code> — or plain natural language ("ask codex about this design").
+         Advisors reuse each CLI's existing login; no API keys. Local models join with the same
+         syntax at zero cost: <code>ask ollama:qwen3.6:latest "…"</code>.</p>
+    </div>
+
+    <div class="card" style="max-width:760px; margin:26px auto 0;">
+      <div class="ico">🧪</div>
+      <h3>Advanced — pick the mode the measurements recommend</h3>
+      <table class="bt" style="margin-top:12px">
+        <tr><th>You want…</th><th>Reach for</th><th>Why (measured)</th></tr>
+        <tr><td>a review of actual code</td><td>any mode + <code>--staged | --base &lt;ref&gt; | --diff-file</code></td><td>diff collected deterministically, size-capped, never persisted</td></tr>
+        <tr><td>to find defects</td><td><code>review blind</code> (union)</td><td>largest measured dividend — +3.33 with three free local models (act nine)</td></tr>
+        <tr><td>to resolve a split</td><td><code>--tiebreak</code>, then <code>review stats</code> / <code>outcome</code></td><td>tiebreaker = lowest <em>measured</em> agreement, never pedigree (act seven)</td></tr>
+        <tr><td>to stress-test one claim</td><td><code>review debate</code> / <code>council</code></td><td>hostile refutation of a specific claim; for detection it costs recall (act ten)</td></tr>
+        <tr><td>a change, not an opinion</td><td><code>propose</code> → <code>exec</code></td><td>static .patch, then a verified branch from an isolated clone — your tree untouched</td></tr>
+        <tr><td>project-fit routing</td><td><code>setup frugal --apply</code>, <code>profile set-role</code>, <code>traits</code></td><td>role pins + evidence-derived traits (Wilson bounds, sample sizes shown)</td></tr>
+      </table>
+      <p style="margin-top:14px; margin-bottom:0">Free-local recipe: <code>review blind
+         ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b "list every defect"
+         --staged</code> — union within one defect of a frontier single, at zero cost. Add
+         <code>@high</code> to any ollama model to turn thinking on (v0.29+; models that reject
+         it fall back automatically). Full flags and contracts live in the
+         <a href="https://github.com/kimmingul/xllm#명령-레퍼런스">command reference</a>.</p>
     </div>
   </div>
 </section>

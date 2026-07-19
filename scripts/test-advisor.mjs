@@ -42,6 +42,7 @@ import {
   writeMultiIndex,
   ollamaBaseUrl,
   parseOllamaHttpResponse,
+  ollamaThinkFromEffort,
   validateSetupPin,
   applySetupPlan,
 } from './xllm-advisor.js';
@@ -231,6 +232,34 @@ test('resolveSpawnConfig ollama uses the HTTP API with a stdin payload (v0.20.0)
   assert.strictEqual(payload.model, 'codellama');
   assert.strictEqual(payload.prompt, 'review this');
   assert.strictEqual(payload.stream, false);
+});
+
+test('ollamaThinkFromEffort maps effort to the API think parameter', () => {
+  // no effort → undefined: the payload stays unchanged, so models that
+  // reject `think` never see it unless effort was explicitly requested
+  assert.strictEqual(ollamaThinkFromEffort(null, 'qwen3.6:latest'), undefined);
+  assert.strictEqual(ollamaThinkFromEffort('', 'qwen3.6:latest'), undefined);
+  assert.strictEqual(ollamaThinkFromEffort('low', 'qwen3.6:latest'), false);
+  assert.strictEqual(ollamaThinkFromEffort('minimal', 'glm-5.2:cloud'), false);
+  assert.strictEqual(ollamaThinkFromEffort('medium', 'qwen3.6:latest'), true);
+  assert.strictEqual(ollamaThinkFromEffort('high', 'nemotron-3-super:cloud'), true);
+  assert.strictEqual(ollamaThinkFromEffort('xhigh', 'gemma4:cloud'), true);
+  // gpt-oss takes graded string levels instead of a boolean
+  assert.strictEqual(ollamaThinkFromEffort('low', 'gpt-oss:120b-cloud'), 'low');
+  assert.strictEqual(ollamaThinkFromEffort('medium', 'gpt-oss:120b-cloud'), 'medium');
+  assert.strictEqual(ollamaThinkFromEffort('high', 'gpt-oss:120b-cloud'), 'high');
+  assert.strictEqual(ollamaThinkFromEffort('max', 'gpt-oss:120b-cloud'), 'high');
+});
+
+test('resolveSpawnConfig ollama forwards effort as think; no effort leaves payload unchanged', () => {
+  const hi = resolveSpawnConfig('ollama', 'glm-5.2:cloud', 'q', process.env, { effort: 'high' });
+  assert.strictEqual(JSON.parse(hi.stdinPayload).think, true);
+  const lo = resolveSpawnConfig('ollama', 'glm-5.2:cloud', 'q', process.env, { effort: 'low' });
+  assert.strictEqual(JSON.parse(lo.stdinPayload).think, false);
+  const oss = resolveSpawnConfig('ollama', 'gpt-oss:120b-cloud', 'q', process.env, { effort: 'high' });
+  assert.strictEqual(JSON.parse(oss.stdinPayload).think, 'high');
+  const none = resolveSpawnConfig('ollama', 'glm-5.2:cloud', 'q');
+  assert.strictEqual('think' in JSON.parse(none.stdinPayload), false);
 });
 
 test('ollamaBaseUrl normalizes scheme-less OLLAMA_HOST', () => {

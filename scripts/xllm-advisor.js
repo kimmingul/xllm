@@ -277,6 +277,23 @@ export function checkServerHealth(provider) {
   return true;
 }
 
+/**
+ * Map spec effort to the /api/generate `think` parameter. Graded string
+ * levels for gpt-oss (the family documented to take low/medium/high);
+ * boolean for everything else. No effort → undefined: the payload stays
+ * unchanged, so models that reject `think` never see it unless effort was
+ * explicitly requested (and then a rejection triggers one retry without it).
+ */
+export function ollamaThinkFromEffort(effort, model) {
+  if (!effort) return undefined;
+  const e = String(effort).toLowerCase();
+  const low = e === 'none' || e === 'minimal' || e === 'low';
+  if (/^gpt-oss\b/.test(String(model || ''))) {
+    return low ? 'low' : e === 'medium' ? 'medium' : 'high';
+  }
+  return !low;
+}
+
 /** Parse /api/generate output: { response } on success, { error } from the server. */
 export function parseOllamaHttpResponse(stdout) {
   try {
@@ -864,6 +881,7 @@ export function resolveSpawnConfig(
       // stdin (`-d @-`), so prompt size is unbounded on every platform.
       const ollamaModel = resolvedModel || 'llama3.2';
       const curlBin = IS_WINDOWS ? 'curl.exe' : 'curl';
+      const think = ollamaThinkFromEffort(effort, ollamaModel);
       return {
         binary: curlBin,
         args: [
@@ -877,7 +895,12 @@ export function resolveSpawnConfig(
           '@-',
         ],
         usesStdin: true,
-        stdinPayload: JSON.stringify({ model: ollamaModel, prompt, stream: false }),
+        stdinPayload: JSON.stringify({
+          model: ollamaModel,
+          prompt,
+          stream: false,
+          ...(think !== undefined ? { think } : {}),
+        }),
         timeoutMs,
         model: ollamaModel,
         effort,
@@ -2157,7 +2180,25 @@ export function runAdvisor({
     raw = parseLMStudioResponse(stdout);
   }
   if (provider === 'ollama') {
-    const parsed = parseOllamaHttpResponse(stdout);
+    let parsed = parseOllamaHttpResponse(stdout);
+    // Effort is best-effort for local models: a model that rejects the
+    // `think` parameter gets one retry without it instead of a hard failure.
+    if (
+      parsed.error &&
+      /think/i.test(parsed.error) &&
+      (cfg.stdinPayload || '').includes('"think"')
+    ) {
+      console.error(`[ollama] ${cfg.model}: server rejected "think" — retrying without (effort ignored)`);
+      const fallback = JSON.parse(cfg.stdinPayload);
+      delete fallback.think;
+      const retry = withRetry(() =>
+        spawnSync(finalCommand, finalArgs, { ...runOpts, input: JSON.stringify(fallback) })
+      );
+      stdout = retry.stdout || '';
+      code = typeof retry.status === 'number' ? retry.status : 1;
+      raw = [stdout, retry.stderr || ''].filter(Boolean).join('\n\n');
+      parsed = parseOllamaHttpResponse(stdout);
+    }
     if (parsed.error) {
       code = code || 1;
       raw = `[ollama] ${parsed.error}`;

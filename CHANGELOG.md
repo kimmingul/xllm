@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.29.0 — 2026-07-19 — ollama effort→think + 벤치 acts 9–11
+
+### Added
+- **ollama effort→think 매핑** — `@effort`가 이제 ollama HTTP 전송에 실제로
+  전달됩니다: `ollamaThinkFromEffort()`가 none/minimal/low→`think:false`,
+  medium 이상→`think:true`, gpt-oss 계열은 low/medium/high 문자열로 매핑.
+  effort 미지정 시 페이로드 불변(완전 호환). `think`를 거부하는 모델은
+  stderr 고지 후 think 없이 1회 자동 재시도 — 하드 실패 없음. 라이브 e2e:
+  glm-5.2/gemma4/nemotron-super cloud 수용, llama3.2 거부→폴백→성공.
+
+### Measured — 벤치 아크 8→11막 (benchmarks/FINDINGS.md)
+- **9막**: 진짜 로컬 경량 트리오(ornith 5.6GB+gemma4 9.6GB+qwen3-coder 30b)
+  배당 [+4,+4,+2] 평균 **+3.33 — 역대 최대**; 일치율 0.609(역대 최저);
+  h6 double-fire(전 프론티어 공동 맹점)를 5.6GB ornith가 2/3회 검출.
+- **10막**: council 첫 측정 — 경량 로컬은 kill 48%에 판별 0.000(무차별),
+  mid-tier 클라우드는 kill 10.4%에 판별 −0.033(프론티어 쪽) — 측정된 세
+  영역 전부 판별 ≈ 0, 심의는 재현율만 깎음(생존 커버 8–11/21 vs blind
+  합집합 19–20/21) → 경량/중형 로컬은 `review blind`로 라우팅.
+- **11막**: act-6 트리오 @high 재실행 — 배당 +2.0→**+3.0**, 단 천장이 아니라
+  탈상관을 사서(일치율 0.735→0.704, 최고 단일 17→15) — **배당 = 탈상관 ×
+  여지(headroom)**. FINDINGS open items 전부 해소.
+
+`npm run ci` green (184 tests). 전송 변경(ollama payload) 라이브 e2e 완료.
+
 ## 0.28.0 — 2026-07-18 — 구 명칭 alias 제거 (예고된 제거)
 
 ### Removed

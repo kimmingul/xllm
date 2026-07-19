@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.30.0 — 2026-07-19 — 사용법 문서: 기본/고급 온보딩 (README + Pages)
+
+### Added — docs only, 코드 변경 없음
+- **README `## 사용법` 섹션** (설치 직후 위치) — **기본 사용법**: 5분 온보딩
+  경로(doctor → setup → ask → review roles → scribe commit)를 복붙 가능한 한
+  블록으로, 스펙 문법·아티팩트 규약·호스트 스킬 트리거·read-only 기본까지.
+  **고급 사용법**: 실측이 뒷받침하는 7개 워크플로 레시피 — diff 입력, 측정
+  패널 루프(blind→--tiebreak→stats→outcome), 적대 검증의 올바른 용처(10막
+  근거: 검출은 blind, debate/council은 주장 스트레스 테스트), propose→exec
+  에스컬레이션, 라우팅 핀(setup 팩·set-role·traits), 무료 로컬 트리오
+  레시피(9막 근거, @high thinking), argv 32KB·안전 플래그 함정.
+- **GitHub Pages `Use it` 섹션** (Install 직후, nav "Use" 링크) — Basic
+  5단계 복붙 카드 + Advanced "You want → Reach for → Why (measured)" 표를
+  벤치 act 번호로 근거 표기. 라이브 배포 검증 완료.
+
+`npm run ci` green (184 tests). 런타임 표면 변경 없음.
+
 ## 0.29.0 — 2026-07-19 — ollama effort→think + 벤치 acts 9–11
 
 ### Added

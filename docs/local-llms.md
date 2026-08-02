@@ -43,6 +43,25 @@ provider[:model][@effort]
 Profiles: `.xllm/xllm-providers.toml`, legacy `.grok/` honored
 (`default_model`, `default_effort`, timeouts).
 
+### Model-name aliases
+
+Vendors retire model ids faster than xllm ships. `[aliases.<provider>]` rewrites
+a name before spawning, so you can follow a rename without waiting for a
+release. Quote the keys — model ids contain dots.
+
+```toml
+[aliases.codex]
+"gpt-5.6" = "gpt-5.6-terra"   # retarget xllm's built-in seed (sol)
+"gpt-5.5" = ""                # empty value = leave this name alone
+```
+
+Your entries win over xllm's built-in seed, which exists only to rescue names
+measured as retired (`gpt-5.6`, `grok-4`). Unknown names are never rewritten —
+xllm keeps no model roster, so anything it has no measurement for is passed
+through to the CLI untouched. If the CLI then rejects it you get an
+`unknown-model` or `account-unsupported` diagnosis with the command that lists
+what the CLI actually accepts.
+
 ## Environment
 
 | Variable | Meaning |

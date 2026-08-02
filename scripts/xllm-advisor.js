@@ -368,16 +368,46 @@ export const MODEL_ALIASES = {
 };
 
 /**
- * Apply a measured model alias. Pure: returns the name to actually spawn with
- * and, when a substitution happened, what it replaced so callers can say so.
+ * Merge the built-in seed with `[aliases.<provider>]` from xllm-providers.toml.
+ * The TOML wins, so a user can retarget an entry (`"gpt-5.6" = "gpt-5.6-terra"`)
+ * or switch one off with an empty value (`"gpt-5.6" = ""`) without waiting for
+ * an xllm release. Keys are lowercased; lookups are case-insensitive.
  */
-export function resolveModelAlias(provider, model) {
+export function resolveAliasTable(provider, profiles = null) {
+  const p = String(provider || '').toLowerCase();
+  const seed = MODEL_ALIASES[p] || {};
+  const table = {};
+  for (const [k, v] of Object.entries(seed)) table[k.toLowerCase()] = v;
+
+  const prof = profiles || loadProviderProfiles();
+  const user = (prof.aliases && prof.aliases[p]) || null;
+  if (user) {
+    for (const [k, v] of Object.entries(user)) {
+      // An empty value is an explicit "leave this name alone", not a typo —
+      // it is how you disable a seed entry the vendor has since un-retired.
+      table[String(k).toLowerCase()] = String(v ?? '');
+    }
+  }
+  return table;
+}
+
+/**
+ * Apply a measured model alias. Returns the name to actually spawn with and,
+ * when a substitution happened, what it replaced so callers can say so —
+ * plus where the correction came from, since a surprising rewrite should be
+ * traceable to either xllm's seed or the user's own TOML.
+ */
+export function resolveModelAlias(provider, model, profiles = null) {
   if (!model) return { model, aliased: null };
-  const table = MODEL_ALIASES[String(provider || '').toLowerCase()];
-  if (!table) return { model, aliased: null };
-  const to = table[String(model).trim().toLowerCase()];
+  const table = resolveAliasTable(provider, profiles);
+  const key = String(model).trim().toLowerCase();
+  const to = table[key];
   if (!to || to === model) return { model, aliased: null };
-  return { model: to, aliased: { from: model, to } };
+
+  const p = String(provider || '').toLowerCase();
+  const seedValue = MODEL_ALIASES[p]?.[key];
+  const source = seedValue === to ? 'builtin' : 'toml';
+  return { model: to, aliased: { from: model, to, source } };
 }
 
 export function parseProviderSpec(spec, profiles = null) {
@@ -406,14 +436,15 @@ export function parseProviderSpec(spec, profiles = null) {
 
   if (!PROVIDER_BINARIES[provider]) return null;
 
-  const prof = (profiles || loadProviderProfiles()).providers[provider] || {};
+  const allProfiles = profiles || loadProviderProfiles();
+  const prof = allProfiles.providers[provider] || {};
   if (!model && prof.default_model) model = String(prof.default_model);
   if (!effort && prof.default_effort) effort = String(prof.default_effort).toLowerCase();
 
   // Retired names are corrected here — the one choke point every surface
   // (ask/review/panel/debate/bench) routes specs through. The label carries the
   // corrected name so evidence records what actually ran, not what was typed.
-  const alias = resolveModelAlias(provider, model);
+  const alias = resolveModelAlias(provider, model, allProfiles);
   model = alias.model;
 
   const parts = [provider];
@@ -441,9 +472,12 @@ export function parseSimpleToml(text) {
       }
       continue;
     }
-    const kv = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
+    // Quoted keys matter here: model ids carry dots (`"gpt-5.6"`), and a bare
+    // dotted key would mean table nesting in TOML, not a literal name.
+    const kv = line.match(/^(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*=\s*(.+)$/);
     if (!kv) continue;
-    let val = kv[2].trim();
+    const key = kv[1] ?? kv[2] ?? kv[3];
+    let val = kv[4].trim();
     if (
       (val.startsWith('"') && val.endsWith('"')) ||
       (val.startsWith("'") && val.endsWith("'"))
@@ -460,7 +494,7 @@ export function parseSimpleToml(text) {
         .map((s) => s.trim().replace(/^["']|["']$/g, ''))
         .filter(Boolean);
     }
-    cursor[kv[1]] = val;
+    cursor[key] = val;
   }
   return root;
 }
@@ -531,6 +565,9 @@ export function loadProviderProfiles({ force = false } = {}) {
       // Role pins and routing overrides consumed by xllm-routing
       if (parsed.roles) merged.roles = { ...parsed.roles };
       if (parsed.routing) merged.routing = parsed.routing;
+      // [aliases.<provider>] — model-name corrections owned by the user, so a
+      // vendor rename does not have to wait for an xllm release.
+      if (parsed.aliases) merged.aliases = parsed.aliases;
       merged._loaded_from = p;
       break; // first existing wins (search order is priority)
     } catch {
@@ -565,6 +602,15 @@ const PROFILE_TEMPLATE = `# xllm provider profile (project-local)
 # [providers.<name>]     overrides: default_model, default_effort, timeout_ms,
 #                        tier (strong|balanced|local), relative_cost (0-10),
 #                        latency_class (fast|medium|slow)
+#
+# [aliases.<provider>]   rewrite retired model names before spawning. Quote the
+#                        keys — model ids contain dots. These win over xllm's
+#                        built-in seed, so you can track a vendor rename without
+#                        waiting for an xllm release. An empty value switches a
+#                        seed entry off.
+#   [aliases.codex]
+#   "gpt-5.6" = "gpt-5.6-terra"   # retarget xllm's built-in (sol)
+#   "gpt-5.5" = ""                # leave this name alone
 `;
 
 /**
@@ -2171,10 +2217,14 @@ export function runAdvisor({
   // A retired model name reaching here (direct call, or a default_model pinned
   // in xllm-providers.toml) is corrected and announced — silent substitution
   // would misattribute the evidence.
-  const modelAlias = resolveModelAlias(provider, model);
+  const modelAlias = resolveModelAlias(provider, model, profiles);
   if (modelAlias.aliased) {
+    const origin =
+      modelAlias.aliased.source === 'toml'
+        ? ' (from [aliases] in xllm-providers.toml)'
+        : '';
     console.error(
-      `[xllm] ${provider} no longer accepts '${modelAlias.aliased.from}' → using '${modelAlias.aliased.to}'`
+      `[xllm] ${provider} no longer accepts '${modelAlias.aliased.from}' → using '${modelAlias.aliased.to}'${origin}`
     );
     model = modelAlias.model;
     meta.modelAliased = modelAlias.aliased;

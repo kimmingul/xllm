@@ -9,6 +9,7 @@ import {
   getProviderMeta,
   parseProviderSpec,
   resolveModelAlias,
+  resolveAliasTable,
   agyEffortFromEffort,
   stalePinHint,
   MODEL_LIST_COMMANDS,
@@ -223,6 +224,64 @@ test('resolveSpawnConfig antigravity model', () => {
   assert.ok(c.args.includes('--model'));
   assert.ok(c.args.includes('gemini-3.6-flash-high'));
   assert.ok(c.args.includes('-p'));
+});
+
+test('parseSimpleToml reads quoted keys (model ids contain dots)', () => {
+  const t = parseSimpleToml(`
+[aliases.codex]
+"gpt-5.6" = "gpt-5.6-terra"
+'gpt-5.4' = "gpt-5.5"
+bare_key = "still works"
+`);
+  assert.strictEqual(t.aliases.codex['gpt-5.6'], 'gpt-5.6-terra');
+  assert.strictEqual(t.aliases.codex['gpt-5.4'], 'gpt-5.5');
+  assert.strictEqual(t.aliases.codex.bare_key, 'still works');
+});
+
+test('resolveAliasTable: TOML [aliases] overrides and disables the built-in seed', () => {
+  const profiles = {
+    providers: {},
+    aliases: {
+      codex: { 'gpt-5.6': 'gpt-5.6-terra' },
+      grok: { 'grok-4': '' },
+    },
+  };
+  // Retarget: user picks terra where the seed says sol.
+  const retargeted = resolveModelAlias('codex', 'gpt-5.6', profiles);
+  assert.strictEqual(retargeted.model, 'gpt-5.6-terra');
+  assert.strictEqual(retargeted.aliased.source, 'toml');
+
+  // Disable: empty value means "leave this name alone", so nothing is rewritten.
+  const disabled = resolveModelAlias('grok', 'grok-4', profiles);
+  assert.strictEqual(disabled.model, 'grok-4');
+  assert.strictEqual(disabled.aliased, null);
+
+  // Untouched seed entries still apply and are labelled as built-in.
+  const seeded = resolveModelAlias('grok', 'grok-4-latest', profiles);
+  assert.strictEqual(seeded.model, 'grok-4.5');
+  assert.strictEqual(seeded.aliased.source, 'builtin');
+
+  // A provider with no seed and no TOML entry passes through untouched.
+  assert.strictEqual(resolveModelAlias('claude', 'opus', profiles).model, 'opus');
+
+  // Lookup is case-insensitive on the requested name.
+  assert.strictEqual(resolveModelAlias('codex', 'GPT-5.6', profiles).model, 'gpt-5.6-terra');
+
+  // With no TOML aliases at all the seed is the whole table.
+  const bare = { providers: {} };
+  assert.strictEqual(resolveModelAlias('codex', 'gpt-5.6', bare).model, 'gpt-5.6-sol');
+  assert.strictEqual(resolveAliasTable('grok', bare)['grok-4'], 'grok-4.5');
+});
+
+test('parseProviderSpec honours TOML aliases over the built-in seed', () => {
+  const profiles = {
+    providers: {},
+    aliases: { codex: { 'gpt-5.6': 'gpt-5.6-luna' } },
+  };
+  const s = parseProviderSpec('codex:gpt-5.6@high', profiles);
+  assert.strictEqual(s.model, 'gpt-5.6-luna');
+  assert.strictEqual(s.spec, 'codex:gpt-5.6-luna@high');
+  assert.strictEqual(s.modelAliased.source, 'toml');
 });
 
 test('classifyFailure separates account-unsupported from unknown-model', () => {

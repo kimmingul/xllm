@@ -821,10 +821,18 @@ test('provider contracts: every provider has a contract; flags match spawn confi
   assert.ok(PROVIDER_CONTRACTS.grok.probes[0].required.includes('--reasoning-effort'));
 });
 
-test('probeProviderContract: live probe on installed ollama, missing lemonade', () => {
+test('probeProviderContract: ollama when installed, missing lemonade', () => {
+  // ollama is optional — present on dev machines, absent on CI runners. Assert
+  // the contract-satisfied path only when the binary is actually on PATH;
+  // otherwise assert the missing-binary path. Both are real assertions.
   const ollama = probeProviderContract('ollama');
-  assert.strictEqual(ollama.ok, true);
-  assert.ok(ollama.version);
+  if (resolveBinaryPath('ollama') === 'ollama') {
+    assert.strictEqual(ollama.ok, false);
+    assert.strictEqual(ollama.failure.kind, 'missing-binary');
+  } else {
+    assert.strictEqual(ollama.ok, true);
+    assert.ok(ollama.version);
+  }
   const env = { ...process.env };
   delete env.LEMONADE_BIN;
   const lemonade = probeProviderContract('lemonade', env);

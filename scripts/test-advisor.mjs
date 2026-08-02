@@ -223,6 +223,27 @@ test('resolveSpawnConfig antigravity model', () => {
   assert.ok(c.args.includes('-p'));
 });
 
+test('XLLM_ADVISOR_TIMEOUT_MS outranks the per-provider profile timeout', () => {
+  // Regression: the env var only set defaults.timeout_ms, but every built-in
+  // provider pins its own timeout_ms and resolveSpawnConfig read pconf first,
+  // so the documented override was unreachable. Measured before the fix:
+  // XLLM_ADVISOR_TIMEOUT_MS=900000 still produced timeoutMs 300000.
+  const env = { ...process.env, XLLM_ADVISOR_TIMEOUT_MS: '900000' };
+  for (const p of ['codex', 'grok', 'antigravity', 'claude']) {
+    const c = resolveSpawnConfig(p, null, 'hi', env, {});
+    assert.strictEqual(c.timeoutMs, 900000, `${p} must honour the env timeout`);
+  }
+  // An explicit call-site timeout still wins over the env var.
+  const explicit = resolveSpawnConfig('codex', null, 'hi', env, { timeoutMs: 1234 });
+  assert.strictEqual(explicit.timeoutMs, 1234);
+  // Unset/garbage env → fall back to the profile value, not NaN.
+  const clean = { ...process.env };
+  delete clean.XLLM_ADVISOR_TIMEOUT_MS;
+  assert.strictEqual(resolveSpawnConfig('codex', null, 'hi', clean, {}).timeoutMs, 300000);
+  const junk = { ...process.env, XLLM_ADVISOR_TIMEOUT_MS: 'abc' };
+  assert.strictEqual(resolveSpawnConfig('codex', null, 'hi', junk, {}).timeoutMs, 300000);
+});
+
 test('resolveSpawnConfig antigravity passes @effort through agy --effort', () => {
   // agy 1.1.9 accepts low|medium|high; xllm's wider vocabulary is clamped
   // rather than dropped (dropping it silently was the v0.30.0 behaviour).

@@ -538,11 +538,17 @@ export function loadProviderProfiles({ force = false } = {}) {
     }
   }
 
-  // env timeout override
+  // env timeout override. Setting only defaults.timeout_ms is not enough:
+  // every built-in provider carries its own timeout_ms, and resolveSpawnConfig
+  // reads pconf.timeout_ms *before* defaults — so the documented env var
+  // silently did nothing for every provider. Stamp both.
   const envTimeout = Number(
     process.env.XLLM_ADVISOR_TIMEOUT_MS || 0
   );
-  if (envTimeout > 0) merged.defaults.timeout_ms = envTimeout;
+  if (envTimeout > 0) {
+    merged.defaults.timeout_ms = envTimeout;
+    merged.defaults.env_timeout_ms = envTimeout;
+  }
 
   _profilesCache = merged;
   return merged;
@@ -788,8 +794,14 @@ export function resolveSpawnConfig(
   const codexSafety = allowMutation
     ? ['--dangerously-bypass-approvals-and-sandbox']
     : ['--sandbox', 'read-only'];
+  // Precedence: explicit call arg > XLLM_ADVISOR_TIMEOUT_MS > per-provider
+  // profile > global default. The env var has to outrank pconf, otherwise the
+  // built-in per-provider timeout_ms makes it unreachable (measured: with
+  // XLLM_ADVISOR_TIMEOUT_MS=900000 a codex dry-run still reported 300000).
+  const envTimeoutMs = Number(env.XLLM_ADVISOR_TIMEOUT_MS || 0) || null;
   const timeoutMs =
     options.timeoutMs ||
+    envTimeoutMs ||
     pconf.timeout_ms ||
     profiles.defaults.timeout_ms ||
     300000;

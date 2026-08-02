@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.31.0 — 2026-08-02 — 모델 버전 추종: 플랫폼 차단 제거, 실패 분류, 타임아웃 복구
+
+사용자 보고에서 시작: "grok은 잘 되는데 agy를 통한 gemini는 headless가 없다고
+나오고, gpt-5.6도 자주 실패한다." 원인은 모델이 아니라 xllm이 스스로 박아둔
+규칙과 빈 진단이었습니다. 전부 실측으로 진단했습니다(Windows 11, 2026-08-02).
+
+### Fixed — antigravity Windows 차단 제거 (5곳)
+
+`resolvePreferredProvider` · `pickDefaultXllmPair` · `buildInventory` ·
+`detectAvailableProviders` · doctor 가 모두 "antigravity는 Windows에서 헤드리스
+불가"를 전제로 gemini로 치환하고 있었습니다. 사용자가 본 "headless가 없다"는
+agy의 출력이 아니라 **이 경로가 뱉은 xllm 자신의 문자열**입니다.
+
+실측(agy 1.1.9): `--help`에 `-p/--print`, `--model`, `--effort`,
+`--print-timeout`, `--output-format` 모두 존재. 라이브 `agy -p` exit 0, 10.9s.
+규칙이 낡았을 뿐 아니라 유해했습니다 — 멀쩡한 agy를 버리고 **설치조차 안 된**
+gemini CLI로 떨어뜨려 확정 실패시켰습니다.
+
+치환 기준을 플랫폼 → **PATH 실재 여부**로 교체했습니다. agy 없으면 gemini로,
+gemini 없으면 agy로, 둘 다 있으면 요청대로. `isAvailable` 주입으로 PATH 없이
+테스트합니다.
+
+### Fixed — agy `--effort` 연결
+
+agy 1.1.9가 `--effort(low|medium|high)`를 추가했는데 xllm은 "전용 플래그 없음"
+으로 판단해 `@effort`를 조용히 버리고 있었습니다. 넓은 어휘를 세 단계로 클램프해
+전달합니다(none/minimal/low→low, high/xhigh/max/ultra→high). 계약 프로브의
+`required`에도 추가해 드리프트를 잡습니다.
+
+### Fixed — `XLLM_ADVISOR_TIMEOUT_MS`가 무효였던 문제
+
+문서화된 환경변수가 **어떤 프로바이더에도 도달하지 못했습니다**.
+`loadProviderProfiles`는 `defaults.timeout_ms`만 덮어쓰는데 `resolveSpawnConfig`는
+`options.timeoutMs || pconf.timeout_ms || defaults.timeout_ms` 순으로 읽고, 모든
+빌트인 프로바이더가 자기 `timeout_ms: 300000`을 명시하고 있어 defaults까지
+내려가지 않았습니다. 실측: `=900000` 설정 후에도 dry-run이 `300000` 보고.
+우선순위를 **명시 인자 > env > 프로바이더 프로필 > 전역 기본**으로 정정.
+
+적대 리뷰를 돌리다 codex@high가 300초에 두 번 잘려 발견됐습니다.
+
+### Added — 실패 분류에 `unknown-model` / `account-unsupported` 신설
+
+기존 6종(`missing-binary/timeout/auth/transient/permanent/ok`)에서는 잘못된
+모델명과 계정 거부가 **모두 `permanent`로 뭉개져**, 다음 명령에서 고칠 수 있는
+실패와 진짜 하드 실패를 구분할 수 없었습니다.
+
+- `unknown-model` — CLI가 모델 id 자체를 모름. 실측: grok이 `grok-4`에
+  "Invalid params: unknown model id"
+- `account-unsupported` — 이름은 존재하나 이 계정/플랜이 못 씀. 실측: codex가
+  `gpt-5.6`에 HTTP 400 "not supported when using Codex with a ChatGPT account".
+  **모델 품질 실패가 아니라 권한 실패**이므로 모델에 귀속되면 안 됩니다.
+
+**검사 순서가 중요합니다.** 계정 거부 메시지는 "model … is not supported"를
+포함하고 codex는 같은 출력에 "Model metadata … not found"까지 함께 냅니다 — 한
+응답이 두 패턴에 모두 걸립니다. 계정 검사를 먼저 두어 해소했고 라이브 검증했습니다.
+
+낡은 핀 고지(`stalePinHint`)도 추가했습니다: 실패한 모델이 정확히
+`default_model` 핀 값일 때만 출처를 밝힙니다. `MODEL_LIST_COMMANDS`는 각 CLI에
+모델 목록을 묻는 **명령만** 담습니다 — 파싱도 캐시도 하지 않습니다(그건 이름만
+다른 로스터). codex는 `codex models`가 TTY를 요구해 `codex doctor`를 가리킵니다.
+
+### Added — 은퇴한 모델명 별칭 (측량된 최소 표)
+
+`gpt-5.6`→`gpt-5.6-sol`, `grok-4`/`grok-4-latest`→`grok-4.5`.
+`parseProviderSpec` 한 지점에서 교정하고 stderr로 고지합니다. **로스터는 여전히
+하드코딩하지 않습니다** — 모르는 이름은 그대로 통과시킵니다.
+
+### Added — `docs/model-version-tracking-design.md`
+
+"모델이 1~2개월마다 바뀌는데 xllm이 못 따라간다"는 문제에 대한 codex@high ×
+grok@high **적대 리뷰 3라운드 수렴 기록**. 3안(무모델+회수 / 탐색+퍼지 /
+설정소유+힌트)을 검토해 제안자 원안이 기각됐습니다. 결정적 반박은
+`resolveCandidateKey`가 모델 없으면 bare provider 키를 만든다는 코드 사실 —
+"모델 생략"을 권장 경로로 삼으면 그 경로에서만 traits exact-key가 미스나
+bench 점프/veto가 영구 비활성됩니다. 목록 조회(B안)는 계정별 가용성에
+정보 이론적으로 무력해 기각. 두 리뷰어 모두 잔여 쟁점 "없음" 판정.
+
+### Fixed — CI
+
+`probeProviderContract` 테스트가 ollama 설치를 전제해 GitHub Actions에서 항상
+실패했습니다(v0.28.0~v0.30.0 red). PATH 존재 여부로 분기하되 양쪽 모두 실제
+단언을 유지합니다.
+
+### 검증
+
+`npm run ci` green — **191 tests**(v0.30.0 대비 +7). 계약 프로브 전원 OK.
+라이브 e2e: `gemini:gemini-3.6-flash-high@high`→agy 치환 exit 0 ·
+`codex:gpt-5.6@medium`→`gpt-5.6-sol` 교정 exit 0 · `--multi` 3종 병렬
+Failures 0 · `codex:gpt-5.6-thinking`→account-unsupported ·
+`grok:grok-3`→unknown-model · TOML 핀 실패 시 핀 출처 고지.
+
 ## 0.30.0 — 2026-07-19 — 사용법 문서: 기본/고급 온보딩 (README + Pages)
 
 ### Added — docs only, 코드 변경 없음

@@ -84,4 +84,11 @@ node scripts/xllm.mjs doctor
 
 ## Windows
 
-Prefer `codex`, `grok`, `claude`, `ollama`, `lmstudio`. Skip `antigravity` headless.
+No provider is Windows-blocked. `antigravity` (`agy`) headless was measured
+working on Windows 11 with agy 1.1.9 — xllm used to substitute it with the
+`gemini` CLI here, which broke the design lane on machines where only `agy`
+was installed. Substitution is now decided by what is on PATH, not by platform.
+
+The one real Windows constraint is argv size (~32KB): use `--prompt-file` for
+long prompts. `grok` and `gemini` pass the prompt as argv and cannot avoid it;
+`codex` and `claude` use stdin.

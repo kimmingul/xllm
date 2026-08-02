@@ -124,7 +124,7 @@ Print:
 /ask <provider> "…"
 ```
 
-- Windows: avoid antigravity headless
+- antigravity (`agy`) headless works on every platform, Windows included
 - Docs: `docs/install.md`
 
 ## Usage

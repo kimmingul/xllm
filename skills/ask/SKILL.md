@@ -40,7 +40,7 @@ env sanitization, and artifact capture.**
 provider | provider:model | provider@effort | provider:model@effort
 ```
 
-Examples: `codex@high`, `claude:opus@medium`, `gemini`, `grok:grok-4@high`,
+Examples: `codex@high`, `claude:opus@medium`, `gemini`, `grok:grok-4.5@high`,
 `ollama:qwen3.6:latest`. Profiles: `.xllm/xllm-providers.toml` (legacy
 `.grok/` honored).
 

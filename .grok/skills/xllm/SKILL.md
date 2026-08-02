@@ -20,7 +20,7 @@ If the user omits providers, use profile defaults from `.xllm/xllm-providers.tom
 | Role | Preferred | Fallback |
 |------|-----------|----------|
 | Analysis | `codex` | `claude`, `grok` |
-| Design | **`antigravity`** (over gemini) | `gemini` (esp. Windows headless) |
+| Design | **`antigravity`** (over gemini, every platform) | `gemini` (only when `agy` is absent) |
 | Mix | local + cloud when both READY | e.g. `ollama:…,codex` |
 
 Resolve advisor path like `/ask` (`.xllm/xllm-advisor-path` or legacy `.grok/` → env → `./scripts/…`).  
@@ -124,7 +124,8 @@ Same as `/ask`: `codex`, `codex@high`, `claude:opus@medium`, `antigravity`, `oll
 
 - One advisor fails → continue; note failure in synthesis.
 - All fail → explain + best-effort Grok-only analysis labeled as degraded.
-- Windows + `antigravity` → auto-fallback to `gemini` (warn once).
+- `antigravity`/`gemini` requested but its binary is absent → substitute the
+  other one and warn once. Platform is never a reason to substitute.
 
 ## Relation to other skills
 

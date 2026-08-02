@@ -66,7 +66,9 @@ export const PROVIDER_CONTRACTS = {
   antigravity: {
     binary: 'agy',
     versionArgs: ['--version'],
-    probes: [{ helpArgs: ['--help'], required: ['-p', '--model'] }],
+    // --effort landed in agy 1.1.9; xllm now spawns with it, so it is part of
+    // the surface we depend on and must drift-detect.
+    probes: [{ helpArgs: ['--help'], required: ['-p', '--model', '--effort'] }],
   },
   grok: {
     binary: 'grok',

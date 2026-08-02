@@ -8,6 +8,8 @@ import {
   getSupportedProviders,
   getProviderMeta,
   parseProviderSpec,
+  resolveModelAlias,
+  agyEffortFromEffort,
   resolveSpawnConfig,
   slugify,
   parseLMStudioResponse,
@@ -131,12 +133,12 @@ test('slugify truncates and sanitizes', () => {
 });
 
 test('resolveSpawnConfig grok model+effort (read-only default)', () => {
-  const c = resolveSpawnConfig('grok', 'grok-4', 'hi', process.env, {
+  const c = resolveSpawnConfig('grok', 'grok-4.5', 'hi', process.env, {
     effort: 'high',
   });
   assert.strictEqual(c.binary, 'grok');
   assert.ok(c.args.includes('-m'));
-  assert.ok(c.args.includes('grok-4'));
+  assert.ok(c.args.includes('grok-4.5'));
   assert.ok(c.args.includes('--reasoning-effort'));
   assert.ok(c.args.includes('high'));
   assert.ok(!c.args.includes('--always-approve'));
@@ -212,11 +214,31 @@ test('resolveSpawnConfig claude model+effort', () => {
 });
 
 test('resolveSpawnConfig antigravity model', () => {
-  const c = resolveSpawnConfig('antigravity', 'Gemini 3.5 Flash', 'hi');
+  // Model id as `agy models` reports it (probed 2026-08-02, agy 1.1.9) —
+  // the effort tier is part of the name.
+  const c = resolveSpawnConfig('antigravity', 'gemini-3.6-flash-high', 'hi');
   assert.strictEqual(c.binary, 'agy');
   assert.ok(c.args.includes('--model'));
-  assert.ok(c.args.includes('Gemini 3.5 Flash'));
+  assert.ok(c.args.includes('gemini-3.6-flash-high'));
   assert.ok(c.args.includes('-p'));
+});
+
+test('resolveSpawnConfig antigravity passes @effort through agy --effort', () => {
+  // agy 1.1.9 accepts low|medium|high; xllm's wider vocabulary is clamped
+  // rather than dropped (dropping it silently was the v0.30.0 behaviour).
+  const hi = resolveSpawnConfig('antigravity', null, 'hi', process.env, { effort: 'xhigh' });
+  assert.ok(hi.args.includes('--effort'));
+  assert.strictEqual(hi.args[hi.args.indexOf('--effort') + 1], 'high');
+
+  const lo = resolveSpawnConfig('antigravity', null, 'hi', process.env, { effort: 'minimal' });
+  assert.strictEqual(lo.args[lo.args.indexOf('--effort') + 1], 'low');
+
+  // No effort requested → no flag at all.
+  const none = resolveSpawnConfig('antigravity', null, 'hi', process.env, {});
+  assert.ok(!none.args.includes('--effort'));
+
+  assert.strictEqual(agyEffortFromEffort('medium'), 'medium');
+  assert.strictEqual(agyEffortFromEffort(''), null);
 });
 
 test('resolveSpawnConfig ollama uses the HTTP API with a stdin payload (v0.20.0)', () => {
@@ -373,20 +395,77 @@ test('pickDefaultXllmPair prefers antigravity when ready', () => {
     ['ollama']
   );
   assert.ok(pair.includes('codex') || pair.includes('ollama'));
-  // design side should prefer antigravity over gemini when not Windows-blocked
-  if (process.platform !== 'win32') {
-    assert.ok(pair.includes('antigravity'));
-  }
+  // design side prefers antigravity over gemini on every platform — the
+  // Windows carve-out was removed once agy headless was measured working.
+  assert.ok(pair.includes('antigravity'));
 });
 
-test('resolvePreferredProvider windows antigravity fallback', () => {
-  const r = resolvePreferredProvider('antigravity');
-  if (process.platform === 'win32') {
-    assert.strictEqual(r.provider, 'gemini');
-    assert.ok(r.substituted);
-  } else {
-    assert.strictEqual(r.provider, 'antigravity');
+test('resolvePreferredProvider substitutes on missing binary, never on platform', () => {
+  const has = (installed) => (bin) => installed.includes(bin);
+
+  // Both installed → each name is honoured as typed, on any platform.
+  const both = has(['agy', 'gemini']);
+  assert.strictEqual(
+    resolvePreferredProvider('antigravity', null, { isAvailable: both }).provider,
+    'antigravity'
+  );
+  assert.strictEqual(
+    resolvePreferredProvider('gemini', null, { isAvailable: both }).provider,
+    'gemini'
+  );
+
+  // gemini CLI absent, agy present → gemini work routes to agy. This is the
+  // case that was broken through v0.30.0: it substituted the other direction
+  // on Windows and landed on a binary that was not installed.
+  const agyOnly = resolvePreferredProvider('gemini', null, { isAvailable: has(['agy']) });
+  assert.strictEqual(agyOnly.provider, 'antigravity');
+  assert.ok(agyOnly.substituted);
+  assert.strictEqual(agyOnly.from, 'gemini');
+
+  // agy absent, gemini present → the standalone CLI still carries the lane.
+  const geminiOnly = resolvePreferredProvider('antigravity', null, {
+    isAvailable: has(['gemini']),
+  });
+  assert.strictEqual(geminiOnly.provider, 'gemini');
+  assert.ok(geminiOnly.substituted);
+
+  // Neither installed → nothing to substitute to; report the name as asked.
+  const none = resolvePreferredProvider('antigravity', null, { isAvailable: () => false });
+  assert.strictEqual(none.provider, 'antigravity');
+  assert.ok(!none.substituted);
+});
+
+test('resolveModelAlias corrects retired names, passes unknown ones through', () => {
+  // Measured 2026-08-02: bare gpt-5.6 is rejected with HTTP 400 by codex 0.146.0.
+  assert.strictEqual(resolveModelAlias('codex', 'gpt-5.6').model, 'gpt-5.6-sol');
+  assert.strictEqual(resolveModelAlias('codex', 'gpt-5.6').aliased.from, 'gpt-5.6');
+  assert.strictEqual(resolveModelAlias('grok', 'grok-4').model, 'grok-4.5');
+
+  // Shipping names and names xllm has no opinion about are untouched — xllm
+  // keeps no roster, so unknown models must pass straight through.
+  for (const [p, m] of [
+    ['codex', 'gpt-5.6-sol'],
+    ['codex', 'gpt-5.5'],
+    ['grok', 'grok-4.5'],
+    ['antigravity', 'gemini-3.6-flash-high'],
+    ['claude', 'opus'],
+    ['codex', 'some-future-model'],
+  ]) {
+    const r = resolveModelAlias(p, m);
+    assert.strictEqual(r.model, m, `${p}:${m} must pass through`);
+    assert.strictEqual(r.aliased, null);
   }
+  assert.strictEqual(resolveModelAlias('codex', null).model, null);
+});
+
+test('parseProviderSpec applies the model alias and labels the corrected name', () => {
+  const s = parseProviderSpec('codex:gpt-5.6@high');
+  assert.strictEqual(s.model, 'gpt-5.6-sol');
+  assert.strictEqual(s.spec, 'codex:gpt-5.6-sol@high');
+  assert.strictEqual(s.modelAliased.from, 'gpt-5.6');
+  const clean = parseProviderSpec('grok:grok-4.5@low');
+  assert.strictEqual(clean.model, 'grok-4.5');
+  assert.strictEqual(clean.modelAliased, null);
 });
 
 test('resolveAdvisorScriptPath finds scripts in cwd', () => {

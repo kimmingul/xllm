@@ -342,6 +342,44 @@ export function isEffortToken(s) {
  * Model may contain colons (ollama:qwen3.6:latest).
  * Effort is trailing @token when it looks like an effort level.
  */
+/**
+ * Model names that a provider CLI no longer accepts, mapped to the shipping
+ * replacement. Every entry below was probed live, not guessed — see the note
+ * on each. Keep this table small: it exists to rescue names that used to work
+ * or that read as the obvious spelling, NOT to enumerate a roster (xllm
+ * deliberately has no cloud model roster; unknown names are passed through).
+ *
+ * Probed 2026-08-02 on codex-cli 0.146.0 / grok 0.2.118:
+ * - `gpt-5.6` → HTTP 400 "The 'gpt-5.6' model is not supported when using
+ *   Codex with a ChatGPT account", plus "Model metadata not found". The
+ *   shipping variants carry a suffix; sol/terra/luna all returned exit 0.
+ *   sol is the mapping target as the general-purpose one.
+ * - `grok-4` → "Invalid params: unknown model id". `grok models` now lists
+ *   grok-4.5 only, and it is the account default.
+ */
+export const MODEL_ALIASES = {
+  codex: {
+    'gpt-5.6': 'gpt-5.6-sol',
+  },
+  grok: {
+    'grok-4': 'grok-4.5',
+    'grok-4-latest': 'grok-4.5',
+  },
+};
+
+/**
+ * Apply a measured model alias. Pure: returns the name to actually spawn with
+ * and, when a substitution happened, what it replaced so callers can say so.
+ */
+export function resolveModelAlias(provider, model) {
+  if (!model) return { model, aliased: null };
+  const table = MODEL_ALIASES[String(provider || '').toLowerCase()];
+  if (!table) return { model, aliased: null };
+  const to = table[String(model).trim().toLowerCase()];
+  if (!to || to === model) return { model, aliased: null };
+  return { model: to, aliased: { from: model, to } };
+}
+
 export function parseProviderSpec(spec, profiles = null) {
   let raw = String(spec || '').trim();
   if (!raw) return null;
@@ -372,11 +410,17 @@ export function parseProviderSpec(spec, profiles = null) {
   if (!model && prof.default_model) model = String(prof.default_model);
   if (!effort && prof.default_effort) effort = String(prof.default_effort).toLowerCase();
 
+  // Retired names are corrected here — the one choke point every surface
+  // (ask/review/panel/debate/bench) routes specs through. The label carries the
+  // corrected name so evidence records what actually ran, not what was typed.
+  const alias = resolveModelAlias(provider, model);
+  model = alias.model;
+
   const parts = [provider];
   if (model) parts[0] = `${provider}:${model}`;
   const label = effort ? `${parts[0]}@${effort}` : parts[0];
 
-  return { provider, model, effort, spec: label };
+  return { provider, model, effort, spec: label, modelAliased: alias.aliased };
 }
 
 /** Minimal TOML subset reader (tables + string/number/bool/string-array). */
@@ -659,19 +703,40 @@ export function applySetupPlan(plan, { inventory, apply = false, root = process.
 }
 
 /**
- * Prefer antigravity over gemini. On Windows headless, fall back to design_fallback.
+ * Prefer antigravity (agy) for the Gemini family; use the standalone gemini CLI
+ * only when agy is not installed. Substitution is driven by what is actually on
+ * PATH — never by platform.
+ *
+ * Through v0.30.0 this substituted antigravity → gemini on Windows
+ * unconditionally, on the belief that agy had no headless mode. Measured
+ * 2026-08-02 on Windows 11 with agy 1.1.9: `--help` exposes -p/--print,
+ * --model, --effort, --print-timeout and --output-format, and a live
+ * `agy -p` returned clean output with exit 0 in 10.9s. The rule was not just
+ * stale but harmful — it redirected working agy calls onto a gemini CLI that
+ * is frequently not installed at all, so the design lane failed outright.
+ *
+ * opts.isAvailable is injectable so this stays testable without touching PATH.
  */
-export function resolvePreferredProvider(name, profiles = null) {
+export function resolvePreferredProvider(name, profiles = null, opts = {}) {
   const prof = profiles || loadProviderProfiles();
-  let p = String(name || '').toLowerCase();
-  if (p === 'antigravity' && IS_WINDOWS) {
-    const fb = (prof.defaults.design_fallback || 'gemini').toLowerCase();
-    return {
-      provider: fb,
-      substituted: true,
-      from: 'antigravity',
-      reason: 'antigravity headless blocked on Windows',
-    };
+  const p = String(name || '').toLowerCase();
+  const onPath = opts.isAvailable || ((bin) => binaryOnPath(bin));
+
+  const design = (prof.defaults.design_provider || 'antigravity').toLowerCase();
+  const fallback = (prof.defaults.design_fallback || 'gemini').toLowerCase();
+  let sibling = null;
+  if (p === design) sibling = fallback;
+  else if (p === fallback) sibling = design;
+
+  if (sibling && PROVIDER_BINARIES[p] && PROVIDER_BINARIES[sibling]) {
+    if (!onPath(PROVIDER_BINARIES[p]) && onPath(PROVIDER_BINARIES[sibling])) {
+      return {
+        provider: sibling,
+        substituted: true,
+        from: p,
+        reason: `${PROVIDER_BINARIES[p]} not on PATH; ${PROVIDER_BINARIES[sibling]} is`,
+      };
+    }
   }
   return { provider: p, substituted: false };
 }
@@ -685,8 +750,8 @@ export function pickDefaultXllmPair(readyCloud = [], readyLocal = [], profiles =
   const ready = new Set([...(readyCloud || []), ...(readyLocal || [])]);
   const prefer = (candidates) => candidates.find((c) => ready.has(c));
 
-  // Design side: antigravity first, then gemini, then anything cloud
-  if (design === 'antigravity' && IS_WINDOWS) design = designFb;
+  // Design side: antigravity first, then gemini, then anything cloud.
+  // `ready` already reflects which binaries exist, so no platform rule here.
   const designPick =
     prefer([design, designFb, 'antigravity', 'gemini', 'grok', 'claude']) || null;
 
@@ -821,8 +886,12 @@ export function resolveSpawnConfig(
       };
     }
     case 'antigravity': {
+      // This case assembles argv directly (it does not route through
+      // withModelEffort), so the --effort flag has to be pushed here too.
       const args = allowMutation ? ['--dangerously-skip-permissions'] : [];
       if (resolvedModel) args.push('--model', resolvedModel);
+      const agyEffort = agyEffortFromEffort(effort);
+      if (agyEffort) args.push('--effort', agyEffort);
       args.push('-p', prompt);
       return {
         binary: 'agy',
@@ -973,6 +1042,19 @@ export function resolveSpawnConfig(
   }
 }
 
+/**
+ * Clamp xllm's effort vocabulary onto the three tiers agy accepts.
+ * Returns null when there is nothing to pass.
+ */
+export function agyEffortFromEffort(effort) {
+  const e = String(effort || '').trim().toLowerCase();
+  if (!e) return null;
+  if (e === 'none' || e === 'minimal' || e === 'low') return 'low';
+  if (e === 'medium') return 'medium';
+  if (e === 'high' || e === 'xhigh' || e === 'max' || e === 'ultra') return 'high';
+  return null;
+}
+
 function appendModelEffortFlags(provider, args, model, effort, pconf) {
   if (model) {
     switch (provider) {
@@ -1019,11 +1101,15 @@ function appendModelEffortFlags(provider, args, model, effort, pconf) {
     case 'grok':
       args.push('--reasoning-effort', effort);
       break;
-    case 'antigravity':
-      // agy models list shows High/Medium/Low as part of model name often;
-      // if effort alone, try --model suffix only when no model set is already handled.
-      // No dedicated effort flag in help — skip unless model embeds it.
+    case 'antigravity': {
+      // agy 1.1.9 does expose a dedicated flag: `--effort low|medium|high`
+      // (measured 2026-08-02 — earlier xllm believed there was none and
+      // dropped @effort silently). Model ids also embed a tier
+      // (gemini-3.6-flash-high); the flag is accepted alongside one.
+      const agy = agyEffortFromEffort(effort);
+      if (agy) args.push('--effort', agy);
       break;
+    }
     case 'gemini':
       // unknown dedicated flag; skip
       break;
@@ -1793,10 +1879,6 @@ export function buildInventory({
         entry.healthy = entry.installed;
         if (entry.installed) entry.notes.push('binary found; auth unverified (smoke --live)');
       }
-      if (p === 'antigravity' && IS_WINDOWS) {
-        entry.healthy = false;
-        entry.notes.push('headless blocked on Windows — gemini fallback');
-      }
     }
     providers[p] = entry;
   }
@@ -1857,7 +1939,6 @@ export function detectAvailableProviders(env = process.env) {
       if (checkServerHealth('lmstudio')) out.push(p);
       continue;
     }
-    if (p === 'antigravity' && IS_WINDOWS) continue; // headless blocked
     if (!binaryOnPath(PROVIDER_BINARIES[p])) continue;
     if (p === 'ollama' && !checkServerHealth('ollama')) continue;
     out.push(p);
@@ -2007,7 +2088,7 @@ export function runAdvisor({
   const profiles = loadProviderProfiles();
   let meta = {};
 
-  // Prefer antigravity; auto-fallback on Windows
+  // Prefer antigravity (agy); fall back only when its binary is missing
   const pref = resolvePreferredProvider(provider, profiles);
   if (pref.substituted) {
     console.error(
@@ -2015,6 +2096,18 @@ export function runAdvisor({
     );
     meta = { substituted: true, from: pref.from };
     provider = pref.provider;
+  }
+
+  // A retired model name reaching here (direct call, or a default_model pinned
+  // in xllm-providers.toml) is corrected and announced — silent substitution
+  // would misattribute the evidence.
+  const modelAlias = resolveModelAlias(provider, model);
+  if (modelAlias.aliased) {
+    console.error(
+      `[xllm] ${provider} no longer accepts '${modelAlias.aliased.from}' → using '${modelAlias.aliased.to}'`
+    );
+    model = modelAlias.model;
+    meta.modelAliased = modelAlias.aliased;
   }
 
   const allowMutation = mutationAllowed(process.env, { allowWrite });
@@ -2301,12 +2394,6 @@ export function runDoctor() {
         entry.healthOk = false;
         entry.notes.push('Set LEMONADE_BIN — lemonade is unavailable without it');
       }
-    } else if (p === 'antigravity' && IS_WINDOWS) {
-      entry.binaryOk = binaryOnPath('agy');
-      entry.healthOk = false;
-      entry.notes.push(
-        'Headless blocked on Windows — auto-fallback to gemini; prefer antigravity on macOS/Linux'
-      );
     } else {
       entry.binaryOk = binaryOnPath(PROVIDER_BINARIES[p]);
       if (LOCAL_PROVIDERS.includes(p)) {
@@ -2348,15 +2435,9 @@ export function runDoctor() {
       `Suggested /xllm default (antigravity>gemini for design): ${pair.join(',')}`
     );
   }
-  if (IS_WINDOWS) {
-    report.recommendations.push(
-      'On Windows: codex, grok, claude, ollama, lmstudio; antigravity→gemini fallback'
-    );
-  } else {
-    report.recommendations.push(
-      'Prefer antigravity over gemini for design-side reviews'
-    );
-  }
+  report.recommendations.push(
+    'Design side prefers antigravity (agy) on every platform; the standalone gemini CLI is used only when agy is absent'
+  );
   report.recommendations.push(
     'Spec syntax: provider[:model][@effort]  e.g. codex@high  antigravity:model  ollama:qwen3.6:latest'
   );

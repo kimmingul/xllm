@@ -118,7 +118,7 @@ export const BUILTIN_ROLE_ROUTES = {
     notes: 'Evidence first via native tools; CLI second opinion on high',
   },
   scribe: {
-    providers: ['ollama', 'lmstudio', 'gemini', 'grok'],
+    providers: ['ollama', 'lmstudio', 'antigravity', 'grok'],
     effort: 'low',
     native_agent: null,
     prefer_native: false,

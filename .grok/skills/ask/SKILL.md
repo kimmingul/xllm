@@ -44,11 +44,12 @@ provider@effort
 provider:model@effort
 ```
 
-Examples: `codex@high`, `claude:opus@medium`, `grok:grok-4@high`,  
-`antigravity:Gemini 3.5 Flash`, `ollama:qwen3.6:latest`, `ollama:qwen3.6:latest@low`
+Examples: `codex@high`, `claude:opus@medium`, `grok:grok-4.5@high`,  
+`antigravity:gemini-3.6-flash-high`, `ollama:qwen3.6:latest`, `ollama:qwen3.6:latest@low`
 
 Profiles / defaults: `.xllm/xllm-providers.toml` (legacy `.grok/` honored)  
-(design side prefers **antigravity** over gemini; Windows auto-falls back to gemini)
+(design side prefers **antigravity** on every platform; the standalone `gemini`
+CLI is substituted in only when `agy` is not on PATH — and vice versa)
 
 ## Safety defaults
 
@@ -67,8 +68,8 @@ Profiles / defaults: `.xllm/xllm-providers.toml` (legacy `.grok/` honored)
 | Cloud | `codex` | `-m model`, effort via `-c model_reasoning_effort=` |
 | Cloud | `claude` | `--model`, `--effort` |
 | Cloud | `grok` | `-m`, `--reasoning-effort` |
-| Cloud | `antigravity` (**preferred over gemini**) | `--model` (Windows → gemini fallback) |
-| Cloud | `gemini` | `--model` (fallback when antigravity unavailable) |
+| Cloud | `antigravity` (**preferred over gemini**) | `--model`, `--effort low\|medium\|high` |
+| Cloud | `gemini` | `--model` (used only when `agy` is not installed) |
 | Cloud | `cursor` | `--model` when set |
 | Local | `ollama[:model]` | model required-ish (default from profile/env) |
 | Local | `lmstudio[:model]` | OpenAI body model + optional effort field |

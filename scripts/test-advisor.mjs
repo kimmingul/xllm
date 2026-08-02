@@ -226,6 +226,48 @@ test('resolveSpawnConfig antigravity model', () => {
   assert.ok(c.args.includes('-p'));
 });
 
+test('writeArtifact records requested → transmitted model and who corrected it', () => {
+  // Design F7: a corrected name must not erase what the user asked for. Before
+  // this, the artifact showed only the corrected model and the stderr notice
+  // was ephemeral, so evidence attributed the run to a model never chosen.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xllm-f7-'));
+  const prev = process.cwd();
+  try {
+    process.chdir(dir);
+    const p = writeArtifact({
+      provider: 'codex',
+      model: 'gpt-5.6-sol',
+      effort: 'high',
+      original: 'task',
+      finalPrompt: 'task',
+      raw: 'done',
+      exitCode: 0,
+      meta: { modelAliased: { from: 'gpt-5.6', to: 'gpt-5.6-sol', source: 'builtin' } },
+    });
+    const text = fs.readFileSync(p, 'utf8');
+    assert.match(text, /- Requested model: gpt-5\.6$/m);
+    assert.match(text, /- Transmitted model: gpt-5\.6-sol$/m);
+    assert.match(text, /- Model correction source: builtin$/m);
+
+    // No correction → none of the three lines appear (no noise on the common case).
+    const clean = writeArtifact({
+      provider: 'codex',
+      model: 'gpt-5.5',
+      original: 'task2',
+      finalPrompt: 'task2',
+      raw: 'done',
+      exitCode: 0,
+      meta: {},
+    });
+    const cleanText = fs.readFileSync(clean, 'utf8');
+    assert.ok(!/Requested model/.test(cleanText));
+    assert.ok(!/Model correction source/.test(cleanText));
+  } finally {
+    process.chdir(prev);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('parseSimpleToml reads quoted keys (model ids contain dots)', () => {
   const t = parseSimpleToml(`
 [aliases.codex]
@@ -260,6 +302,15 @@ test('resolveAliasTable: TOML [aliases] overrides and disables the built-in seed
   const seeded = resolveModelAlias('grok', 'grok-4-latest', profiles);
   assert.strictEqual(seeded.model, 'grok-4.5');
   assert.strictEqual(seeded.aliased.source, 'builtin');
+
+  // Provenance follows who owns the key, not whether the value matches the
+  // seed: a user who pins the same mapping still decided it, and the notice
+  // must point at their file rather than blaming xllm's built-in table.
+  const sameValue = {
+    providers: {},
+    aliases: { grok: { 'grok-4': 'grok-4.5' } },
+  };
+  assert.strictEqual(resolveModelAlias('grok', 'grok-4', sameValue).aliased.source, 'toml');
 
   // A provider with no seed and no TOML entry passes through untouched.
   assert.strictEqual(resolveModelAlias('claude', 'opus', profiles).model, 'opus');

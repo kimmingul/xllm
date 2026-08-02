@@ -399,15 +399,20 @@ export function resolveAliasTable(provider, profiles = null) {
  */
 export function resolveModelAlias(provider, model, profiles = null) {
   if (!model) return { model, aliased: null };
-  const table = resolveAliasTable(provider, profiles);
+  const prof = profiles || loadProviderProfiles();
+  const table = resolveAliasTable(provider, prof);
   const key = String(model).trim().toLowerCase();
   const to = table[key];
   if (!to || to === model) return { model, aliased: null };
 
+  // Provenance is about who *owns* the entry, not whether the value happens to
+  // match the seed: a user who pins the same mapping still decided it, and the
+  // notice should point them at their own file.
   const p = String(provider || '').toLowerCase();
-  const seedValue = MODEL_ALIASES[p]?.[key];
-  const source = seedValue === to ? 'builtin' : 'toml';
-  return { model: to, aliased: { from: model, to, source } };
+  const userTable = (prof.aliases && prof.aliases[p]) || null;
+  const ownedByUser =
+    !!userTable && Object.keys(userTable).some((k) => String(k).toLowerCase() === key);
+  return { model: to, aliased: { from: model, to, source: ownedByUser ? 'toml' : 'builtin' } };
 }
 
 export function parseProviderSpec(spec, profiles = null) {
@@ -1382,6 +1387,14 @@ export function writeArtifact({
     '',
     `- Provider: ${provider}`,
     model ? `- Model: ${model}` : null,
+    // A corrected name must not erase what was asked for: the evidence has to
+    // show requested → transmitted and who decided, or a reader attributes the
+    // run to a model the user never chose.
+    meta.modelAliased ? `- Requested model: ${meta.modelAliased.from}` : null,
+    meta.modelAliased ? `- Transmitted model: ${meta.modelAliased.to}` : null,
+    meta.modelAliased
+      ? `- Model correction source: ${meta.modelAliased.source || 'builtin'}`
+      : null,
     effort ? `- Effort: ${effort}` : null,
     `- Exit code: ${exitCode}`,
     durationMs != null ? `- Duration ms: ${durationMs}` : null,
@@ -2200,6 +2213,10 @@ export function runAdvisor({
   noArtifacts = false,
   propose = false,
   quiet = false,
+  // Callers that went through parseProviderSpec have already had the name
+  // corrected, so runAdvisor's own alias lookup sees nothing to do. Without
+  // this hand-off the correction would be invisible on every real path.
+  modelAliased = null,
 }) {
   const profiles = loadProviderProfiles();
   let meta = {};
@@ -2218,16 +2235,19 @@ export function runAdvisor({
   // in xllm-providers.toml) is corrected and announced — silent substitution
   // would misattribute the evidence.
   const modelAlias = resolveModelAlias(provider, model, profiles);
-  if (modelAlias.aliased) {
+  if (modelAlias.aliased) model = modelAlias.model;
+  // Either the caller corrected it (spec path) or we just did (direct call /
+  // TOML pin). Announce exactly once, and carry it into the evidence.
+  const correction = modelAliased || modelAlias.aliased;
+  if (correction) {
     const origin =
-      modelAlias.aliased.source === 'toml'
+      correction.source === 'toml'
         ? ' (from [aliases] in xllm-providers.toml)'
         : '';
     console.error(
-      `[xllm] ${provider} no longer accepts '${modelAlias.aliased.from}' → using '${modelAlias.aliased.to}'${origin}`
+      `[xllm] ${provider} no longer accepts '${correction.from}' → using '${correction.to}'${origin}`
     );
-    model = modelAlias.model;
-    meta.modelAliased = modelAlias.aliased;
+    meta.modelAliased = correction;
   }
 
   const allowMutation = mutationAllowed(process.env, { allowWrite });
@@ -2286,6 +2306,7 @@ export function runAdvisor({
           mutation: allowMutation,
           unavailable: cfg.unavailable || false,
           substituted: meta.substituted || false,
+          modelAliased: meta.modelAliased || null,
         },
         null,
         2
@@ -2737,7 +2758,10 @@ function parseArgs(argv) {
         console.error(`Unknown provider: ${s}`);
         process.exit(1);
       }
-      return p;
+      // Children re-parse and re-correct on their own. Hand them the string the
+      // user typed, not p.spec — p.spec already carries the corrected name, so
+      // passing it down would hide the correction from the child's evidence.
+      return { ...p, rawSpec: s };
     });
     return { mode: 'multi', providers, prompt, diffOpts: dr.diffOpts, flags };
   }
@@ -2880,6 +2904,7 @@ async function main() {
       dryRun: true,
       allowWrite: parsed.flags.allowWrite,
       propose: parsed.flags.propose,
+      modelAliased: parsed.modelAliased,
     });
     process.exit(0);
   }
@@ -2927,7 +2952,7 @@ async function main() {
         console.error(`[multi] running ${p.spec}...`);
         const child = spawn(
           process.execPath,
-          [self, ...childFlags, p.spec, ...childPromptArgs],
+          [self, ...childFlags, p.rawSpec || p.spec, ...childPromptArgs],
           { env: process.env, windowsHide: true }
         );
         let out = '';
@@ -2987,6 +3012,7 @@ async function main() {
     allowSelf: parsed.flags.allowSelf,
     noArtifacts: parsed.flags.noArtifacts,
     propose: parsed.flags.propose,
+    modelAliased: parsed.modelAliased,
   });
   process.exit(result.exitCode === 0 ? 0 : result.exitCode || 1);
 }

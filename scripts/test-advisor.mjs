@@ -10,6 +10,8 @@ import {
   parseProviderSpec,
   resolveModelAlias,
   agyEffortFromEffort,
+  stalePinHint,
+  MODEL_LIST_COMMANDS,
   resolveSpawnConfig,
   slugify,
   parseLMStudioResponse,
@@ -221,6 +223,58 @@ test('resolveSpawnConfig antigravity model', () => {
   assert.ok(c.args.includes('--model'));
   assert.ok(c.args.includes('gemini-3.6-flash-high'));
   assert.ok(c.args.includes('-p'));
+});
+
+test('classifyFailure separates account-unsupported from unknown-model', () => {
+  // Verbatim stderr captured from the live CLIs on 2026-08-02. Before this
+  // split both collapsed to `permanent`, so a fixable model-name mistake was
+  // indistinguishable from a real hard failure.
+  const codexAccount = classifyFailure({
+    status: 1,
+    stderr:
+      'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5.6\' model is not supported when using Codex with a ChatGPT account."}}',
+  });
+  assert.strictEqual(codexAccount.kind, 'account-unsupported');
+  assert.strictEqual(codexAccount.retryable, false);
+
+  const grokUnknown = classifyFailure({
+    status: 1,
+    stderr: 'Couldn\'t set model \'grok-4\': Invalid params: "unknown model id". Run \'grok models\' to see available models.',
+  });
+  assert.strictEqual(grokUnknown.kind, 'unknown-model');
+  assert.strictEqual(grokUnknown.retryable, false);
+
+  // The account message also contains "model … is not supported"; if the
+  // unknown-model test ran first it would swallow this case. Guard the order.
+  assert.notStrictEqual(codexAccount.kind, 'unknown-model');
+
+  // Neither may fire on success, and the existing taxonomy must be untouched.
+  assert.strictEqual(classifyFailure({ status: 0, stderr: 'unknown model id' }).kind, 'ok');
+  assert.strictEqual(classifyFailure({ status: 1, stderr: '429 rate limit' }).kind, 'transient');
+  assert.strictEqual(classifyFailure({ status: 1, stderr: '401 unauthorized' }).kind, 'auth');
+  assert.strictEqual(classifyFailure({ status: 1, stderr: 'segfault' }).kind, 'permanent');
+});
+
+test('stalePinHint names the TOML pin only when the pin is what failed', () => {
+  const profiles = { providers: { grok: { default_model: 'grok-4' }, codex: {} } };
+  // Model failed and it is exactly the pinned value → disclose the pin.
+  assert.match(stalePinHint('grok', 'grok-4', profiles), /default_model in xllm-providers\.toml/);
+  // Model came from the command line and differs from the pin → stay quiet.
+  assert.strictEqual(stalePinHint('grok', 'grok-9', profiles), null);
+  // No pin configured → nothing to disclose.
+  assert.strictEqual(stalePinHint('codex', 'gpt-5.6', profiles), null);
+  assert.strictEqual(stalePinHint('claude', 'opus', profiles), null);
+  // Model unresolved but a pin exists → the pin is the only candidate.
+  assert.match(stalePinHint('grok', null, profiles), /grok-4/);
+});
+
+test('MODEL_LIST_COMMANDS covers the providers that can report their models', () => {
+  // codex is deliberately pointed at `doctor`: `codex models` requires a TTY
+  // (measured: "Error: stdin is not a terminal").
+  for (const p of ['codex', 'grok', 'antigravity', 'ollama']) {
+    assert.ok(MODEL_LIST_COMMANDS[p], `${p} needs a model-list command`);
+  }
+  assert.ok(!/^codex models/.test(MODEL_LIST_COMMANDS.codex));
 });
 
 test('XLLM_ADVISOR_TIMEOUT_MS outranks the per-provider profile timeout', () => {

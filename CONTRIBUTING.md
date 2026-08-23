@@ -59,6 +59,13 @@ until `npm run ci` is green locally.
 3. `npm run ci` green; live e2e for behavior that has a runtime surface.
 4. Commit, then tag: `git tag -a vX.Y.Z -m "xllm vX.Y.Z"` and push the tag.
    Hosts install from git — the tagged commit IS the release artifact.
+5. If the release touched `docs/`, confirm the site actually rebuilt:
+   `curl -s https://kimmingul.github.io/xllm/ | grep <a phrase you just added>`.
+   A push that changes only `docs/` does not reliably trigger
+   pages-build-deployment (measured 2026-08-23: the deploy fired for the
+   previous commit, which had touched no docs, and skipped the one that did).
+   Force it with `gh api -X POST repos/kimmingul/xllm/pages/builds` and
+   re-check. Green CI says nothing about whether the site is current.
 
 ## Adding a provider
 

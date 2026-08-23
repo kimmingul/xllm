@@ -493,7 +493,7 @@ test('resolveAliasTable: TOML [aliases] overrides and disables the built-in seed
 
   // Untouched seed entries still apply and are labelled as built-in.
   const seeded = resolveModelAlias('grok', 'grok-4-latest', profiles);
-  assert.strictEqual(seeded.model, 'grok-4.5');
+  assert.strictEqual(seeded.model, 'grok-4.6');
   assert.strictEqual(seeded.aliased.source, 'builtin');
 
   // Provenance follows who owns the key, not whether the value matches the
@@ -501,7 +501,7 @@ test('resolveAliasTable: TOML [aliases] overrides and disables the built-in seed
   // must point at their file rather than blaming xllm's built-in table.
   const sameValue = {
     providers: {},
-    aliases: { grok: { 'grok-4': 'grok-4.5' } },
+    aliases: { grok: { 'grok-4': 'grok-4.6' } },
   };
   assert.strictEqual(resolveModelAlias('grok', 'grok-4', sameValue).aliased.source, 'toml');
 
@@ -514,7 +514,7 @@ test('resolveAliasTable: TOML [aliases] overrides and disables the built-in seed
   // With no TOML aliases at all the seed is the whole table.
   const bare = { providers: {} };
   assert.strictEqual(resolveModelAlias('codex', 'gpt-5.6', bare).model, 'gpt-5.6-sol');
-  assert.strictEqual(resolveAliasTable('grok', bare)['grok-4'], 'grok-4.5');
+  assert.strictEqual(resolveAliasTable('grok', bare)['grok-4'], 'grok-4.6');
 });
 
 test('parseProviderSpec honours TOML aliases over the built-in seed', () => {
@@ -817,14 +817,14 @@ test('resolveModelAlias corrects retired names, passes unknown ones through', ()
   // Measured 2026-08-02: bare gpt-5.6 is rejected with HTTP 400 by codex 0.146.0.
   assert.strictEqual(resolveModelAlias('codex', 'gpt-5.6').model, 'gpt-5.6-sol');
   assert.strictEqual(resolveModelAlias('codex', 'gpt-5.6').aliased.from, 'gpt-5.6');
-  assert.strictEqual(resolveModelAlias('grok', 'grok-4').model, 'grok-4.5');
+  assert.strictEqual(resolveModelAlias('grok', 'grok-4').model, 'grok-4.6');
 
   // Shipping names and names xllm has no opinion about are untouched — xllm
   // keeps no roster, so unknown models must pass straight through.
   for (const [p, m] of [
     ['codex', 'gpt-5.6-sol'],
     ['codex', 'gpt-5.5'],
-    ['grok', 'grok-4.5'],
+    ['grok', 'grok-4.5'],   // still accepted by the CLI — must pass through
     ['antigravity', 'gemini-3.6-flash-high'],
     ['claude', 'opus'],
     ['codex', 'some-future-model'],

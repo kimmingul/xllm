@@ -37,7 +37,7 @@ import {
 // Re-exported so the 8 modules that import these from here keep working.
 export { PROVIDER_BINARIES, CLOUD_PROVIDERS, LOCAL_PROVIDERS, KNOWN_EFFORTS };
 
-const VERSION = '0.35.1';
+const VERSION = '0.35.2';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 
@@ -333,16 +333,19 @@ export function isEffortToken(s) {
  *   Codex with a ChatGPT account", plus "Model metadata not found". The
  *   shipping variants carry a suffix; sol/terra/luna all returned exit 0.
  *   sol is the mapping target as the general-purpose one.
- * - `grok-4` → "Invalid params: unknown model id". `grok models` now lists
- *   grok-4.5 only, and it is the account default.
+ * - `grok-4` → "Invalid params: unknown model id". Re-measured 2026-08-23:
+ *   still rejected, and the account default moved on to grok-4.6, so the
+ *   rescue target follows. `grok-4.5` is still accepted and therefore must
+ *   NOT be aliased — rewriting a name the CLI honours would silently change
+ *   what the user asked for.
  */
 export const MODEL_ALIASES = {
   codex: {
     'gpt-5.6': 'gpt-5.6-sol',
   },
   grok: {
-    'grok-4': 'grok-4.5',
-    'grok-4-latest': 'grok-4.5',
+    'grok-4': 'grok-4.6',
+    'grok-4-latest': 'grok-4.6',
   },
 };
 

@@ -226,7 +226,7 @@ export function deriveTraitProfiles({
 
   // bench_defect_detection: newest observation per {canonical_spec, task_id}
   // (whole-file summation would let reruns manufacture n).
-  const newestCell = {}; // `${key} ${taskId}` -> {t, hits, misses}
+  const newestCell = {}; // `${key}\u0000${taskId}` -> {t, hits, misses}
   let benchFilesUsed = 0;
   for (const rep of benchReports) {
     if (!rep || typeof rep !== 'object' || !rep.single) continue;
@@ -240,7 +240,7 @@ export function deriveTraitProfiles({
       const key = canonicalSpecKey(rawSpec);
       for (const [taskId, cell] of Object.entries(s.per_task || {})) {
         if (!cell || cell.error || !Array.isArray(cell.hits)) continue;
-        const k = `${key} ${taskId}`;
+        const k = `${key}\u0000${taskId}`;
         if (!newestCell[k] || t > newestCell[k].t) {
           newestCell[k] = { t, key, taskId, hits: cell.hits, misses: cell.misses || [] };
         }

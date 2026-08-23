@@ -28,7 +28,7 @@ import { pathToFileURL, fileURLToPath } from 'url';
 import process from 'process';
 import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta, PROMPT_FILE_THRESHOLD } from './xllm-diff.js';
 
-const VERSION = '0.32.0';
+const VERSION = '0.33.0';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 
@@ -587,10 +587,7 @@ export function loadProviderProfiles({ force = false } = {}) {
   const envTimeout = Number(
     process.env.XLLM_ADVISOR_TIMEOUT_MS || 0
   );
-  if (envTimeout > 0) {
-    merged.defaults.timeout_ms = envTimeout;
-    merged.defaults.env_timeout_ms = envTimeout;
-  }
+  if (envTimeout > 0) merged.defaults.timeout_ms = envTimeout;
 
   _profilesCache = merged;
   return merged;
@@ -2217,6 +2214,13 @@ export function runAdvisor({
   // corrected, so runAdvisor's own alias lookup sees nothing to do. Without
   // this hand-off the correction would be invisible on every real path.
   modelAliased = null,
+  // Test seam. Everything above this line is decided before any process is
+  // started, but until now the spawn itself was hard-wired to spawnSync, so the
+  // whole orchestration layer — substitution notices, alias hand-off, timeout
+  // precedence — could only be checked by making real LLM calls. That is why
+  // three separate defects in it shipped silently. Injecting the spawn keeps CI
+  // free of live calls (a project rule) while covering this code.
+  spawnFn = spawnSync,
 }) {
   const profiles = loadProviderProfiles();
   let meta = {};
@@ -2383,7 +2387,7 @@ export function runAdvisor({
 
   const started = Date.now();
   // Contract floor: bounded jittered retry, transient failures only.
-  const result = withRetry(() => spawnSync(finalCommand, finalArgs, runOpts));
+  const result = withRetry(() => spawnFn(finalCommand, finalArgs, runOpts));
   const durationMs = Date.now() - started;
   if (result.attempts > 1) {
     console.error(

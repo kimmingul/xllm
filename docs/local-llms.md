@@ -83,3 +83,20 @@ node scripts/xllm.mjs inventory --refresh    # re-probe installed CLIs + pulled 
 
 **Wedged ollama server** (diagnosed live): if `ollama ps` shows nothing but calls fail with a
 cudaMalloc OOM, the server itself is wedged — restarting it is the fix, not switching models.
+
+### 아티팩트에 남는 모델 교정 기록
+
+xllm이 모델 이름을 교정하면 아티팩트 헤더에 세 줄이 추가됩니다. 교정이 없으면
+세 줄 모두 나오지 않습니다.
+
+```
+- Model: gpt-5.6-sol
+- Requested model: gpt-5.6          # 사용자가 요청한 이름
+- Transmitted model: gpt-5.6-sol    # CLI에 실제로 전달된 이름
+- Model correction source: builtin  # builtin | toml — 누가 결정했는지
+```
+
+교정된 이름만 남기면 증거가 사용자가 고른 적 없는 모델에 실행을 귀속시키게
+됩니다. `source`는 값이 아니라 **키의 소유자**로 판정합니다 — 사용자가 내장
+씨앗과 같은 값을 `[aliases]`에 지정했더라도 결정한 것은 사용자이므로 `toml`로
+기록됩니다.

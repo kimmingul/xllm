@@ -8,6 +8,7 @@ import {
   getSupportedProviders,
   getProviderMeta,
   parseProviderSpec,
+  runAdvisor,
   resolveModelAlias,
   resolveAliasTable,
   agyEffortFromEffort,
@@ -224,6 +225,127 @@ test('resolveSpawnConfig antigravity model', () => {
   assert.ok(c.args.includes('--model'));
   assert.ok(c.args.includes('gemini-3.6-flash-high'));
   assert.ok(c.args.includes('-p'));
+});
+
+// ---------------------------------------------------------------------------
+// runAdvisor orchestration (spawn injected — no live calls)
+//
+// Every defect found on 2026-08-02 lived here rather than in the pure helpers:
+// the alias notice never fired, --multi swallowed the correction, and the
+// documented timeout env var was unreachable. All three passed the unit suite
+// because nothing exercised runAdvisor. These tests close that gap.
+// ---------------------------------------------------------------------------
+
+/** Run fn while capturing console.error output. */
+function captureStderr(fn) {
+  const orig = console.error;
+  const lines = [];
+  console.error = (...a) => lines.push(a.join(" "));
+  try {
+    return { result: fn(), stderr: lines.join(String.fromCharCode(10)) };
+  } finally {
+    console.error = orig;
+  }
+}
+
+/** A spawnFn stub that records its call and returns a clean success. */
+function recordingSpawn(calls, out = "OK") {
+  return (command, args, opts) => {
+    calls.push({ command, args, opts });
+    return { status: 0, stdout: out, stderr: "", error: null };
+  };
+}
+
+test('runAdvisor announces a model correction handed over by the spec parser', () => {
+  // The spec path corrects the name before runAdvisor sees it, so its own alias
+  // lookup finds nothing. Without the modelAliased hand-off the substitution was
+  // completely silent — the v0.31.0 behaviour.
+  const calls = [];
+  const { stderr } = captureStderr(() =>
+    runAdvisor({
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      prompt: "hi",
+      noArtifacts: true,
+      quiet: true,
+      modelAliased: { from: "gpt-5.6", to: "gpt-5.6-sol", source: "builtin" },
+      spawnFn: recordingSpawn(calls),
+    })
+  );
+  assert.ok(stderr.includes("no longer accepts"), stderr);
+  assert.ok(stderr.includes("gpt-5.6-sol"), stderr);
+  assert.strictEqual(calls.length, 1);
+});
+
+test('runAdvisor names xllm-providers.toml when the correction came from there', () => {
+  const calls = [];
+  const { stderr } = captureStderr(() =>
+    runAdvisor({
+      provider: "grok",
+      model: "grok-4.5",
+      prompt: "hi",
+      noArtifacts: true,
+      quiet: true,
+      modelAliased: { from: "grok-4", to: "grok-4.5", source: "toml" },
+      spawnFn: recordingSpawn(calls),
+    })
+  );
+  assert.ok(stderr.includes("xllm-providers.toml"), stderr);
+});
+
+test('runAdvisor stays quiet about models when nothing was corrected', () => {
+  const calls = [];
+  const { stderr } = captureStderr(() =>
+    runAdvisor({
+      provider: "grok",
+      model: "grok-4.5",
+      prompt: "hi",
+      noArtifacts: true,
+      quiet: true,
+      spawnFn: recordingSpawn(calls),
+    })
+  );
+  assert.ok(!stderr.includes("no longer accepts"), stderr);
+});
+
+test('runAdvisor carries XLLM_ADVISOR_TIMEOUT_MS all the way to the spawn call', () => {
+  // resolveSpawnConfig is unit-tested for precedence, but the value still has to
+  // survive into spawnFn options — that gap is what killed codex@high at 300s
+  // while the env var claimed 900s.
+  const calls = [];
+  const prev = process.env.XLLM_ADVISOR_TIMEOUT_MS;
+  process.env.XLLM_ADVISOR_TIMEOUT_MS = "777000";
+  try {
+    loadProviderProfiles({ force: true });
+    runAdvisor({
+      provider: "codex",
+      prompt: "hi",
+      noArtifacts: true,
+      quiet: true,
+      spawnFn: recordingSpawn(calls),
+    });
+    assert.strictEqual(calls[0].opts.timeout, 777000);
+  } finally {
+    if (prev === undefined) delete process.env.XLLM_ADVISOR_TIMEOUT_MS;
+    else process.env.XLLM_ADVISOR_TIMEOUT_MS = prev;
+    loadProviderProfiles({ force: true });
+  }
+});
+
+test('runAdvisor keeps advisors read-only unless mutation is opted into', () => {
+  // The safety default the product rests on, asserted at the argv that actually
+  // reaches the process rather than at the config layer.
+  const calls = [];
+  runAdvisor({
+    provider: "codex",
+    prompt: "hi",
+    noArtifacts: true,
+    quiet: true,
+    spawnFn: recordingSpawn(calls),
+  });
+  const args = calls[0].args.join(" ");
+  assert.ok(args.includes("--sandbox read-only"), args);
+  assert.ok(!args.includes("bypass-approvals"), args);
 });
 
 test('writeArtifact records requested → transmitted model and who corrected it', () => {
@@ -1848,8 +1970,15 @@ test('inferIntensity respects explicit', () => {
   assert.strictEqual(r.source, 'explicit');
 });
 
+// Routing tests must not read the developer's own .xllm/xllm-providers.toml:
+// a role pin written by `--setup --apply` (or a stale cache from the TOML test
+// below) would silently change what these assertions exercise. An empty profile
+// yields the pure built-in routing table, which is what they mean to test.
+const ROUTING_FIXTURE = { defaults: {}, providers: {}, roles: {}, routing: {} };
+
 test('pickAdvisorForRole security uses codex high/xhigh', () => {
   const p = pickAdvisorForRole('security', {
+    profiles: ROUTING_FIXTURE,
     taskText: 'auth token rotation race',
     readyProviders: ['codex', 'ollama', 'grok', 'claude'],
     forceCli: true,
@@ -1863,6 +1992,7 @@ test('pickAdvisorForRole security uses codex high/xhigh', () => {
 
 test('pickAdvisorForRole explore prefers native', () => {
   const p = pickAdvisorForRole('explore', {
+    profiles: ROUTING_FIXTURE,
     taskText: 'map the auth module',
     readyProviders: ['ollama', 'grok'],
   });
@@ -1873,6 +2003,7 @@ test('pickAdvisorForRole explore prefers native', () => {
 
 test('pickAdvisorForRole design prefers antigravity chain', () => {
   const p = pickAdvisorForRole('design', {
+    profiles: ROUTING_FIXTURE,
     taskText: 'improve onboarding UX',
     readyProviders: ['antigravity', 'gemini', 'grok'],
     forceCli: true,
@@ -1883,6 +2014,7 @@ test('pickAdvisorForRole design prefers antigravity chain', () => {
 
 test('pickAdvisorForRole critic escalates to cloud on high', () => {
   const p = pickAdvisorForRole('critic', {
+    profiles: ROUTING_FIXTURE,
     taskText: 'security review of payment module',
     readyProviders: ['ollama', 'codex', 'grok'],
     forceCli: true,
@@ -1983,6 +2115,7 @@ test('loadProviderProfiles propagates [roles] from TOML (CLI path)', () => {
     const prof = loadProviderProfiles({ force: true });
     assert.strictEqual(prof.roles.analysis, 'gemini@low');
     const p = pickAdvisorForRole('analysis', {
+      profiles: prof,
       taskText: 'security auth payment rewrite',
       forceCli: true,
       readyProviders: ['gemini', 'codex'],
@@ -2013,6 +2146,7 @@ test('profile [roles] string spec pins provider/model/effort', () => {
 
 test('pick includes cost metadata and low intensity prefers cheap', () => {
   const p = pickAdvisorForRole('docs', {
+    profiles: ROUTING_FIXTURE,
     taskText: 'fix typo in README',
     forceCli: true,
     readyProviders: ['ollama', 'grok', 'antigravity'],
@@ -2324,7 +2458,7 @@ test('sharedBenchComparison uses exact shared {task, defect} opportunities', () 
 });
 
 test('pickAdvisorForRole: cold-start identity — empty traits change nothing', () => {
-  const opts = { taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
+  const opts = { profiles: ROUTING_FIXTURE, taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
   const before = pickAdvisorForRole('critic', opts);
   const after = pickAdvisorForRole('critic', {
     ...opts,
@@ -2337,7 +2471,7 @@ test('pickAdvisorForRole: cold-start identity — empty traits change nothing', 
 });
 
 test('pickAdvisorForRole: measured bench LCB can cross the legacy order under gates', () => {
-  const opts = { taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
+  const opts = { profiles: ROUTING_FIXTURE, taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
   const baseline = pickAdvisorForRole('critic', opts).provider;
   const other = baseline === 'grok' ? 'codex' : 'grok';
   const traits = {
@@ -2356,7 +2490,7 @@ test('pickAdvisorForRole: measured bench LCB can cross the legacy order under ga
 });
 
 test('pickAdvisorForRole: below shared-opportunity gates the measured layer is silent', () => {
-  const opts = { taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
+  const opts = { profiles: ROUTING_FIXTURE, taskText: 'find bugs', intensity: 'high', forceCli: true, readyProviders: ['codex', 'grok'] };
   const baseline = pickAdvisorForRole('critic', opts).provider;
   const other = baseline === 'grok' ? 'codex' : 'grok';
   const traits = {

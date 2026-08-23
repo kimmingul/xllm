@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.32.0** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.33.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -246,6 +246,38 @@ stdin. 안전 플래그(`--allow-write`/`--allow-self`/`--no-artifacts`)는 명�
 않는 것이 규약. 상세 플래그는 아래 [명령 레퍼런스](#명령-레퍼런스) 참고.
 
 ---
+
+
+### 모델 이름이 바뀔 때
+
+벤더는 xllm 릴리스보다 빠르게 모델을 은퇴시킵니다. 그래서 xllm은 클라우드
+모델 목록을 하드코딩하지 않습니다 — 모르는 이름은 그대로 CLI에 넘깁니다.
+
+- **모델을 생략하면** 각 CLI의 자체 기본 모델이 쓰입니다. 벤더가 최신으로
+  바꾸면 자동으로 따라갑니다.
+- **은퇴한 이름은 교정됩니다.** 실측된 소수(`gpt-5.6` → `gpt-5.6-sol`,
+  `grok-4` → `grok-4.5`)는 내장 씨앗으로, 그 외에는 프로젝트 설정에서
+  직접 지정합니다. 교정되면 stderr로 알리고 아티팩트에 요청/전송 모델을
+  모두 남깁니다.
+- **CLI가 이름을 거부하면** 왜 거부했는지 구분해 알려 줍니다 —
+  `unknown-model`(그런 모델 없음)인지 `account-unsupported`(이름은 있으나
+  이 계정/플랜이 못 씀)인지, 그리고 그 CLI에 목록을 묻는 명령까지.
+
+```toml
+# .xllm/xllm-providers.toml
+[aliases.codex]
+"gpt-5.6" = "gpt-5.6-terra"   # 내장 씨앗(sol)을 재지정
+"gpt-5.5" = ""                # 빈 값 = 교정하지 않음
+```
+
+자세한 내용은 [`docs/local-llms.md`](docs/local-llms.md).
+
+### Gemini는 Antigravity(`agy`)로도 씁니다
+
+`gemini` CLI가 없어도 Antigravity(`agy`)가 설치돼 있으면 Gemini 계열을
+그대로 쓸 수 있습니다 — xllm이 PATH에 실제로 있는 쪽으로 보냅니다
+(플랫폼이 아니라 설치 여부로 판단). 설계 배경은
+[`docs/model-version-tracking-design.md`](docs/model-version-tracking-design.md).
 
 ## 안전 모델
 

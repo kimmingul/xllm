@@ -37,7 +37,7 @@ import {
 // Re-exported so the 8 modules that import these from here keep working.
 export { PROVIDER_BINARIES, CLOUD_PROVIDERS, LOCAL_PROVIDERS, KNOWN_EFFORTS };
 
-const VERSION = '0.34.0';
+const VERSION = '0.35.0';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 
@@ -1464,7 +1464,8 @@ export function writeMultiIndex({
         ...(diffContext ? { diff_context: diffContext } : {}),
         failures: failed,
         results: results.map((r) => ({
-          spec: r.spec,
+          spec: r.executedSpec || r.spec,
+          requested_spec: r.requestedSpec || r.spec,
           exit_code: r.code,
           artifact: r.artifact || null,
           patch: r.patch || null,
@@ -1483,7 +1484,12 @@ export function writeMultiIndex({
       `# xllm multi-run index${propose ? ' (proposal mode)' : ''}`,
       '',
       `- Created at: ${new Date().toISOString()}`,
-      `- Providers: ${results.map((r) => r.spec).join(', ')}`,
+      // `Providers` reads as "what ran", so it has to BE what ran. The request
+      // is kept on its own clearly-named line, and only when it differs.
+      `- Providers: ${results.map((r) => r.executedSpec || r.spec).join(', ')}`,
+      results.some((r) => r.requestedSpec && r.executedSpec && r.requestedSpec !== r.executedSpec)
+        ? `- Requested providers: ${results.map((r) => r.requestedSpec || r.spec).join(', ')}`
+        : null,
       `- Failures: ${failed}`,
       `- Measurement: none — coverage mode; the consensus labels below are the host's synthesis, not measured agreement (use \`review blind\` for measured agreement)`,
       ...(diffContext ? [`- Code context: ${diffContext.source} (${diffContext.bytes} bytes${diffContext.truncated ? ', truncated' : ''}) — diff body not persisted`] : []),
@@ -2101,6 +2107,10 @@ export function runAdvisor({
 }) {
   const profiles = loadProviderProfiles();
   let meta = {};
+  // Snapshot the request before provider substitution or model correction
+  // rewrite these locals.
+  const requestedProvider = provider;
+  const requestedModel = model;
 
   // Prefer antigravity (agy); fall back only when its binary is missing
   const pref = resolvePreferredProvider(provider, profiles);
@@ -2383,7 +2393,20 @@ export function runAdvisor({
     console.error(`[${provider}] ${result.error.message}`);
   }
 
-  return { artifactPath, patchPath, exitCode: code, raw, durationMs };
+  // Attribution: what was asked for vs what actually ran. The index and the
+  // ledger must key off the executed values — the same agy run recorded once
+  // as `gemini:X` and once as `antigravity:X` splits the sample and makes the
+  // measured router decide on halves. `requested_*` is audit/UX only.
+  const attribution = {
+    requested_provider: requestedProvider,
+    requested_model: modelAliased ? modelAliased.from : requestedModel,
+    executed_provider: provider,
+    transmitted_model: cfg.model || null,
+    substituted_from: meta.substituted ? meta.from : null,
+    model_correction_source: meta.modelAliased ? meta.modelAliased.source : null,
+  };
+
+  return { artifactPath, patchPath, exitCode: code, raw, durationMs, attribution };
 }
 
 export function runDoctor() {
@@ -2642,7 +2665,16 @@ function parseArgs(argv) {
       // Children re-parse and re-correct on their own. Hand them the string the
       // user typed, not p.spec — p.spec already carries the corrected name, so
       // passing it down would hide the correction from the child's evidence.
-      return { ...p, rawSpec: s };
+      //
+      // The parent still needs to know what will actually run, because the
+      // index it writes is the entry point every reader (and every aggregation)
+      // starts from. Resolving here is deterministic: the child runs the same
+      // pure functions against the same PATH a moment later.
+      const executedProvider = resolvePreferredProvider(p.provider).provider;
+      const executedSpec =
+        (p.model ? executedProvider + ':' + p.model : executedProvider) +
+        (p.effort ? '@' + p.effort : '');
+      return { ...p, rawSpec: s, executedProvider, executedSpec };
     });
     return { mode: 'multi', providers, prompt, diffOpts: dr.diffOpts, flags };
   }
@@ -2828,6 +2860,8 @@ async function main() {
       }
     }
 
+    // The string the user typed, for the audit line in the index.
+    const s0 = (p) => p.rawSpec || p.spec;
     const runOne = (p) =>
       new Promise((resolve) => {
         console.error(`[multi] running ${p.spec}...`);
@@ -2844,10 +2878,10 @@ async function main() {
           process.stderr.write(d);
         });
         child.on('error', (e) =>
-          resolve({ spec: p.spec, code: 1, out: `[spawn error] ${e.message}`, err: '' })
+          resolve({ spec: p.spec, executedSpec: p.executedSpec, requestedSpec: s0(p), code: 1, out: `[spawn error] ${e.message}`, err: '' })
         );
         child.on('close', (code) =>
-          resolve({ spec: p.spec, code: code ?? 1, out: out.trim(), err: errBuf })
+          resolve({ spec: p.spec, executedSpec: p.executedSpec, requestedSpec: s0(p), code: code ?? 1, out: out.trim(), err: errBuf })
         );
       });
 
@@ -2862,7 +2896,7 @@ async function main() {
     const results = raw.map((r) => {
       const artifact = r.code === 0 && r.out ? r.out.split(/\r?\n/).pop() : null;
       const patchMatch = (r.err || '').match(/patch: (.+\.patch)/);
-      return { spec: r.spec, code: r.code, artifact, patch: patchMatch ? patchMatch[1].trim() : null, out: r.out };
+      return { spec: r.spec, executedSpec: r.executedSpec, requestedSpec: r.requestedSpec, code: r.code, artifact, patch: patchMatch ? patchMatch[1].trim() : null, out: r.out };
     });
     const failed = results.filter((r) => r.code !== 0).length;
 

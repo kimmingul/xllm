@@ -1,6 +1,6 @@
 {
   "name": "xllm",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Cross-vendor LLM advisors for Codex: ask claude, gemini, grok, cursor, or local ollama/lmstudio from inside a session and synthesize their independent opinions. Read-only by default.",
   "author": {
     "name": "xllm contributors"

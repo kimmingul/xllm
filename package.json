@@ -1,6 +1,6 @@
 {
   "name": "xllm",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "xllm — cross-vendor LLM advisors for agentic coding hosts (Claude Code, Codex, Grok Build): ask/propose/exec escalation, blind panels, adversarial debate, measured-diversity routing.",
   "type": "module",
   "license": "MIT",

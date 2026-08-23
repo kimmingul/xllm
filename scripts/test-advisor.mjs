@@ -348,6 +348,66 @@ test('runAdvisor keeps advisors read-only unless mutation is opted into', () => 
   assert.ok(!args.includes("bypass-approvals"), args);
 });
 
+test('runAdvisor returns attribution separating what was asked from what ran', () => {
+  // The measured router keys off the executed identity. Recording the request
+  // as if it were the executor splits one agy run across two keys and makes the
+  // router decide on halves — the defect this release closes.
+  const calls = [];
+  const r = runAdvisor({
+    provider: "codex",
+    model: "gpt-5.6-sol",
+    prompt: "hi",
+    noArtifacts: true,
+    quiet: true,
+    modelAliased: { from: "gpt-5.6", to: "gpt-5.6-sol", source: "builtin" },
+    spawnFn: (c, a, o) => { calls.push({ c, a, o }); return { status: 0, stdout: "OK", stderr: "" }; },
+  });
+  assert.strictEqual(r.attribution.requested_provider, "codex");
+  assert.strictEqual(r.attribution.requested_model, "gpt-5.6");
+  assert.strictEqual(r.attribution.executed_provider, "codex");
+  assert.strictEqual(r.attribution.transmitted_model, "gpt-5.6-sol");
+  assert.strictEqual(r.attribution.model_correction_source, "builtin");
+});
+
+test('runAdvisor attribution records a provider substitution as executed', () => {
+  // gemini requested, agy on PATH: the run belongs to antigravity, and the
+  // request survives only as audit metadata.
+  const calls = [];
+  const r = runAdvisor({
+    provider: "gemini",
+    prompt: "hi",
+    noArtifacts: true,
+    quiet: true,
+    spawnFn: (c, a, o) => { calls.push({ c, a, o }); return { status: 0, stdout: "OK", stderr: "" }; },
+  });
+  assert.strictEqual(r.attribution.requested_provider, "gemini");
+  if (r.attribution.executed_provider !== "gemini") {
+    assert.strictEqual(r.attribution.executed_provider, "antigravity");
+    assert.strictEqual(r.attribution.substituted_from, "gemini");
+  }
+});
+
+test('writeMultiIndex labels Providers with what ran, not what was asked', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xllm-attr-"));
+  const prev = process.cwd();
+  try {
+    process.chdir(dir);
+    const idx = writeMultiIndex({
+      prompt: "q",
+      results: [
+        { spec: "gemini:m@high", requestedSpec: "gemini:m@high", executedSpec: "antigravity:m@high", code: 0 },
+        { spec: "codex", requestedSpec: "codex", executedSpec: "codex", code: 0 },
+      ],
+    });
+    const md = fs.readFileSync(idx.mdPath || idx.path || idx, "utf8");
+    assert.ok(md.includes("- Providers: antigravity:m@high, codex"), md.slice(0, 400));
+    assert.ok(md.includes("Requested providers: gemini:m@high"), md.slice(0, 400));
+  } finally {
+    process.chdir(prev);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('writeArtifact records requested → transmitted model and who corrected it', () => {
   // Design F7: a corrected name must not erase what the user asked for. Before
   // this, the artifact showed only the corrected model and the stderr notice

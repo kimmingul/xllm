@@ -37,7 +37,7 @@ import {
 // Re-exported so the 8 modules that import these from here keep working.
 export { PROVIDER_BINARIES, CLOUD_PROVIDERS, LOCAL_PROVIDERS, KNOWN_EFFORTS };
 
-const VERSION = '0.35.3';
+const VERSION = '0.35.4';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 

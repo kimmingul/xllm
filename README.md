@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.35.2** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.35.3** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -256,7 +256,7 @@ stdin. 안전 플래그(`--allow-write`/`--allow-self`/`--no-artifacts`)는 명�
 - **모델을 생략하면** 각 CLI의 자체 기본 모델이 쓰입니다. 벤더가 최신으로
   바꾸면 자동으로 따라갑니다.
 - **은퇴한 이름은 교정됩니다.** 실측된 소수(`gpt-5.6` → `gpt-5.6-sol`,
-  `grok-4` → `grok-4.5`)는 내장 씨앗으로, 그 외에는 프로젝트 설정에서
+  `grok-4` → `grok-4.6`)는 내장 씨앗으로, 그 외에는 프로젝트 설정에서
   직접 지정합니다. 교정되면 stderr로 알리고 아티팩트에 요청/전송 모델을
   모두 남깁니다.
 - **CLI가 이름을 거부하면** 왜 거부했는지 구분해 알려 줍니다 —
@@ -267,7 +267,9 @@ stdin. 안전 플래그(`--allow-write`/`--allow-self`/`--no-artifacts`)는 명�
 # .xllm/xllm-providers.toml
 [aliases.codex]
 "gpt-5.6" = "gpt-5.6-terra"   # 내장 씨앗(sol)을 재지정
-"gpt-5.5" = ""                # 빈 값 = 교정하지 않음
+
+[aliases.grok]
+"grok-4" = ""                 # 빈 값 = 교정하지 않음 (그대로 CLI에 넘김)
 ```
 
 자세한 내용은 [`docs/local-llms.md`](docs/local-llms.md).
@@ -304,7 +306,7 @@ node <plugin-root>/scripts/xllm.mjs …      # 플러그인 설치본에서
 **공통 규약**
 
 - **스펙 문법** — `provider[:model][@effort]`. 예: `codex@high`, `claude:opus@medium`,
-  `grok:grok-4@high`, `ollama:qwen3.6:latest`. 프로젝트 프로파일: `.xllm/xllm-providers.toml`.
+  `grok:grok-4.6@high`, `ollama:qwen3.6:latest`. 프로젝트 프로파일: `.xllm/xllm-providers.toml`.
 - **출력 규약** — 실행 결과의 **마지막 stdout 줄이 아티팩트/인덱스 경로**입니다
   (`.xllm/artifacts/…`). `review`의 blind/debate/council(roles 제외) 구조화 판정은 산문보다 먼저
   `.xllm/panel-ledger.jsonl`(append-only)에 기록됩니다.

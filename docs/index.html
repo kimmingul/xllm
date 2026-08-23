@@ -293,9 +293,14 @@
         <p>No sandbox escape, no approval bypass. Same-vendor nesting refused. Host session env stripped. Secrets redacted from every artifact.</p>
       </div>
       <div class="card">
+        <div class="ico">🔄</div>
+        <h3>Model churn, absorbed</h3>
+        <p>Vendors retire model ids faster than any tool ships. Omit the model and each CLI&rsquo;s own default is used, so a new release is followed with no change here. Retired names are corrected from a small measured seed, and <code>[aliases]</code> in your project config overrides it &mdash; no waiting on an xllm release. Every correction is announced and recorded as requested vs transmitted.</p>
+      </div>
+      <div class="card">
         <div class="ico">🩺</div>
         <h3>Contract floor</h3>
-        <p>Probes each installed CLI for the flags xllm depends on and detects version drift; classifies failures; retries only transient ones.</p>
+        <p>Probes each installed CLI for the flags xllm depends on and detects version drift. Failures are classified into eight kinds &mdash; including <em>unknown-model</em> and <em>account-unsupported</em>, which look alike from the outside but need opposite fixes. Only transient ones retry.</p>
       </div>
     </div>
   </div>

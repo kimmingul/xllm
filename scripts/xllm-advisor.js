@@ -37,7 +37,7 @@ import {
 // Re-exported so the 8 modules that import these from here keep working.
 export { PROVIDER_BINARIES, CLOUD_PROVIDERS, LOCAL_PROVIDERS, KNOWN_EFFORTS };
 
-const VERSION = '0.35.0';
+const VERSION = '0.35.1';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 
@@ -1739,8 +1739,8 @@ function binaryOnPath(binary) {
   return !which.error && which.status === 0;
 }
 
-function ensureBinary(binary, { isLocal = false, optional = false } = {}) {
-  if (binaryOnPath(binary)) return true;
+function ensureBinary(binary, { isLocal = false, optional = false, isAvailable = binaryOnPath } = {}) {
+  if (isAvailable(binary)) return true;
   const msg = `[ask] Missing binary: ${binary}. Install it and ensure it is in PATH.`;
   if (isLocal || optional) {
     console.error(msg + ' (continuing)');
@@ -2104,6 +2104,11 @@ export function runAdvisor({
   // three separate defects in it shipped silently. Injecting the spawn keeps CI
   // free of live calls (a project rule) while covering this code.
   spawnFn = spawnSync,
+  // Paired with spawnFn: a stubbed spawn is useless if the PATH probe in front
+  // of it calls process.exit(1) on a machine without the CLI installed, which
+  // is exactly what CI is. Injecting the probe keeps the orchestration tests
+  // honest without pretending the binaries exist.
+  isBinaryAvailable = binaryOnPath,
 }) {
   const profiles = loadProviderProfiles();
   let meta = {};
@@ -2242,9 +2247,9 @@ export function runAdvisor({
 
   if (provider !== 'lmstudio') {
     const isLocal = LOCAL_PROVIDERS.includes(provider);
-    ensureBinary(cfg.binary, { isLocal });
+    ensureBinary(cfg.binary, { isLocal, isAvailable: isBinaryAvailable });
   } else {
-    ensureBinary(cfg.binary, { isLocal: true, optional: true });
+    ensureBinary(cfg.binary, { isLocal: true, optional: true, isAvailable: isBinaryAvailable });
   }
 
   const target = resolveSpawnTarget(cfg.binary);

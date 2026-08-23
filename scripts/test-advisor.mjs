@@ -270,6 +270,8 @@ test('runAdvisor announces a model correction handed over by the spec parser', (
       quiet: true,
       modelAliased: { from: "gpt-5.6", to: "gpt-5.6-sol", source: "builtin" },
       spawnFn: recordingSpawn(calls),
+      isBinaryAvailable: () => true,
+    isBinaryAvailable: () => true,
     })
   );
   assert.ok(stderr.includes("no longer accepts"), stderr);
@@ -288,6 +290,8 @@ test('runAdvisor names xllm-providers.toml when the correction came from there',
       quiet: true,
       modelAliased: { from: "grok-4", to: "grok-4.5", source: "toml" },
       spawnFn: recordingSpawn(calls),
+      isBinaryAvailable: () => true,
+    isBinaryAvailable: () => true,
     })
   );
   assert.ok(stderr.includes("xllm-providers.toml"), stderr);
@@ -303,6 +307,8 @@ test('runAdvisor stays quiet about models when nothing was corrected', () => {
       noArtifacts: true,
       quiet: true,
       spawnFn: recordingSpawn(calls),
+      isBinaryAvailable: () => true,
+    isBinaryAvailable: () => true,
     })
   );
   assert.ok(!stderr.includes("no longer accepts"), stderr);
@@ -323,6 +329,8 @@ test('runAdvisor carries XLLM_ADVISOR_TIMEOUT_MS all the way to the spawn call',
       noArtifacts: true,
       quiet: true,
       spawnFn: recordingSpawn(calls),
+      isBinaryAvailable: () => true,
+    isBinaryAvailable: () => true,
     });
     assert.strictEqual(calls[0].opts.timeout, 777000);
   } finally {
@@ -342,6 +350,7 @@ test('runAdvisor keeps advisors read-only unless mutation is opted into', () => 
     noArtifacts: true,
     quiet: true,
     spawnFn: recordingSpawn(calls),
+    isBinaryAvailable: () => true,
   });
   const args = calls[0].args.join(" ");
   assert.ok(args.includes("--sandbox read-only"), args);
@@ -361,6 +370,7 @@ test('runAdvisor returns attribution separating what was asked from what ran', (
     quiet: true,
     modelAliased: { from: "gpt-5.6", to: "gpt-5.6-sol", source: "builtin" },
     spawnFn: (c, a, o) => { calls.push({ c, a, o }); return { status: 0, stdout: "OK", stderr: "" }; },
+    isBinaryAvailable: () => true,
   });
   assert.strictEqual(r.attribution.requested_provider, "codex");
   assert.strictEqual(r.attribution.requested_model, "gpt-5.6");
@@ -379,6 +389,7 @@ test('runAdvisor attribution records a provider substitution as executed', () =>
     noArtifacts: true,
     quiet: true,
     spawnFn: (c, a, o) => { calls.push({ c, a, o }); return { status: 0, stdout: "OK", stderr: "" }; },
+    isBinaryAvailable: () => true,
   });
   assert.strictEqual(r.attribution.requested_provider, "gemini");
   if (r.attribution.executed_provider !== "gemini") {

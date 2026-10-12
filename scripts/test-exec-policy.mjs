@@ -469,6 +469,20 @@ test('refuses an exec root that overlaps the repository', async (t) => {
   assert.equal(adv.seen.length, 0);
 });
 
+test('refuses an exec root reached through a filesystem alias', async (t) => {
+  const h = harness(t);
+  const alias = path.join(h.execRoot, 'repo-alias');
+  fs.symlinkSync(h.repo, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const adv = advisorStub();
+  const res = await silent(() => runExec({
+    spec: 'codex', task: 'x', root: h.repo,
+    env: { XLLM_EXEC_ROOT: path.join(alias, 'clones') },
+    policyFn: ALLOW, advisorFn: adv, spawnFn: fakeSandbox().spawnFn, resolveTarget,
+  }));
+  assert.equal(res.status, 'refused');
+  assert.equal(adv.seen.length, 0);
+});
+
 // ---------------------------------------------------------------------------
 // Verification-definition drift (real git)
 // ---------------------------------------------------------------------------

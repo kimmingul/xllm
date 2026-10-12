@@ -1,6 +1,6 @@
 {
   "name": "xllm",
-  "version": "0.36.0",
+  "version": "0.36.1",
   "description": "xllm — cross-vendor LLM advisors for Grok Build. Ask one other vendor or local model, blind independent review with measured agreement, strict-identity evidence routing, isolated verified-sandbox exec, optional scribe. debate/council are experimental. Read-only by default for adapters with a verified boundary.",
   "author": {
     "name": "xllm contributors"

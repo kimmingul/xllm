@@ -106,8 +106,20 @@ function toml(s) {
   return JSON.stringify(String(s));
 }
 
+function canonicalPath(value) {
+  const absolute = path.resolve(value);
+  try {
+    return fs.realpathSync.native(absolute);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    const parent = path.dirname(absolute);
+    if (parent === absolute) return absolute;
+    return path.join(canonicalPath(parent), path.basename(absolute));
+  }
+}
+
 export function isInside(child, parent) {
-  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  const rel = path.relative(canonicalPath(parent), canonicalPath(child));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 

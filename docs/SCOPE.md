@@ -17,15 +17,16 @@ provide:
 
 | Priority | Capability | Mechanism |
 |----------|------------|-----------|
-| P0 | Single / parallel advisors | `ask`, `multi` + `scripts/xllm-advisor.js` |
+| P0 | Single / parallel advisors | `ask` (`--json` result envelope), `review roles` + `scripts/xllm-advisor.js` |
 | P0 | Local LLMs | ollama (HTTP API) / lmstudio / lemonade |
 | P0 | Reliable Windows delivery | `shell: false`, stdin payloads, `--prompt-file`, cmd-shim unwrap |
-| P0 | Review family | `panel` (blind, measured) · `debate` (adversarial, mechanical kill rules) · `council` (pipeline) |
-| P0 | Measured routing | ledger tiebreaker, trait profiles (Wilson LCB, sample gates), cost/tier routing |
-| P1 | Escalation ladder | `ask` → `propose` (diff) → `exec` (isolated clone, evidence handback) |
-| P1 | Cheap-prose lane | `scribe` (commit/PR/release notes on the cheapest healthy model) |
+| P0 | Review family | `review blind` (independent, measured — default) · `review roles` (coverage) · `review debate` / `review council` (**experimental**: benefit unproven, re-evaluation pending) |
+| P0 | Evidence-based routing | strict-identity ledger + trait profiles (Wilson LCB, sample gates); unresolved/legacy records never route; cost/tier routing |
+| P0 | Execution boundaries | verified read-only adapters only, `execution_policy` local-only (fail-closed), auth unknown until observed |
+| P1 | Escalation ladder | `ask` → `propose` (diff) → `exec` (isolated clone, verified OS sandbox, evidence handback) |
+| P1 | Cheap-prose lane (optional) | `scribe` (commit/PR/release notes on the cheapest healthy model; the diff goes to the routed provider) |
 | P1 | Health & contracts | `doctor`, `contracts` (flag drift, failure taxonomy), `smoke` |
-| P1 | Self-refuting benchmark | seeded-defect tasks + error-correlation measurement |
+| P1 | Self-refuting benchmark | `xllm bench`: seeded-defect tasks, repeats, held-out set, human adjudication, opt-in budgeted live runs |
 
 ## Out of scope (deliberate)
 
@@ -41,9 +42,10 @@ provide:
 1. `npm run ci` passes without live LLMs
 2. `--doctor` reports provider availability accurately (READY = binary/server
    responds; auth is only proven by `smoke --live`)
-3. A `multi`/`panel` run produces per-advisor artifacts + a synthesis contract
-4. Measured instruments feed real decisions: split → measured tiebreaker;
-   bench cells → trait-profile routing (see `benchmarks/FINDINGS.md`)
+3. A `review roles` run produces per-advisor artifacts + a synthesis contract; `--json` runs emit one
+   result object with full attribution
+4. Measured instruments feed real decisions only through resolved-identity evidence: split → measured
+   tiebreaker; bench cells → trait-profile routing (`benchmarks/FINDINGS.md` is historical, non-routing)
 
 ## Naming / version
 

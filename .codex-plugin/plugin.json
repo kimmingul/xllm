@@ -1,7 +1,7 @@
 {
   "name": "xllm",
-  "version": "0.35.4",
-  "description": "Cross-vendor LLM advisors for Codex: ask claude, gemini, grok, cursor, or local ollama/lmstudio from inside a session and synthesize their independent opinions. Read-only by default.",
+  "version": "0.36.0",
+  "description": "Cross-vendor LLM advisors for Codex: ask claude or a local ollama/lmstudio model, or run a blind independent review across several, from inside a session. Read-only by default on adapters whose boundary is verified; debate/council are experimental.",
   "author": {
     "name": "xllm contributors"
   },
@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "xllm",
     "shortDescription": "Cross-vendor LLM second opinions, read-only by default",
-    "longDescription": "Ask other vendors' CLIs (claude, gemini, grok, cursor) or local models (ollama, lmstudio) for independent opinions without leaving your session, then synthesize agreements and disagreements. Advisors run read-only by default and same-vendor nesting is refused.",
+    "longDescription": "Ask another vendor's CLI (claude) or local models (ollama, lmstudio) for independent opinions without leaving your session, or run a blind independent review across several and compare agreement. Advisors run read-only by default only where xllm can verify the boundary; same-vendor nesting is refused. debate/council are experimental.",
     "developerName": "xllm contributors",
     "category": "Developer Tools",
     "capabilities": [

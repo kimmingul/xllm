@@ -10,7 +10,7 @@
  */
 
 const AUTH_RE =
-  /\b(401|403 forbidden|unauthorized|not logged in|login required|please (log ?in|sign ?in)|invalid api key|api key (missing|not set)|authentication (failed|required)|credential|token expired)\b/i;
+  /\b(401|403 forbidden|unauthorized|not logged in|login required|please (log ?in|sign ?in)|invalid api key|api key (missing|not set)|authentication (failed|required)|failed to authenticate|oauth (session|token) expired|credential|token expired)\b/i;
 const TRANSIENT_RE =
   /\b(429|rate limit|too many requests|overloaded|capacity|temporar(y|ily)|try again|502 bad gateway|503|504|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang ?up|network (error|failure))\b/i;
 
@@ -39,7 +39,9 @@ export const MODEL_LIST_COMMANDS = {
   grok: 'grok models',
   antigravity: 'agy models',
   ollama: 'ollama list',
-  claude: 'claude --help       # aliases such as opus/sonnet always track the latest',
+  claude: 'claude             # use /model to see models available to this account',
+  gemini: 'gemini             # use /model to see models available to this account',
+  cursor: 'cursor-agent --list-models',
 };
 
 /**

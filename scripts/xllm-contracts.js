@@ -14,26 +14,62 @@
  *  - Opt-in live auth mini-call (--live): READY means "binary responds";
  *    only a real call proves auth.
  *
+ * Health cache (~/.xllm/contracts.json, schema 2) keeps three independent
+ * facts, each with its OWN timestamp:
+ *   providers[p]  flags/version, from the token-free probe
+ *   auth[p]       auth observation (live mini-call or a real runtime call);
+ *                 a token-free probe NEVER overwrites it, and it is dropped
+ *                 only when the CLI version or the connection/account
+ *                 context changes
+ *   safety        per-provider read-only boundary class (derived from flags)
+ * Only OBSERVED failures veto routing; "unknown" is never success.
+ *
  *   node scripts/xllm-contracts.js [--live] [--json]
  */
 
 import { spawnSync } from 'child_process';
-import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import { stripVTControlCharacters } from 'node:util';
 import process from 'process';
 import {
   getSupportedProviders,
-  resolveBinaryPath,
   resolveSpawnTarget,
   runAdvisor,
-  xllmHomeDir,
   detectHostCli,
   classifyFailure,
   withRetry,
 } from './xllm-advisor.js';
+import {
+  CONTRACTS_VERSION,
+  AUTH_TTL_MS,
+  contractsCachePath,
+  normalizeCliVersion,
+  authContextHash,
+  authObservationValidity,
+  readHealthCache,
+  writeHealthCache,
+  preserveAuthObservations,
+  authEntry,
+  recordAuthObservation,
+  recordProviderResult,
+} from './xllm-health.js';
 
 export { classifyFailure, withRetry };
+// Health-cache persistence lives in the dependency-free leaf xllm-health.js
+// (runAdvisor records auth outcomes through it without an import cycle).
+export {
+  CONTRACTS_VERSION,
+  AUTH_TTL_MS,
+  contractsCachePath,
+  normalizeCliVersion,
+  authContextHash,
+  authObservationValidity,
+  readHealthCache,
+  preserveAuthObservations,
+  recordAuthObservation,
+  recordProviderResult,
+};
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -41,61 +77,102 @@ const IS_WINDOWS = process.platform === 'win32';
  * The exact CLI surface xllm depends on, per provider. `helpArgs` is probed
  * token-free; every `required` token must appear in the help text.
  * Versioned by whatever `--version` reports at probe time.
+ *
+ * `safety.boundary` classifies the read-only boundary the flags can provide:
+ *   native-flags  the CLI exposes the vendor's own sandbox/tool-restriction
+ *                 flags (necessary, NOT sufficient: flags present ≠ verified)
+ *   unverified    no enforceable read-only boundary evidenced for this CLI
+ *   prompt-only   HTTP completion; no client tools exist to restrict
  */
 export const PROVIDER_CONTRACTS = {
   codex: {
     binary: 'codex',
     versionArgs: ['--version'],
     probes: [
-      { helpArgs: ['exec', '--help'], required: ['--sandbox', '--cd', '-c'] },
+      {
+        helpArgs: ['exec', '--help'],
+        required: [
+          '--sandbox', '--cd', '-c', '--model', '--json', '--output-schema',
+          '--ignore-user-config', '--ignore-rules', '--ephemeral',
+        ],
+      },
       { helpArgs: ['--help'], required: ['exec', 'sandbox'] },
     ],
+    safety: { boundary: 'native-flags', note: 'exec --sandbox read-only + --ignore-user-config/--ignore-rules/--ephemeral' },
   },
   claude: {
     binary: 'claude',
     versionArgs: ['--version'],
     probes: [
-      { helpArgs: ['--help'], required: ['-p', '--model', '--permission-mode'] },
+      {
+        helpArgs: ['--help'],
+        required: [
+          '-p', '--model', '--permission-mode', '--effort', '--output-format', '--json-schema',
+          '--tools', '--strict-mcp-config', '--safe-mode', '--restricted', '--permission-prompts',
+        ],
+      },
     ],
+    safety: { boundary: 'native-flags', note: '--safe-mode --restricted --tools Read,Glob,Grep --strict-mcp-config --permission-mode dontAsk' },
   },
   gemini: {
     binary: 'gemini',
     versionArgs: ['--version'],
-    probes: [{ helpArgs: ['--help'], required: ['-p', '--model'] }],
+    probes: [{ helpArgs: ['--help'], required: ['-p', '--model', '--approval-mode'] }],
+    safety: { boundary: 'unverified', note: 'no enforceable read-only boundary evidenced' },
   },
   antigravity: {
     binary: 'agy',
     versionArgs: ['--version'],
     // --effort landed in agy 1.1.9; xllm now spawns with it, so it is part of
     // the surface we depend on and must drift-detect.
-    probes: [{ helpArgs: ['--help'], required: ['-p', '--model', '--effort'] }],
+    probes: [
+      {
+        helpArgs: ['--help'],
+        required: [
+          '-p', '--model', '--effort', '--print-timeout', '--output-format', '--json-schema',
+          '--mode', '--sandbox',
+        ],
+      },
+    ],
+    safety: { boundary: 'unverified', note: '--sandbox is read-WRITE workspace; no tool allowlist' },
   },
   grok: {
     binary: 'grok',
     versionArgs: ['--version'],
     probes: [
-      { helpArgs: ['--help'], required: ['-p', '-m', '--reasoning-effort'] },
+      {
+        helpArgs: ['--help'],
+        required: [
+          '-p', '-m', '--reasoning-effort', '--prompt-file', '--tools', '--deny', '--no-subagents',
+          '--permission-mode', '--output-format', '--json-schema',
+        ],
+      },
     ],
+    safety: { boundary: 'unverified', note: 'tool controls exist but no config/hook isolation proven' },
   },
   cursor: {
     binary: 'cursor-agent',
     versionArgs: ['--version'],
-    probes: [{ helpArgs: ['--help'], required: ['--print'] }],
+    probes: [{ helpArgs: ['--help'], required: ['--print', '--model', '--mode'] }],
+    safety: { boundary: 'unverified', note: 'no enforceable read-only boundary evidenced' },
   },
   ollama: {
     binary: 'ollama',
     versionArgs: ['--version'],
     probes: [{ helpArgs: ['--help'], required: ['run', 'list'] }],
+    safety: { boundary: 'prompt-only', note: 'HTTP completion, no client tools' },
   },
   lmstudio: {
     binary: IS_WINDOWS ? 'curl.exe' : 'curl',
     versionArgs: ['--version'],
     probes: [{ helpArgs: ['--help'], required: ['-d'] }],
+    safety: { boundary: 'prompt-only', note: 'HTTP completion, no client tools' },
   },
   lemonade: {
     binary: null, // resolved from LEMONADE_BIN at probe time
     versionArgs: ['--version'],
     probes: [],
+    safety: { boundary: 'prompt-only', note: 'HTTP completion, no client tools' },
   },
 };
 
@@ -114,7 +191,23 @@ function runHelp(binary, args) {
   });
 }
 
-export function probeProviderContract(provider, env = process.env) {
+/** Match complete help tokens: --model-picker cannot satisfy --model. */
+export function helpHasToken(help, token) {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^\\w-])${escaped}(?=$|[^\\w-])`, 'm').test(stripVTControlCharacters(help));
+}
+
+function safetyReport(contract, report) {
+  const s = contract?.safety || { boundary: 'unverified', note: 'no safety contract defined' };
+  return {
+    boundary: s.boundary,
+    // Flags present is necessary, never sufficient — parent policy decides eligibility.
+    flags_present: s.boundary === 'native-flags' ? report.ok === true : null,
+    note: s.note,
+  };
+}
+
+export function probeProviderContract(provider, env = process.env, { run = runHelp } = {}) {
   const contract = PROVIDER_CONTRACTS[provider];
   if (!contract) return { provider, ok: false, error: 'no contract defined' };
 
@@ -127,37 +220,35 @@ export function probeProviderContract(provider, env = process.env) {
     missing_flags: [],
     failure: null,
     probed_at: new Date().toISOString(),
+    safety: null,
   };
+  report.safety = safetyReport(contract, report);
   if (!binary) {
     report.failure = { kind: 'missing-binary', retryable: false, hint: 'Set LEMONADE_BIN.' };
     return report;
   }
-  const resolved = resolveBinaryPath(binary);
-  if (resolved === binary && !path.isAbsolute(resolved)) {
-    // PATH scan failed; try help anyway — spawn error will classify it.
-  }
-
-  const ver = runHelp(binary, contract.versionArgs);
-  if (ver.error || (ver.status !== 0 && !(ver.stdout || ver.stderr))) {
-    report.failure = classifyFailure(ver);
+  const ver = run(binary, contract.versionArgs);
+  if (ver.error || ver.status !== 0) {
+    report.failure = classifyFailure({ ...ver, status: ver.status ?? 1 });
     return report;
   }
   report.version = (ver.stdout || ver.stderr || '').trim().split(/\r?\n/)[0].slice(0, 80);
 
   for (const probe of contract.probes) {
-    const res = runHelp(binary, probe.helpArgs);
+    const res = run(binary, probe.helpArgs);
     const help = `${res.stdout || ''}\n${res.stderr || ''}`;
-    if (res.error) {
-      report.failure = classifyFailure(res);
+    if (res.error || res.status !== 0) {
+      report.failure = classifyFailure({ ...res, status: res.status ?? 1 });
       return report;
     }
     for (const flag of probe.required) {
-      if (!help.includes(flag)) {
+      if (!helpHasToken(help, flag)) {
         report.missing_flags.push(`${probe.helpArgs.join(' ')} → ${flag}`);
       }
     }
   }
   report.ok = report.missing_flags.length === 0;
+  report.safety = safetyReport(contract, report);
   if (!report.ok) {
     report.failure = {
       kind: 'contract-drift',
@@ -193,6 +284,7 @@ export function liveAuthCheck(provider) {
     auth_verified: cls.kind === 'ok',
     failure: cls.kind === 'ok' ? null : cls,
     duration_ms: Date.now() - started,
+    cli_version: r.attribution?.cli_version ?? null,
   };
 }
 
@@ -200,14 +292,11 @@ export function liveAuthCheck(provider) {
 // Report + cache
 // ---------------------------------------------------------------------------
 
-export function contractsCachePath(env = process.env) {
-  return path.join(xllmHomeDir(env), 'contracts.json');
-}
-
 export function runContracts({ live = false, env = process.env } = {}) {
   const host = detectHostCli(env);
+  const previous = readHealthCache(env);
   const report = {
-    contracts_version: 1,
+    contracts_version: CONTRACTS_VERSION,
     probed_at: new Date().toISOString(),
     host_cli: host,
     providers: {},
@@ -221,52 +310,66 @@ export function runContracts({ live = false, env = process.env } = {}) {
       report.drift.push({ provider: p, missing: r.missing_flags });
     }
   }
+  // Token-free probe: keep earlier auth observations (own timestamps).
+  report.auth = preserveAuthObservations(previous, report.providers, env);
   if (live) {
     for (const p of CLOUD_FOR_AUTH) {
       if (!report.providers[p]?.ok) continue;
       if (host && host === p) {
-        report.auth[p] = { provider: p, auth_verified: null, skipped: 'same-vendor host' };
+        report.auth[p] = report.auth[p] || { provider: p, auth_verified: null, skipped: 'same-vendor host' };
         continue;
       }
       console.error(`[contracts] live auth check: ${p}…`);
-      report.auth[p] = liveAuthCheck(p);
+      const r = liveAuthCheck(p);
+      report.auth[p] = authEntry(p, {
+        verified: r.auth_verified,
+        failure: r.failure,
+        source: 'live',
+        cliVersion: r.cli_version ?? report.providers[p].version,
+        env,
+      });
+      report.auth[p].duration_ms = r.duration_ms;
     }
   }
-  try {
-    fs.mkdirSync(path.dirname(contractsCachePath(env)), { recursive: true });
-    fs.writeFileSync(contractsCachePath(env), JSON.stringify(report, null, 2), 'utf8');
-  } catch {
-    /* cache is best-effort */
-  }
+  writeHealthCache(report, env);
   return report;
 }
 
 function formatHuman(report) {
   const lines = [`xllm contracts — probed ${report.probed_at}`, ''];
+  const now = Date.now();
   for (const [p, r] of Object.entries(report.providers)) {
     const state = r.ok
       ? 'OK'
       : r.failure?.kind === 'contract-drift'
         ? 'DRIFT'
         : (r.failure?.kind || 'FAIL').toUpperCase();
-    const auth = report.auth[p]
-      ? report.auth[p].auth_verified === true
-        ? ' auth:verified'
-        : report.auth[p].skipped
-          ? ` auth:skipped(${report.auth[p].skipped})`
-          : ` auth:FAILED(${report.auth[p].failure?.kind})`
-      : '';
-    lines.push(
-      `  ${p.padEnd(12)} ${state.padEnd(15)} ${r.version || '-'}${auth}`
-    );
+    const a = report.auth[p];
+    let auth = '';
+    if (a) {
+      const age = a.observed_at ? Date.parse(a.observed_at) : NaN;
+      const stale = Number.isFinite(age) && now - age > AUTH_TTL_MS ? ',stale' : '';
+      const when = a.observed_at ? ` @${a.observed_at}` : '';
+      auth = a.auth_verified === true
+        ? ` auth:verified(${a.source || '?'}${stale})${when}`
+        : a.skipped
+          ? ` auth:skipped(${a.skipped})`
+          : ` auth:FAILED(${a.failure?.kind}${stale})${when}`;
+    }
+    const safety = r.safety ? ` safety:${r.safety.boundary}${r.safety.flags_present === false ? '(flags missing)' : ''}` : '';
+    lines.push(`  ${p.padEnd(12)} ${state.padEnd(15)} ${(r.version || '-').padEnd(24)}${auth}${safety}`);
     for (const m of r.missing_flags || []) lines.push(`      missing: ${m}`);
   }
   if (report.drift.length) {
     lines.push('', `⚠ contract drift on: ${report.drift.map((d) => d.provider).join(', ')}`);
   }
   if (!Object.keys(report.auth).length) {
-    lines.push('', 'Note: auth unproven — run with --live for a real per-provider auth call.');
+    lines.push('', 'Note: auth unknown — a binary that responds is not proof of login. Run with --live (or make a real call).');
   }
+  lines.push(
+    '',
+    'safety: native-flags = vendor sandbox/tool flags exist (necessary, not proof); unverified = no enforceable read-only boundary evidenced; prompt-only = HTTP, no client tools.'
+  );
   return lines.join('\n');
 }
 

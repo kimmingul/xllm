@@ -15,16 +15,28 @@ Local models are first-class advisors — same artifact contract as cloud CLIs.
 ```bash
 node scripts/xllm.mjs ask ollama:qwen3.6:latest "Review this function"
 node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "Analyze authentication changes"
-node scripts/xllm.mjs review debate ollama:llama3.2,ollama:gemma4 "Is this cache design safe under concurrency?"
+node scripts/xllm.mjs review blind ollama:llama3.2,ollama:gemma4 "Is this cache design safe under concurrency?"
 ```
 
 Or via the host skills: `/xllm:ask`, `/xllm:review` (Claude Code / Codex) · `/ask`, `/xllm`
 (Grok Build).
 
 Identity is the **model**, not the provider: two models on the same local runtime
-(`ollama:llama3.2,ollama:gemma4`) are distinct panel/debate members and refute each other.
+(`ollama:llama3.2,ollama:gemma4`) are distinct panel members (and, in the experimental
+`review debate`, refute each other).
 Tiny local models are barred from voting on judgment roles (capability floor) — they still
 serve fine as cheap critics and `scribe` writers.
+
+## Keeping everything local (`execution_policy`)
+
+Set `profile set-default execution_policy local-only` (the `local` setup pack does this) to refuse any
+provider that is not verified as running on this machine. Ollama counts as local only with a loopback
+endpoint **and** trustworthy local model metadata (digest/size, no remote markers); `:cloud` models and
+remote hosts are remote even when proxied through loopback. LM Studio / lemonade stay `unknown` — and
+therefore refused — unless local metadata can be verified. Unknown never passes and no flag bypasses it.
+Ollama and LM Studio HTTP responses report the model they ran, which can lift a result to
+`identity_status: resolved`; when the runtime reports no usable identity the result stays `unresolved` —
+shown, but never used as routing evidence.
 
 ## Spec (all providers)
 
@@ -37,7 +49,7 @@ provider[:model][@effort]
 | `ollama:qwen3.6:latest` | local model |
 | `codex@high` | cloud default model, high reasoning effort |
 | `claude:opus@medium` | model + effort |
-| `antigravity:…` | preferred design advisor (over gemini) |
+| `antigravity:…` | design advisor over gemini — only when its read-only boundary is verified (see `doctor`) |
 | `grok:…@high` | grok model + reasoning effort |
 
 Profiles: `.xllm/xllm-providers.toml`, legacy `.grok/` honored

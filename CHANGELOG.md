@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.36.0 — 2026-10-13 — 근거·격리·평가 경로 재설계 (PR1–PR7)
+
+- **PR1 — 근거:** 실행 모델·revision·effort·surface·CLI 버전으로 근거를 식별한다. 기존 원장은 보존하되 legacy·미확정 관측은 라우팅에서 제외한다. 실패한 토론 단계는 `UNRESOLVED`, 전원 실패한 패널은 비정상 종료다.
+- **PR2 — 호출 계약:** advisor 결과를 schema v2 JSON으로 통일하고 네이티브 모델·usage·cost를 기록한다. 요청한 모델을 실제 실행 모델로 추정하지 않으며 Markdown 산출물을 결과 전송 수단으로 쓰지 않는다.
+- **PR3 — 라우팅:** 모델별 로컬 실행 증거, 지속되는 `local-only` 정책, 실제 인증 상태를 pin·ready·fallback·tiebreak·실행 경로에 적용한다. `--no-traits`는 품질 근거만 끄며 인증 실패를 무시하지 않는다.
+- **PR4 — 실행 경계:** 검증하지 못한 읽기 전용 CLI는 기본 거부한다. Codex exec와 verifier는 같은 OS 권한 프로필을 사용하고, 테스트 미실행·정의 변경·격리 실패는 `green`이 될 수 없다. Windows backend를 명시하며 비격리 우회는 없다.
+- **PR5 — 리뷰:** 지원되는 네이티브 schema를 우선하고 JSON 보정은 최소화한다. diff는 파일·hunk별로 배분하고 누락·부분 노출을 manifest에 남긴다.
+- **PR6 — 평가:** 반복·paired 실행, 동일 응답의 virtual union, 최종 채택 손실, 사람의 blind adjudication, 실제 native 응답·회고 사례 import를 추가한다. 라이브 평가는 명시적 모델과 유한 호출·시간 예산이 필요하다. calibrate는 bench로 통합하고 결과 경로를 하나로 정리한다.
+- **PR7 — 제품 표면:** 기본 흐름은 host → ask → blind, scribe는 선택 사항이다. debate/council은 실험 기능으로 표시하고 자동 discipline 설치와 불필요한 설정 경로를 제거한다.
+
+검증: `npm run ci` 통과(기존 129개 + 정책·회귀 149개 테스트, offline smoke, bench selftest). 실호출에서는 Codex 네이티브 schema 응답, OS 샌드박스 내 수정·검증 `green`, 호스트 작업 트리 보존을 확인했다. 전원 실패한 blind/council의 exit 1과 실패 진단 보존, 평가 prompt hash·dry-run·예산 초과 거부도 확인했다. Claude 실호출은 OAuth 만료로 실패했으며 해당 오류의 인증 실패 분류를 회귀 검증했다. 포함된 held-out 사례는 합성 데이터이며, 실제 회고 사례 기반 모델 순위나 대규모 라이브 평가 결과를 주장하지 않는다.
+
+### 모델·CLI 호환성 갱신 (2026-09-12 작업 포함)
+
+- 공식 문서와 로컬 CLI의 버전·도움말·모델 목록을 대조한
+  [`호환성 스냅샷`](docs/current-models-and-clis.md) 추가. GPT-6 Astra,
+  Claude Fable 5.1·Opus 5·Sonnet 5, Antigravity Gemini 3.8 Flash 명시.
+  기존 모델 고정값과 측정 기반 라우팅, 과거 벤치마크 기록은 유지.
+- Gemini 쓰기 옵트인은 `--approval-mode yolo` 사용. Cursor 기본 자문에
+  `--mode ask` 명시. Antigravity의 내부 print 제한 시간에 xllm 유효 timeout 전달.
+- 계약 검사에 누락된 모델·effort·모드·prompt-file 옵션 추가. 버전·도움말 명령의
+  실패 종료를 감지하고, 부분 문자열 대신 정확한 토큰으로 옵션 확인.
+- 모델 오류 안내에 Gemini·Cursor 목록 조회 방법 추가. Claude는 계정별 `/model` 안내.
+- 회귀 테스트 추가. 테스트에서 호스트 세션 환경을 제거해 Codex 안에서도 스텁 호출이
+  동일 공급자 차단에 걸리지 않도록 수정.
+
+검증: `npm run ci` 통과(208 tests), 설치된 Codex·Claude·Antigravity·Grok 계약 검사 통과,
+Antigravity 실제 smoke 호출 exit 0 및 결과 토큰 확인. Gemini CLI·Cursor는 미설치로
+공식 문서와 회귀 테스트만 확인. 미발행 작업이며 전역 CLI 설치를 변경하지 않음.
+
 ## 0.35.4 — 2026-08-23 — 릴리스 체크리스트에 Pages 반영 확인 추가
 
 v0.35.3에서 `docs/index.html`을 바꿨는데 pages-build-deployment가 걸리지

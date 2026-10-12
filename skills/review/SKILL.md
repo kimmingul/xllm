@@ -1,18 +1,19 @@
 ---
 name: review
 description: >
-  Cross-vendor deliberation over a question or a code diff, four modes in one
-  noun: roles (parallel advisors + host synthesis), blind (measured
-  independent panel), debate (adversarial refutation), council (blind→debate
-  pipeline). Use for "get multiple opinions", cross-vendor design or security
-  review, "review this diff/branch with other vendors", or when a decision is
-  consequential and claims need stress-testing. Advisors run read-only by
-  default; nothing is auto-applied.
+  Cross-vendor review of a question or code diff. Default path is blind
+  independent review (several models answer the same prompt without seeing each
+  other; agreement is measured). Also: roles (parallel advisors, host
+  synthesis) and EXPERIMENTAL debate/council. Use for "get multiple opinions",
+  cross-vendor design or security review, "review this diff/branch with other
+  vendors". Advisors run read-only by default; nothing is auto-applied.
 ---
 
-# review — cross-vendor deliberation (xllm)
+# review — cross-vendor review (xllm)
 
-One entry point, four modes. Your host CLI synthesizes; external CLIs advise.
+Your host CLI synthesizes; external CLIs advise. Escalate by need: host alone →
+`ask` one other vendor → **blind** independent review when a measured spread is
+worth the extra calls.
 
 ## Resolve the script
 
@@ -22,48 +23,61 @@ Other hosts: `<plugin-root>/scripts/xllm-review.js` (two dirs above this SKILL.m
 ## Modes
 
 ```bash
-node <xllm-review.js> roles   p1,p2[,p3] "<prompt>"      # parallel advisors, host synthesis — NOT measured
 node <xllm-review.js> blind   p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
-node <xllm-review.js> debate  p1,p2[,p3] "<claim>"       # SURVIVED / KILLED / UNRESOLVED
-node <xllm-review.js> council p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
-node <xllm-review.js> stats                              # pairwise agreement (measured decorrelation)
+node <xllm-review.js> roles   p1,p2[,p3] "<prompt>"      # parallel advisors, host synthesis — NOT measured
+node <xllm-review.js> debate  p1,p2[,p3] "<claim>"       # EXPERIMENTAL
+node <xllm-review.js> council p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]   # EXPERIMENTAL
+node <xllm-review.js> stats                              # pairwise agreement
 node <xllm-review.js> outcome <run-id> --adopted <spec|majority|minority|none> --helpful yes|no
 ```
 
-| mode | epistemology | cost | reach for it when |
+| mode | what it gives | cost | status |
 |---|---|---|---|
-| roles | coverage — synthesis labels, **not measured** | 1× | advisors need different prompts |
-| blind | measurement — identical blind prompt, append-only ledger | ~1× | you want the measured spread |
-| debate | adversarial — decisive falsifiers kill wrong claims | ~2–3× | being wrong is expensive |
-| council | independent divergence → hostile convergence | ~3–4× | the highest-stakes calls |
+| blind | identical blind prompt, append-only ledger, measured agreement | ~1× per model | default recommendation |
+| roles | different prompts per advisor; synthesis labels are yours | 1× | coverage, **not measured** |
+| debate | adversarial refutation → SURVIVED / KILLED / UNRESOLVED | ~2–3× | **experimental** |
+| council | blind → debate pipeline | ~3–4× | **experimental** |
+
+**debate/council are experimental.** Their benefit has not been shown: the
+earlier measurements found no quality discrimination and lower recall than
+blind, and the evaluation under the current strict-identity method is still
+pending. Do not use them as the basis for a high-stakes recommendation; use
+`blind` and re-verify consequential claims yourself. A failed debate round is
+reported UNRESOLVED, never survived.
 
 ## Reviewing code
 
-Add exactly one diff source to any mode. The diff is collected
-deterministically (plain git), size-capped, sent to advisors — and never
-persisted (ledger/index record source/stat/bytes only):
-
-```bash
---staged | --base <ref> | --diff-file <path>
-```
-
-`--base <ref>` is two-dot (`git diff <ref>`): working tree vs ref, so
-uncommitted changes are included — NOT a merge-base (three-dot) branch diff.
+Add exactly one diff source to any mode: `--staged | --base <ref> | --diff-file <path>`.
+The diff is collected deterministically (plain git) and cut to a 24KB budget at
+file/hunk boundaries. Every omitted file/hunk is listed in a DIFF COVERAGE
+manifest (in md, ledger and `--json` result): relay that coverage, never
+claim you reviewed the whole diff. `--base <ref>` is two-dot (`git diff <ref>`):
+working tree vs ref, uncommitted changes included. The diff text is sent to
+every advisor; see the persistence note below.
 
 ## Contract
 
-- Advisors are read-only; your own vendor is refused; nothing is auto-applied.
-- blind/council write `<state>/panel-ledger.jsonl` BEFORE prose. The ledger is
-  truth; your summary is UX; minority reports are findings; failures abstain.
-- roles output is never "measured" — its labels are your synthesis, not
-  agreement rates. Only blind/council/stats speak measured decorrelation.
+- Advisors are read-only only where xllm verifies the boundary (installed ≠
+  eligible); your own vendor is refused; nothing is auto-applied.
+- `execution_policy = "local-only"` is strict: providers whose location is
+  unknown or remote are excluded, never assumed local.
+- blind/council write `<state>/panel-ledger.jsonl` BEFORE prose. Evidence uses
+  the full attribution (executed provider, reported model, effort, surface,
+  CLI version); results whose model identity is unresolved are shown but do
+  not count toward routing evidence. Failures abstain.
+- roles output is never "measured". Only blind/council/stats speak agreement.
 - On a blind split the core suggests the measured tiebreaker for free — spend
   it with `--tiebreak`; never hand-pick by vendor pedigree.
-- Afterwards record adoption: `outcome <run-id> …` — it feeds measured routing.
-- SURVIVED = withstood refutation, not proven. Re-verify consequential claims.
+- Afterwards record adoption: `outcome <run-id> …`.
+- Persistence: by default each advisor call writes an artifact holding the
+  original task and full prompt (diff text included, secrets redacted); the
+  ledger and md index keep metadata + coverage only. `--no-artifacts` (blind/
+  debate/council) writes no advisor artifacts or md index and no question/claim
+  text in the ledger. Machine output: add `--json` (one object on stdout).
+  Sensitive code → `--no-artifacts`, local-only policy, or local models.
 
 ## When NOT to use
 
 Quick opinion → `ask`. Cheap git prose → `scribe`. Host-native agents already
-cover same-model parallelism; reach here only when cross-vendor disagreement
-(or a local-model perspective) is the point.
+cover same-model parallelism; reach here only when a different-model
+perspective is the point.

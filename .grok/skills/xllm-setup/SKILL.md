@@ -76,16 +76,18 @@ Resolve pins deterministically; the skill only renders and confirms.
 Never send repository contents to advisors during setup; analyze locally, persist
 only the resulting config.
 
-## 2.7 Process-discipline block (optional, explicit opt-in)
+## 2.7 Execution policy + auth (privacy)
 
-Preview with `node <advisor.js> --discipline show`, show the user the full
-text, ask consent (default = skip), then on consent:
+`execution_policy` is `any` (default) or `local-only`
+(`node <advisor.js> --set-default execution_policy local-only`, or the `local`
+pack). `local-only` is strict and fails closed: only providers verified as
+running on this machine pass; `unknown` location is refused, not assumed local;
+no flag bypasses it. Auth is **unknown until observed** — token-free probes
+never report auth as success, and only an observed failure vetoes a provider.
 
-```bash
-node <advisor.js> --discipline install   # auto-target: CLAUDE.md, else AGENTS.md
-```
-
-Idempotent marker block (≤25 lines); `--discipline remove` deletes it.
+xllm no longer installs process-discipline text into CLAUDE.md/AGENTS.md. A
+block installed by an earlier version is removed only on the user's request:
+`node <advisor.js> --discipline remove`. Never edit instruction files yourself.
 
 ## 3. Doctor
 
@@ -124,7 +126,8 @@ Print:
 /ask <provider> "…"
 ```
 
-- antigravity (`agy`) headless works on every platform, Windows included
+- Eligibility: only advisors with a verified read-only boundary run by default;
+  `doctor` shows that separately from "binary installed"
 - Docs: `docs/install.md`
 
 ## Usage

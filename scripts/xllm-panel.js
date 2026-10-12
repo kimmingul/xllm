@@ -16,7 +16,12 @@
  *    never asserted from lineage metadata.
  *  - Consensus is confidence metadata, not truth.
  *
- *   node scripts/xllm-panel.js run p1,p2[,p3] "<question>"
+ * Evidence rule: spec strings are PRESENTATION. Every call's executed identity
+ * comes from the advisor --json envelope's `attribution`; pairwise rows carry
+ * the shared `evidenceKey(attribution)` of both sides, and stats count only
+ * rows where both keys resolve.
+ *
+ *   node scripts/xllm-panel.js run p1,p2[,p3] "<question>" [--json] [--no-artifacts]
  *   node scripts/xllm-panel.js stats
  *   node scripts/xllm-panel.js outcome <run-id> --adopted <spec|none|majority|minority> --helpful yes|no [--note "…"]
  */
@@ -33,22 +38,48 @@ import {
   slugify,
   getProviderCostMeta,
   detectAvailableProviders,
+  buildInventory,
 } from './xllm-advisor.js';
 import { suggestTiebreaker } from './xllm-routing.js';
 import { loadTraits } from './xllm-traits.js';
 import {
   extractJson,
   askStructured,
+  askAdvisor,
   adherenceSummary,
-  rawFromArtifact,
+  mergeAttributions,
+  noArtifactsRequested,
+  sumUsage,
+  sumCost,
 } from './xllm-structured.js';
-import { parseDiffFlags, hasDiffSource, collectReviewDiff, buildReviewContext, diffMeta, questionWithContext } from './xllm-diff.js';
+import { evidenceKey, executionLocation } from './xllm-evidence.js';
+import {
+  parseDiffFlags,
+  hasDiffSource,
+  collectReviewDiff,
+  buildReviewContext,
+  diffMeta,
+  questionWithContext,
+  coverageSummary,
+  renderCoverage,
+} from './xllm-diff.js';
 
-// rawFromArtifact now lives in the shared structured layer; re-export for
-// callers (e.g. xllm-debate) that imported it from here.
-export { rawFromArtifact };
+/** Ledger record schema (panel / tiebreak / debate / outcome records written by this family). */
+export const LEDGER_SCHEMA_VERSION = 2;
 
 export const PANEL_VERDICTS = ['approve', 'reject', 'mixed'];
+
+/** JSON schema for native structured output (strict-mode compatible: all properties required). */
+export const PANEL_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['verdict', 'confidence', 'key_claims'],
+  properties: {
+    verdict: { type: 'string', enum: PANEL_VERDICTS },
+    confidence: { type: 'number' },
+    key_claims: { type: 'array', items: { type: 'string' } },
+  },
+};
 
 export const PANEL_VERDICT_INSTRUCTIONS = `
 
@@ -67,10 +98,9 @@ export function buildPanelPrompt(question) {
   return `${question}${PANEL_VERDICT_INSTRUCTIONS}`;
 }
 
-/** Deterministically extract + validate the verdict json block, or null. */
-export function extractPanelVerdict(raw) {
-  const v = extractJson(raw);
-  if (!v || !PANEL_VERDICTS.includes(v.verdict)) return null;
+/** Validate a parsed verdict object (native structured output or extracted JSON), or null. */
+export function validatePanelVerdict(v) {
+  if (!v || typeof v !== 'object' || !PANEL_VERDICTS.includes(v.verdict)) return null;
   const confidence = Number(v.confidence);
   return {
     verdict: v.verdict,
@@ -81,9 +111,15 @@ export function extractPanelVerdict(raw) {
   };
 }
 
+/** Deterministically extract + validate the verdict json block from raw text, or null. */
+export function extractPanelVerdict(raw) {
+  return validatePanelVerdict(extractJson(raw));
+}
+
 /**
  * Pairwise verdict agreement. Abstentions (failed/invalid panelists) yield
- * null — never agreement.
+ * null — never agreement. Rows carry each side's evidence key (null when the
+ * executed identity did not resolve): spec text alone is never evidence.
  */
 export function computePairwise(panelists) {
   const pairs = [];
@@ -96,6 +132,8 @@ export function computePairwise(panelists) {
         a: a.spec,
         b: b.spec,
         agree: comparable ? a.verdict.verdict === b.verdict.verdict : null,
+        a_evidence: a.evidence_key ?? null,
+        b_evidence: b.evidence_key ?? null,
       });
     }
   }
@@ -112,6 +150,8 @@ export function tiebreakPairwise(panelists, tb) {
     a: p.spec,
     b: tb.spec,
     agree: p.verdict && tb.verdict ? p.verdict.verdict === tb.verdict.verdict : null,
+    a_evidence: p.evidence_key ?? null,
+    b_evidence: tb.evidence_key ?? null,
   }));
 }
 
@@ -126,6 +166,24 @@ export function consensusLabel(panelists) {
   if (top === valid.length) return 'unanimous';
   if (top > valid.length / 2) return 'majority';
   return 'split';
+}
+
+/**
+ * How much of the panel actually reported. A label computed over survivors
+ * ("unanimous" of 2 valid out of 3 asked) is NOT the same claim as unanimous
+ * over everyone asked; this makes the difference explicit. Pure.
+ */
+export function panelCompletion(panelists) {
+  const valid = panelists.filter((p) => p.verdict).length;
+  return {
+    asked: panelists.length,
+    valid,
+    abstained: panelists.length - valid,
+    complete: panelists.length > 0 && valid === panelists.length,
+    abstentions: panelists
+      .filter((p) => !p.verdict)
+      .map((p) => ({ spec: p.spec, adherence: p.adherence, exit_code: p.exit_code, failure: p.failure?.kind || null })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -167,30 +225,49 @@ export function readLedger(root = process.cwd()) {
  * Tiebreak records also contribute pairwise rows (the tiebreaker is blind and
  * prompt-identical → comparable) but never increment `runs` — that is how a
  * tiebreak bought today becomes routing evidence tomorrow.
+ *
+ * STRICT: a row is evidence only when BOTH sides carry an `evidenceKey`
+ * written at record time from the executed attribution. Rows without keys
+ * (legacy spec-only records, or identities that did not resolve) are excluded
+ * and counted in `excluded` — never matched by spec string, never backfilled.
+ * Matrix rows are keyed by the evidence-key pair; `pair` is presentation.
  */
 export function ledgerStats(records) {
   const pairs = {};
   let runs = 0;
   let tiebreaks = 0;
+  const excluded = { legacy_rows: 0, unresolved_rows: 0 };
   for (const r of records) {
     if (r.type !== 'panel' && r.type !== 'tiebreak') continue;
     if (r.type === 'panel') runs += 1;
     else tiebreaks += 1;
     for (const p of r.pairwise || []) {
       if (p.agree === null) continue; // abstention — not comparable
-      const key = [p.a, p.b].sort().join(' ↔ ');
-      pairs[key] = pairs[key] || { comparable: 0, agreements: 0 };
-      pairs[key].comparable += 1;
-      if (p.agree) pairs[key].agreements += 1;
+      if (!('a_evidence' in p) && !('b_evidence' in p)) {
+        excluded.legacy_rows += 1;
+        continue;
+      }
+      if (!p.a_evidence || !p.b_evidence) {
+        excluded.unresolved_rows += 1;
+        continue;
+      }
+      const evidence = [p.a_evidence, p.b_evidence].sort();
+      const key = JSON.stringify(evidence);
+      const row = (pairs[key] = pairs[key] || { evidence, labels: {}, comparable: 0, agreements: 0 });
+      row.labels[p.a_evidence] = row.labels[p.a_evidence] || p.a;
+      row.labels[p.b_evidence] = row.labels[p.b_evidence] || p.b;
+      row.comparable += 1;
+      if (p.agree) row.agreements += 1;
     }
   }
-  const matrix = Object.entries(pairs).map(([pair, s]) => ({
-    pair,
+  const matrix = Object.values(pairs).map((s) => ({
+    pair: s.evidence.map((e) => s.labels[e]).sort().join(' ↔ '),
+    evidence: s.evidence,
     comparable_runs: s.comparable,
     agreement_rate: s.comparable ? +(s.agreements / s.comparable).toFixed(3) : null,
   }));
   const outcomes = records.filter((r) => r.type === 'outcome');
-  return { runs, tiebreaks, matrix, outcomes_recorded: outcomes.length };
+  return { runs, tiebreaks, matrix, outcomes_recorded: outcomes.length, excluded };
 }
 
 // ---------------------------------------------------------------------------
@@ -211,16 +288,148 @@ export function parsePanelRunArgs(argv) {
   if (d.error) return { error: d.error };
   const rest = d.rest;
   const tiebreak = rest.includes('--tiebreak');
+  const noArtifacts = rest.includes('--no-artifacts');
+  const json = rest.includes('--json');
   const readyArg = rest.find((a) => a.startsWith('--ready='));
   const readyProviders = readyArg
     ? readyArg.slice('--ready='.length).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
     : null;
-  const positional = rest.filter((a) => a !== '--tiebreak' && !a.startsWith('--ready='));
+  const flags = new Set(['--tiebreak', '--no-artifacts', '--json']);
+  const positional = rest.filter((a) => !flags.has(a) && !a.startsWith('--ready='));
   const specs = (positional[0] || '').split(',').map((s) => s.trim()).filter(Boolean);
   const question = positional.slice(1).join(' ').trim();
-  return { specs, question, tiebreak, readyProviders, diffOpts: d.diffOpts };
+  return { specs, question, tiebreak, readyProviders, diffOpts: d.diffOpts, noArtifacts, json };
 }
 
+/**
+ * Lane key for serialization. Panelists sharing a runtime that provably (or
+ * possibly) runs on THIS machine's GPU/RAM run sequentially — parallel model
+ * loads fight over VRAM (observed: ollama CUDA OOM). Cloud providers and local
+ * runtimes proven to execute remotely (e.g. an ollama `:cloud` model) stay
+ * parallel: serializing them buys nothing. Unknown location is treated as
+ * local (the safe direction). Pure given env.
+ */
+export function laneKeyFor(p, env = process.env) {
+  if (getProviderCostMeta(p.provider).tier !== 'local') return `cloud:${p.spec}`;
+  return executionLocation(p.provider, p.model, { env }) === 'remote' ? `remote:${p.spec}` : `local:${p.provider}`;
+}
+
+/** Ledger/JSON form of one panelist (no raw output; content text omitted when not persisting). */
+function panelistView(p, persist) {
+  return {
+    spec: p.spec,
+    provider: p.provider,
+    exit_code: p.exit_code,
+    verdict: p.verdict?.verdict || null,
+    confidence: p.verdict?.confidence ?? null,
+    key_claims: persist ? p.verdict?.key_claims || [] : [],
+    adherence: p.adherence,
+    artifact: p.artifact,
+    attempts: p.attempts,
+    schema_mode: p.schema_mode,
+    attribution: p.attribution,
+    evidence_key: p.evidence_key,
+    usage: p.usage,
+    cost_estimate: p.cost_estimate,
+    failure: p.failure,
+    attempt_log: (p.attempt_log || []).map(({ attribution, ...rest }) => rest),
+  };
+}
+
+function renderPanelMarkdown({ label, id, root, question, contextMeta, panelists, pairwise, suggestion, tbResult, completion }) {
+  const valid = panelists.filter((p) => p.verdict);
+  const counts = {};
+  for (const p of valid) counts[p.verdict.verdict] = (counts[p.verdict.verdict] || 0) + 1;
+  const majorityVerdict = Object.entries(counts).sort((x, y) => y[1] - x[1])[0]?.[0] || null;
+  const abstainWhy = (p) => (p.exit_code !== 0 ? `failed${p.failure?.kind ? `: ${p.failure.kind}` : ''}` : 'invalid verdict block');
+  const tiebreakMd = !suggestion
+    ? []
+    : [
+        '## Tiebreak (measured decorrelation)',
+        '',
+        '- Trigger: initial consensus was **split**',
+        suggestion.provider
+          ? `- Suggested: **${suggestion.provider}** — ${suggestion.reason}`
+          : `- Suggested: (none) — ${suggestion.reason}`,
+        ...(tbResult
+          ? [
+              `- Ran: **${tbResult.panelist.spec}** → ${
+                tbResult.panelist.verdict
+                  ? `**${tbResult.panelist.verdict.verdict}** (confidence ${tbResult.panelist.verdict.confidence ?? '-'})`
+                  : 'ABSTAIN (failed/invalid verdict — label unchanged)'
+              }`,
+              `- Pairwise vs panel: ${tbResult.pairwise
+                .map((p) => `${p.a} ${p.agree === null ? 'not comparable' : p.agree ? 'agree' : 'DISAGREE'}`)
+                .join(' · ')}`,
+              `- Expanded consensus: **${tbResult.consensus_after}** (original **${label}** unchanged in ledger)`,
+            ]
+          : ['- Ran: no — re-invoke with `--tiebreak` to spend one blind call']),
+        '',
+      ];
+  return [
+    `# xllm panel — ${label}${completion.complete ? '' : ` (${completion.valid}/${completion.asked} panelists reported)`}`,
+    '',
+    `- Run id: ${id} (ledger: ${ledgerPath(root)})`,
+    `- Question: ${redactSecrets(question)}`,
+    ...(contextMeta ? [`- Code context: ${coverageSummary(contextMeta)} — diff body not persisted`] : []),
+    ...(completion.complete
+      ? []
+      : [
+          `- **Incomplete panel:** ${completion.abstained} of ${completion.asked} abstained (${completion.abstentions.map((a) => `${a.spec}: ${a.failure || a.adherence}`).join('; ')}). The label covers reporting panelists only.`,
+        ]),
+    '',
+    ...(contextMeta && !contextMeta.coverage?.complete ? ['## Code coverage', '', '```text', renderCoverage(contextMeta.coverage), '```', ''] : []),
+    '## Ledger (truth — the summary below may not override this)',
+    '',
+    '| Panelist | Verdict | Confidence | Key claims |',
+    '|----------|---------|------------|------------|',
+    ...panelists.map((p) =>
+      p.verdict
+        ? `| ${p.spec} | ${p.verdict.verdict}${p.verdict.verdict !== majorityVerdict && valid.length > 1 ? ' **(minority)**' : ''} | ${p.verdict.confidence ?? '-'} | ${p.verdict.key_claims.join(' / ').replace(/\|/g, '\\|')} |`
+        : `| ${p.spec} | ABSTAIN (${abstainWhy(p)}) | - | - |`
+    ),
+    '',
+    '## Pairwise',
+    '',
+    ...pairwise.map(
+      (p) => `- ${p.a} ↔ ${p.b}: ${p.agree === null ? 'not comparable (abstention)' : p.agree ? 'agree' : 'DISAGREE'}`
+    ),
+    '',
+    ...tiebreakMd,
+    '## Synthesis contract (for the host)',
+    '',
+    '- The ledger above is the record; your prose summary is UX and must not',
+    '  contradict or omit it.',
+    '- Surface minority reports explicitly — they are findings, not noise.',
+    `- Consensus label: **${label}** — confidence metadata, not truth;`,
+    '  unanimous can still be wrong.',
+    '- On split: the Tiebreak section above names the measured-decorrelation',
+    '  pick — spend it with `--tiebreak`; never hand-pick by lineage.',
+    `- Afterwards record what you did: \`xllm review outcome ${id} --adopted <spec|majority|minority|none> --helpful yes|no\``,
+    '',
+    '## Contract adherence (structured-output health)',
+    '',
+    ...panelists.map((p) => `- ${p.spec}: ${p.adherence}${p.adherence === 'retry' ? ' (recovered on retry)' : p.adherence === 'failed' ? ' (abstained — no valid block)' : ''}${p.schema_mode ? ` · ${p.schema_mode} schema` : ''}`),
+    '',
+    '## Full answers',
+    '',
+    ...panelists.filter((p) => p.artifact).map((p) => `- ${p.spec}: ${p.artifact}`),
+    ...(tbResult && tbResult.panelist.artifact
+      ? [`- ${tbResult.panelist.spec} (tiebreaker): ${tbResult.panelist.artifact}`]
+      : []),
+    '',
+  ].join('\n');
+}
+
+/**
+ * Run a blind panel. Returns a result object (never prints to stdout — the
+ * CLI prints). Result: { exitCode, schema_version:2, kind:'panel', id, label,
+ * expandedLabel, completion, mdPath|null, markdown, panelists, pairwise,
+ * tiebreakSuggestion, tiebreakResult, context, attributions, attribution_conflicts,
+ * usage, cost_estimate } or { exitCode:1, error }.
+ *
+ * @param ask  call seam (defaults to the child-process advisor with --json)
+ */
 export async function runPanel({
   specs,
   question,
@@ -229,35 +438,43 @@ export async function runPanel({
   readyProviders = null,
   context = null,
   contextMeta = null,
+  noArtifacts = false,
+  ask = askAdvisor,
+  inventory = undefined,
+  env = process.env,
 }) {
-  const parsed = specs.map((s) => {
+  noArtifacts = noArtifactsRequested(noArtifacts, env);
+  const persist = !noArtifacts;
+  const parsed = [];
+  for (const s of specs) {
     const p = parseProviderSpec(s);
-    if (!p) {
-      console.error(`[panel] Unknown provider spec: ${s}`);
-      process.exit(1);
-    }
-    return p;
-  });
-  if (parsed.length < 2) {
-    console.error('[panel] Need at least 2 panelists.');
-    return { exitCode: 1 };
+    if (!p) return { exitCode: 1, error: `Unknown provider spec: ${s}` };
+    parsed.push(p);
   }
+  if (parsed.length < 2) return { exitCode: 1, error: 'Need at least 2 panelists.' };
 
   const prompt = buildPanelPrompt(questionWithContext(question, context));
 
-  // Ask each panelist for a structured verdict via the shared layer: one
-  // corrective retry before counting a non-compliant model as an abstention.
+  // Ask each panelist for a structured verdict via the shared layer: native
+  // schema where the adapter supports it, one corrective retry before counting
+  // a non-compliant model as an abstention.
   const runPanelist = async (p) => {
     console.error(`[panel] asking ${p.spec} (blind)…`);
     const r = await askStructured({
       spec: p.spec,
       prompt,
-      parse: extractPanelVerdict,
+      validate: validatePanelVerdict,
+      schema: PANEL_SCHEMA,
       repairHint:
         'your previous attempt omitted the mandatory verdict block. You MUST end with exactly one fenced ```json block matching the PANEL PROTOCOL above.',
+      noArtifacts,
+      env,
+      ask,
     });
     if (r.adherence === 'retry') console.error(`[panel] ${p.spec}: verdict recovered on retry`);
-    if (r.adherence === 'failed') console.error(`[panel] ${p.spec}: no valid verdict — abstains`);
+    if (r.adherence === 'failed') {
+      console.error(`[panel] ${p.spec}: no valid verdict (${r.failure?.kind || 'unknown'}) — abstains`);
+    }
     return {
       spec: p.spec,
       provider: p.provider,
@@ -265,16 +482,22 @@ export async function runPanel({
       artifact: r.artifact,
       verdict: r.value,
       adherence: r.adherence,
+      attempts: r.attempts,
+      schema_mode: r.schema_mode,
+      attribution: r.attribution,
+      evidence_key: evidenceKey(r.attribution),
+      usage: r.usage,
+      cost_estimate: r.cost_estimate,
+      failure: r.failure,
+      attempt_log: r.attempt_log,
+      raw: r.raw,
     };
   };
 
-  // Panelists sharing a LOCAL provider run sequentially — parallel model
-  // loads on one local runtime fight over GPU/RAM (observed: ollama CUDA
-  // OOM when two models load at once). Cloud panelists stay parallel.
+  // Lanes: see laneKeyFor — serialize only what may share this machine's GPU/RAM.
   const lanes = new Map();
   for (const p of parsed) {
-    const isLocal = getProviderCostMeta(p.provider).tier === 'local';
-    const laneKey = isLocal ? `local:${p.provider}` : `cloud:${p.spec}`;
+    const laneKey = laneKeyFor(p, env);
     if (!lanes.has(laneKey)) lanes.set(laneKey, []);
     lanes.get(laneKey).push(p);
   }
@@ -282,12 +505,15 @@ export async function runPanel({
     [...lanes.values()].map(async (lane) => {
       const acc = [];
       for (let i = 0; i < lane.length; i++) {
-        acc.push(await runPanelist(lane[i]));
+        const done = await runPanelist(lane[i]);
+        acc.push(done);
         // ollama keeps finished models resident in VRAM — unload before the
-        // next panelist's model or it OOMs on load (observed live).
+        // next panelist's model or it OOMs on load (observed live). Skipped
+        // when the executed model is remote: there is nothing resident here.
         const cur = lane[i];
         const next = lane[i + 1];
-        if (cur.provider === 'ollama' && next && next.model !== cur.model) {
+        const remote = done.attribution?.execution_location === 'remote';
+        if (cur.provider === 'ollama' && next && next.model !== cur.model && !remote) {
           const { spawnSync } = await import('child_process');
           spawnSync('ollama', ['stop', cur.model || 'llama3.2'], {
             encoding: 'utf8',
@@ -306,28 +532,30 @@ export async function runPanel({
 
   const pairwise = computePairwise(panelists);
   const label = consensusLabel(panelists);
+  const completion = panelCompletion(panelists);
   const id = panelId();
+  const attrib = mergeAttributions(panelists.map((p) => ({ spec: p.spec, attribution: p.attribution })));
+  const usage = sumUsage(panelists.map((p) => p.usage));
+  const cost = sumCost(panelists.map((p) => p.cost_estimate));
 
   // Record BEFORE narrative: ledger first, index md second.
   const record = {
     type: 'panel',
+    schema_version: LEDGER_SCHEMA_VERSION,
     run_id: id,
     created_at: new Date().toISOString(),
-    question: redactSecrets(question),
+    question: persist ? redactSecrets(question) : null,
+    content_persisted: persist,
     ...(contextMeta ? { diff_context: contextMeta } : {}),
-    panelists: panelists.map((p) => ({
-      spec: p.spec,
-      provider: p.provider,
-      exit_code: p.exit_code,
-      verdict: p.verdict?.verdict || null,
-      confidence: p.verdict?.confidence ?? null,
-      key_claims: p.verdict?.key_claims || [],
-      adherence: p.adherence,
-      artifact: p.artifact,
-    })),
+    panelists: panelists.map((p) => panelistView(p, persist)),
     pairwise,
     consensus: label,
+    completion,
     adherence: adherenceSummary(panelists.map((p) => ({ spec: p.spec, adherence: p.adherence }))),
+    attributions: attrib.attributions,
+    ...(Object.keys(attrib.conflicts).length ? { attribution_conflicts: attrib.conflicts } : {}),
+    usage,
+    cost_estimate: cost,
   };
   appendLedger(record, root);
 
@@ -347,19 +575,36 @@ export async function runPanel({
     const onPanel = parsed.map((p) => p.spec);
     // Traits add health/adherence VETOES only (docs/traits-design.md D′);
     // the lowest-measured-agreement selection itself is untouched.
+    // Inventory supplies per-model server metadata (model_details) and
+    // advisor_eligible so the router can expand a local runtime into verified
+    // local models and refuse unverified/unsafe ones. Production loads the
+    // cached inventory; callers/tests may inject a fixture (or null = none).
+    let tbInventory = inventory;
+    if (tbInventory === undefined) {
+      try {
+        tbInventory = buildInventory({ env });
+      } catch {
+        tbInventory = null;
+      }
+    }
     suggestion = suggestTiebreaker(onPanel, readyList, matrix, null, loadTraits(root), {
       readySource: override ? 'explicit' : 'detected',
+      panelEvidence: panelists.map((p) => p.evidence_key),
+      inventory: tbInventory,
+      env,
     });
     const suggestId = panelId();
     appendLedger(
       {
         type: 'tiebreak_suggest',
+        schema_version: LEDGER_SCHEMA_VERSION,
         run_id: suggestId,
         panel_run_id: id,
         created_at: new Date().toISOString(),
         provider: suggestion.provider,
         measured_agreement: suggestion.measured_agreement ?? null,
         reason: suggestion.reason,
+        ...(suggestion.refusals ? { refusals: suggestion.refusals } : {}),
         selection_basis:
           suggestion.measured_agreement != null ? 'lowest-measured-agreement' : 'strongest-tier-no-data',
         ready: readyList,
@@ -388,10 +633,12 @@ export async function runPanel({
         appendLedger(
           {
             type: 'tiebreak',
+            schema_version: LEDGER_SCHEMA_VERSION,
             run_id: panelId(),
             panel_run_id: id,
             suggest_run_id: suggestId,
             created_at: new Date().toISOString(),
+            content_persisted: persist,
             selection: {
               spec: tb.spec,
               basis: suggestion.measured_agreement != null ? 'lowest-measured-agreement' : 'strongest-tier-no-data',
@@ -399,16 +646,7 @@ export async function runPanel({
               measured_agreement: suggestion.measured_agreement ?? null,
             },
             blind_prompt: true,
-            panelist: {
-              spec: tb.spec,
-              provider: tb.provider,
-              exit_code: tb.exit_code,
-              verdict: tb.verdict?.verdict || null,
-              confidence: tb.verdict?.confidence ?? null,
-              key_claims: tb.verdict?.key_claims || [],
-              adherence: tb.adherence,
-              artifact: tb.artifact,
-            },
+            panelist: panelistView(tb, persist),
             pairwise: tbPairwise,
             consensus_before: label,
             consensus_after: expandedLabel,
@@ -421,108 +659,93 @@ export async function runPanel({
     }
   }
 
-  // Human index: ledger table first, prose contract second.
-  const valid = panelists.filter((p) => p.verdict);
-  const counts = {};
-  for (const p of valid) counts[p.verdict.verdict] = (counts[p.verdict.verdict] || 0) + 1;
-  const majorityVerdict =
-    Object.entries(counts).sort((x, y) => y[1] - x[1])[0]?.[0] || null;
-
-  const dir = path.join(ensureArtifactDirs(root), 'xllm');
-  const mdPath = path.join(dir, `panel-${slugify(question)}-${id}.md`);
-  const tiebreakMd = !suggestion
-    ? []
-    : [
-        '## Tiebreak (measured decorrelation)',
-        '',
-        '- Trigger: initial consensus was **split**',
-        suggestion.provider
-          ? `- Suggested: **${suggestion.provider}** — ${suggestion.reason}`
-          : `- Suggested: (none) — ${suggestion.reason}`,
-        ...(tbResult
-          ? [
-              `- Ran: **${tbResult.panelist.spec}** → ${
-                tbResult.panelist.verdict
-                  ? `**${tbResult.panelist.verdict.verdict}** (confidence ${tbResult.panelist.verdict.confidence ?? '-'})`
-                  : 'ABSTAIN (failed/invalid verdict — label unchanged)'
-              }`,
-              `- Pairwise vs panel: ${tbResult.pairwise
-                .map((p) => `${p.a} ${p.agree === null ? 'not comparable' : p.agree ? 'agree' : 'DISAGREE'}`)
-                .join(' · ')}`,
-              `- Expanded consensus: **${tbResult.consensus_after}** (original **${label}** unchanged in ledger)`,
-            ]
-          : ['- Ran: no — re-invoke with `--tiebreak` to spend one blind call']),
-        '',
-      ];
-  fs.writeFileSync(
-    mdPath,
-    [
-      `# xllm panel — ${label}`,
-      '',
-      `- Run id: ${id} (ledger: ${ledgerPath(root)})`,
-      `- Question: ${redactSecrets(question)}`,
-      ...(contextMeta ? [`- Code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''}) — diff body not persisted`] : []),
-      '',
-      '## Ledger (truth — the summary below may not override this)',
-      '',
-      '| Panelist | Verdict | Confidence | Key claims |',
-      '|----------|---------|------------|------------|',
-      ...panelists.map((p) =>
-        p.verdict
-          ? `| ${p.spec} | ${p.verdict.verdict}${p.verdict.verdict !== majorityVerdict && valid.length > 1 ? ' **(minority)**' : ''} | ${p.verdict.confidence ?? '-'} | ${p.verdict.key_claims.join(' / ').replace(/\|/g, '\\|')} |`
-          : `| ${p.spec} | ABSTAIN (${p.exit_code !== 0 ? 'failed' : 'invalid verdict block'}) | - | - |`
-      ),
-      '',
-      '## Pairwise',
-      '',
-      ...pairwise.map(
-        (p) => `- ${p.a} ↔ ${p.b}: ${p.agree === null ? 'not comparable (abstention)' : p.agree ? 'agree' : 'DISAGREE'}`
-      ),
-      '',
-      ...tiebreakMd,
-      '## Synthesis contract (for the host)',
-      '',
-      '- The ledger above is the record; your prose summary is UX and must not',
-      '  contradict or omit it.',
-      '- Surface minority reports explicitly — they are findings, not noise.',
-      `- Consensus label: **${label}** — confidence metadata, not truth;`,
-      '  unanimous can still be wrong.',
-      '- On split: the Tiebreak section above names the measured-decorrelation',
-      '  pick — spend it with `--tiebreak`; never hand-pick by lineage.',
-      `- Afterwards record what you did: \`xllm review outcome ${id} --adopted <spec|majority|minority|none> --helpful yes|no\``,
-      '',
-      '## Contract adherence (structured-output health)',
-      '',
-      ...panelists.map((p) => `- ${p.spec}: ${p.adherence}${p.adherence === 'retry' ? ' (recovered on retry)' : p.adherence === 'failed' ? ' (abstained — no valid block)' : ''}`),
-      '',
-      '## Full answers',
-      '',
-      ...panelists.filter((p) => p.artifact).map((p) => `- ${p.spec}: ${p.artifact}`),
-      ...(tbResult && tbResult.panelist.artifact
-        ? [`- ${tbResult.panelist.spec} (tiebreaker): ${tbResult.panelist.artifact}`]
-        : []),
-      '',
-    ].join('\n'),
-    'utf8'
-  );
+  // Human index: ledger table first, prose contract second. Not written
+  // under --no-artifacts (the markdown is returned for the CLI to print).
+  const markdown = renderPanelMarkdown({
+    label,
+    id,
+    root,
+    question,
+    contextMeta,
+    panelists,
+    pairwise,
+    suggestion,
+    tbResult,
+    completion,
+  });
+  let mdPath = null;
+  if (persist) {
+    const dir = path.join(ensureArtifactDirs(root), 'xllm');
+    mdPath = path.join(dir, `panel-${slugify(question)}-${id}.md`);
+    fs.writeFileSync(mdPath, markdown, 'utf8');
+  }
 
   const recovered = panelists.filter((p) => p.adherence === 'retry').length;
   const failed = panelists.filter((p) => p.adherence === 'failed').length;
   console.error(
     `[panel] consensus: ${label}${recovered ? ` · ${recovered} recovered on retry` : ''}${failed ? ` · ${failed} abstained` : ''}`
   );
-  console.log(mdPath);
   return {
-    exitCode: 0,
+    exitCode: completion.valid === 0 ? 1 : 0,
+    error: completion.valid === 0 ? 'No panelist produced a valid verdict.' : null,
+    schema_version: LEDGER_SCHEMA_VERSION,
+    kind: 'panel',
     id,
     label,
     expandedLabel,
+    completion,
     mdPath,
+    markdown,
     panelists,
     pairwise,
     tiebreakSuggestion: suggestion,
     tiebreakResult: tbResult,
+    context: contextMeta,
+    attributions: attrib.attributions,
+    attribution_conflicts: attrib.conflicts,
+    usage,
+    cost_estimate: cost,
+    noArtifacts,
   };
+}
+
+/** Machine result for `--json` (answers inline only when no artifact holds them). */
+export function panelJson(r) {
+  if (!r.panelists) return { schema_version: LEDGER_SCHEMA_VERSION, kind: 'panel', exitCode: r.exitCode, error: r.error || 'panel failed' };
+  const persist = !r.noArtifacts;
+  return {
+    schema_version: LEDGER_SCHEMA_VERSION,
+    kind: 'panel',
+    exitCode: r.exitCode,
+    error: r.error || null,
+    run_id: r.id,
+    consensus: r.label,
+    expanded_consensus: r.expandedLabel,
+    completion: r.completion,
+    index_path: r.mdPath,
+    context: r.context,
+    panelists: r.panelists.map((p) => ({ ...panelistView(p, true), ...(persist ? {} : { answer: p.raw }) })),
+    pairwise: r.pairwise,
+    tiebreak: r.tiebreakSuggestion
+      ? {
+          suggestion: r.tiebreakSuggestion,
+          result: r.tiebreakResult
+            ? { panelist: { ...panelistView(r.tiebreakResult.panelist, true), ...(persist ? {} : { answer: r.tiebreakResult.panelist.raw }) }, pairwise: r.tiebreakResult.pairwise, consensus_after: r.tiebreakResult.consensus_after }
+            : null,
+        }
+      : null,
+    attributions: r.attributions,
+    attribution_conflicts: r.attribution_conflicts,
+    usage: r.usage,
+    cost_estimate: r.cost_estimate,
+  };
+}
+
+/** Print a result per CLI mode (shared shape with debate/council mains). */
+export function emitResult(r, toJson, json) {
+  if (json) console.log(JSON.stringify(toJson(r)));
+  else if (r.exitCode !== 0) console.error(`[${r.kind || 'review'}] ${r.error || 'failed'}`);
+  else console.log(r.mdPath || r.markdown);
 }
 
 // ---------------------------------------------------------------------------
@@ -542,8 +765,14 @@ async function main() {
     console.log(
       `panel runs: ${stats.runs}   tiebreaks: ${stats.tiebreaks}   outcomes recorded: ${stats.outcomes_recorded}`
     );
+    const ex = stats.excluded;
+    if (ex.legacy_rows || ex.unresolved_rows) {
+      console.log(
+        `excluded from evidence: ${ex.legacy_rows} legacy row(s) without attribution, ${ex.unresolved_rows} row(s) with unresolved model identity`
+      );
+    }
     if (!stats.matrix.length) {
-      console.log('(no comparable pairs yet — run `panel run` with 2+ panelists)');
+      console.log('(no attributed comparable pairs yet — run `panel run` with 2+ panelists)');
       return;
     }
     console.log('\npairwise agreement (low rate = measured decorrelation):');
@@ -573,6 +802,7 @@ async function main() {
     }
     appendLedger({
       type: 'outcome',
+      schema_version: LEDGER_SCHEMA_VERSION,
       run_id: runId,
       created_at: new Date().toISOString(),
       adopted,
@@ -587,7 +817,7 @@ async function main() {
     const p = parsePanelRunArgs(argv.slice(1));
     if (p.error || p.specs.length < 2 || !p.question) {
       if (p.error) console.error(`[panel] ${p.error}`);
-      console.error('Usage: xllm-panel run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>]');
+      console.error('Usage: xllm-panel run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>] [--json] [--no-artifacts]');
       process.exit(1);
     }
     let context = null;
@@ -600,28 +830,37 @@ async function main() {
       }
       context = buildReviewContext(diff);
       contextMeta = diffMeta(diff);
-      console.error(`[panel] code context: ${contextMeta.source} (${contextMeta.bytes} bytes${contextMeta.truncated ? ', truncated' : ''})`);
+      console.error(`[panel] code context: ${coverageSummary(contextMeta)}`);
     }
-    const r = await runPanel({ specs: p.specs, question: p.question, tiebreak: p.tiebreak, readyProviders: p.readyProviders, context, contextMeta });
+    const r = await runPanel({ specs: p.specs, question: p.question, tiebreak: p.tiebreak, readyProviders: p.readyProviders, context, contextMeta, noArtifacts: p.noArtifacts });
+    r.kind = 'panel';
+    emitResult(r, panelJson, p.json);
     process.exit(r.exitCode);
   }
 
   console.error(`xllm panel — blind same-prompt panel + agreement ledger
 Usage:
-  node scripts/xllm-panel.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>]
+  node scripts/xllm-panel.js run p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--staged|--base <ref>|--diff-file <path>] [--json] [--no-artifacts]
   node scripts/xllm-panel.js stats [--json]                # pairwise agreement matrix
   node scripts/xllm-panel.js outcome <run-id> --adopted <…> --helpful yes|no
 
---staged/--base/--diff-file attach a code diff to the prompt (review family);
-the diff body is never persisted — only source/stat/bytes/truncated land in
-the ledger and md index as diff_context / "Code context".
+--staged/--base/--diff-file attach a code diff to the prompt (review family).
+The diff is budgeted at file/hunk boundaries (24KB); anything not shown is
+enumerated in a coverage manifest. The ledgers/index never store the diff
+body — only source/stat/bytes/truncated/coverage land there as diff_context
+— but advisor child artifacts persist prompts unless --no-artifacts is set.
+
+--json prints ONE JSON result on stdout (progress on stderr). --no-artifacts
+(or XLLM_NO_ARTIFACTS=1) runs children with --no-artifacts, writes no index
+md, and keeps question/claim text out of the ledger (metadata only).
 
 On a SPLIT the ledger's measured agreement picks an unconsulted tiebreaker
 (suggestion is always free and recorded; the one extra blind call runs only
 with --tiebreak). --ready= overrides detected providers.
 
-Ledger: <state>/panel-ledger.jsonl (append-only; outcomes are new records,
-never mutations). The ledger is the record; prose synthesis is UX.`);
+Ledger: <state>/panel-ledger.jsonl (append-only; schema_version 2; outcomes
+are new records, never mutations). The ledger is the record; prose synthesis
+is UX.`);
   process.exit(cmd ? 1 : 0);
 }
 

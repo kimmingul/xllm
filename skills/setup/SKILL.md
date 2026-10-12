@@ -24,9 +24,13 @@ node <advisor.js> --inventory --refresh  # force re-probe
 ```
 
 Reports per provider: installed, healthy, tier (strong/balanced/local),
-relative cost, and for ollama the **actually pulled models**. Cloud model
+relative cost, and for ollama the **actually pulled models** with their
+server metadata (`model_details`: digest/size/remote markers). Cloud model
 catalogs are not enumerated — for cloud CLIs, installed means the binary
-responds; auth is only proven by `node <plugin-root>/scripts/smoke.mjs --live`.
+responds. **Auth is unknown until observed**: a token-free probe reports
+version/flag status only and keeps any earlier auth observation with its own
+timestamp; only an observed failure vetoes a provider, and unknown is never
+shown as success. Prove auth with `node <plugin-root>/scripts/smoke.mjs --live`.
 
 ## Step 2 — Project marker + artifact dirs
 
@@ -48,10 +52,11 @@ Resolve pins deterministically; the skill only renders and confirms.
    ```
 
    The resolver returns `{ roles, warnings, evidence, recommended_packs }`.
-   `balanced` leaves analysis/design OPEN (measured routing) and pins at most a
-   free local critic — a pin FREEZES measured routing, so packs pin only genuine
+   `balanced` leaves analysis/design OPEN (evidence-based routing) and pins at most a
+   free local critic — a pin FREEZES routing, so packs pin only genuine
    constraints. `quality` = max-spend lock, `frugal` = cost lock, `local` =
-   offline lock, `skip` = clear pins.
+   offline lock (also persists `execution_policy = "local-only"`), `skip` =
+   clear pins. Other packs never silently relax an existing policy.
 
 2. **Ask ONE question** using the host's UI, offering the first four of
    `recommended_packs` (always include `skip`). On Claude Code use
@@ -73,25 +78,25 @@ Resolve pins deterministically; the skill only renders and confirms.
 Never send repository contents to advisors during setup — your analysis stays
 local; only the resulting config is written.
 
-## Step 4 — Process-discipline block (optional, explicit opt-in)
+## Step 4 — Execution policy (privacy)
 
-xllm can install a ≤25-line process-discipline block (design-before-code,
-red→green, evidence-before-done, plus pointers to cross-vendor deliberation)
-into the project's CLAUDE.md/AGENTS.md — "discipline in prose, diversity in
-product".
+`execution_policy` is `any` (default) or `local-only` in the project profile
+(`node <advisor.js> --set-default execution_policy local-only`, or the `local`
+pack). `local-only` is strict and fails closed: a provider counts as local only
+when its location is verified (loopback endpoint plus trustworthy local model
+metadata for Ollama; cloud CLIs and `:cloud` models are remote). `unknown` is
+refused, not assumed local, and no `--ready`/`--allow-write` flag bypasses it.
+An unrecognized policy value also fails closed.
 
-1. Preview: `node <advisor.js> --discipline show` — show the user the FULL
-   text. Never install silently.
-2. Ask consent with the host's question UI (default = skip).
-3. On consent: `node <advisor.js> --discipline install` (auto-target: an
-   existing CLAUDE.md, else AGENTS.md; override with `--target <path>`).
-4. Mention reversibility: re-running replaces the marker block only
-   (idempotent, survives version upgrades); `--discipline remove` deletes it.
+xllm does not install process-discipline text into CLAUDE.md/AGENTS.md. If a
+previous version installed its marker block, only the user removes it:
+`node <advisor.js> --discipline remove [--target <path>]`. Never edit the user's
+instruction files yourself.
 
 ## Step 5 — Summarize
 
 Report: usable advisors now, what needs installing (`ollama serve`, missing
-CLIs), pinned roles, whether the discipline block was installed, and the
+CLIs), pinned roles, the execution policy, and the
 standing safety defaults — advisors read-only (`--allow-write` to opt in),
 same-vendor nesting refused, artifacts redacted with
 `--clean-artifacts [--older-than=DAYS]` retention.

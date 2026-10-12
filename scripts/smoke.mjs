@@ -1,113 +1,64 @@
 #!/usr/bin/env node
-/**
- * Optional live smoke for READY providers.
- * Safe defaults: only runs if XLLM_SMOKE=1 or --live is passed.
- * Without --live: dry-run + unit checks only.
- *
- *   node scripts/smoke.mjs
- *   node scripts/smoke.mjs --live
- *   node scripts/smoke.mjs --live --provider ollama
- */
-
+/** Offline by default. Live smoke verifies final assistant output, never prompt artifacts. */
 import { spawnSync } from 'child_process';
+import { randomBytes } from 'crypto';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
+import { buildInventory, loadProviderProfiles } from './xllm-advisor.js';
+import { pickAdvisorForRole } from './xllm-routing.js';
+import { loadTraits } from './xllm-traits.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const advisor = path.join(root, 'scripts', 'xllm-advisor.js');
-const live =
-  process.argv.includes('--live') ||
-  process.env.XLLM_SMOKE === '1';
-const providerFilter = (() => {
-  const i = process.argv.indexOf('--provider');
-  return i >= 0 ? process.argv[i + 1] : null;
-})();
-
-function run(args, opts = {}) {
+const live = process.argv.includes('--live') || process.env.XLLM_SMOKE === '1';
+const filterAt = process.argv.indexOf('--provider');
+const providerFilter = filterAt < 0 ? null : process.argv[filterAt + 1];
+function run(args, env = process.env, timeout = 120000) {
   return spawnSync(process.execPath, [advisor, ...args], {
-    encoding: 'utf8',
-    shell: false,
-    cwd: root,
-    timeout: opts.timeout ?? 120000,
-    maxBuffer: 12 * 1024 * 1024,
+    encoding: 'utf8', shell: false, cwd: root, env, timeout, maxBuffer: 12 * 1024 * 1024,
   });
+}
+function resultOf(run) {
+  let result;
+  try { result = JSON.parse(run.stdout || ''); } catch {
+    throw new Error(`Advisor returned no JSON envelope: ${run.stderr || run.error || ''}`);
+  }
+  if (run.status !== 0 || result.exitCode !== 0 || result.schema_version !== 2) {
+    throw new Error(result.failure?.hint || run.stderr || 'Advisor failed');
+  }
+  return result;
 }
 
 console.log(`xllm smoke (live=${live})`);
-
-const doc = run(['--doctor']);
-if (doc.status !== 0 && doc.status !== 2) {
-  console.error('doctor failed hard', doc.stderr || doc.stdout);
-  process.exit(1);
-}
-let report;
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'xllm-smoke-'));
 try {
-  report = JSON.parse((doc.stdout || '').trim());
-} catch {
-  console.error('doctor did not return JSON');
-  process.exit(1);
+  const profile = path.join(scratch, 'providers.toml');
+  fs.writeFileSync(profile, '[defaults]\nexecution_policy = "any"\n');
+  const dry = resultOf(run(['--dry-run', 'codex', 'offline smoke', '--json'],
+    { ...process.env, XLLM_PROVIDERS_PATH: profile }));
+  if (!dry.dryRun || dry.preview.safety !== 'os-read-only') throw new Error('Read-only dry-run failed');
+  console.log('offline JSON/read-only CLI path: ok');
+  if (live) {
+    const inventory = buildInventory({ refresh: true });
+    const ready = Object.entries(inventory.providers)
+      .filter(([p, v]) => v.installed && v.healthy && v.advisor_eligible && (!providerFilter || p === providerFilter))
+      .map(([p]) => p);
+    const pick = pickAdvisorForRole('critic', {
+      taskText: 'Return a smoke verification token', intensity: 'low', forceCli: true,
+      readyProviders: ready, inventory, profiles: loadProviderProfiles(),
+      traits: loadTraits(),
+    });
+    const marker = `XLLM_SMOKE_${randomBytes(8).toString('hex')}`;
+    const result = resultOf(run([pick.spec, `Reply with exactly ${marker} and nothing else.`,
+      '--json', '--no-artifacts'], process.env, 300000));
+    if (result.raw.trim() !== marker) throw new Error('Final assistant response did not match the smoke token');
+    console.log(`live final response: ok (${pick.spec}; identity=${result.attribution.identity_status}; ${result.durationMs}ms)`);
+  } else console.log('no live model calls (use --live explicitly)');
+} catch (error) {
+  console.error(error.message || error);
+  process.exitCode = 1;
+} finally {
+  fs.rmSync(scratch, { recursive: true, force: true });
 }
-const ready = [...(report.readyLocal || []), ...(report.readyCloud || [])];
-console.log('ready:', ready.join(', ') || '(none)');
-
-const probe = ready[0] || 'grok';
-const dry = run(['--dry-run', probe, 'smoke dry-run']);
-if (dry.status !== 0) {
-  console.error('dry-run failed', dry.stderr);
-  process.exit(1);
-}
-console.log('dry-run ok:', probe);
-
-if (!live) {
-  console.log('skip live calls (pass --live or XLLM_SMOKE=1)');
-  process.exit(0);
-}
-
-const candidates = providerFilter
-  ? ready.filter((p) => p === providerFilter || p.startsWith(providerFilter))
-  : ready.filter((p) => ['ollama', 'grok', 'codex', 'claude'].includes(p));
-
-if (candidates.length === 0) {
-  console.error('no READY providers for live smoke');
-  process.exit(2);
-}
-
-const order = ['ollama', 'grok', 'codex', 'claude'];
-const pick = order.find((p) => candidates.includes(p)) || candidates[0];
-
-let spec = pick;
-if (pick === 'ollama') {
-  const models = report.providers?.ollama?.models || [];
-  const prefer =
-    models.find((m) => /qwen3\.6|llama3\.2|gemma2|phi/i.test(m)) ||
-    models[0] ||
-    'llama3.2';
-  spec = `ollama:${prefer}`;
-}
-
-console.log('live provider:', spec);
-const prompt =
-  'Reply with exactly one line containing the token XLLM_SMOKE_OK and nothing else important.';
-const liveRes = run([spec, prompt], { timeout: 300000 });
-const out = (liveRes.stdout || '') + '\n' + (liveRes.stderr || '');
-const artifactLine = (liveRes.stdout || '')
-  .trim()
-  .split(/\r?\n/)
-  .filter(Boolean)
-  .pop();
-
-console.log('exit:', liveRes.status);
-if (artifactLine && fs.existsSync(artifactLine)) {
-  console.log('artifact:', artifactLine);
-  const body = fs.readFileSync(artifactLine, 'utf8');
-  const hasToken = /XLLM_SMOKE_OK/i.test(body);
-  console.log('token in artifact:', hasToken ? 'yes' : 'no (model may have paraphrased)');
-} else {
-  console.log('stdout/stderr tail:\n', out.slice(-1500));
-}
-
-if (liveRes.status !== 0 && !(artifactLine && fs.existsSync(artifactLine))) {
-  process.exit(liveRes.status || 1);
-}
-console.log('live smoke finished');

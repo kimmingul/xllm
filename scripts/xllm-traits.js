@@ -3,18 +3,31 @@
  * xllm traits — evidence-based provider trait profiles (docs/traits-design.md).
  *
  * A DERIVED, on-demand view over the evidence streams that already exist:
- * the panel ledger (adherence, debate claim outcomes, outcomes), benchmark
- * results (seeded-defect detection cells), and the contracts cache (current
+ * the panel ledger (adherence, debate claim outcomes, outcomes), adjudicated
+ * benchmark evidence (seeded-defect detection), and the health cache (current
  * health). Never hand-authored lore, never written back into any stream,
  * silent below explicit sample gates — cold start is bit-identical to
  * pre-traits routing.
  *
- * Routable map (3-round codex/grok adversarial review, user-adjudicated):
+ * STRICT EVIDENCE IDENTITY. Routable measurements are keyed ONLY by
+ * evidenceKey(attribution) (xllm-evidence.js): a resolved reported model
+ * (+revision), effective effort, surface and CLI version cohort, taken from a
+ * run's envelope. Legacy records, bare provider/spec strings, mutable aliases
+ * and unresolved identities are EXCLUDED (counted, never matched by spec
+ * string, never used as a fallback). A routing candidate gets a key only via
+ * resolveCandidateEvidence (observed current identity or an explicit
+ * immutable ID) with a fresh CLI version; the reported model is never
+ * inferred from the request.
+ *
+ * Routable map:
  *  - bench_defect_detection (Wilson 95% LCB) → general judgment routing only
  *    (critic|verify|tests|security), may cross tier/cost under strict gates.
+ *    Architecture has NO benchmark and is never routed on measured quality.
  *  - structured_output (adherence) → suggestTiebreaker veto only.
- *  - health (contracts) → kind-aware filter (see healthDecision).
- *  - claim_survival / decisive_refutation / outcomes / latency → inspect-only.
+ *  - health (contracts) → kind-aware filter (see healthDecision); flags/
+ *    version and auth are separate facts with their own freshness.
+ *  - claim_survival / decisive_refutation / outcomes / latency → inspect-only
+ *    (spec-string keyed, unverified identity).
  *
  *   node scripts/xllm-traits.js [--json]
  */
@@ -24,7 +37,14 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import process from 'process';
 import { resolveStateDir } from './xllm-advisor.js';
-import { contractsCachePath } from './xllm-contracts.js';
+import {
+  contractsCachePath,
+  normalizeCliVersion,
+  authObservationValidity,
+  AUTH_TTL_MS,
+} from './xllm-health.js';
+import { evidenceKey, isMutableModel } from './xllm-evidence.js';
+import { readBenchEvidence } from './xllm-bench.js';
 
 // Own minimal ledger reader instead of importing xllm-panel.js: panel imports
 // xllm-routing.js (suggestTiebreaker) and routing imports this module — going
@@ -54,14 +74,17 @@ function readLedgerFile(root = process.cwd()) {
 
 export const TRAIT_WINDOW = {
   horizon_days: 180,
-  max_structured_output: 50, // per spec, newest first (batch-granular stop)
+  max_structured_output: 50, // per evidence key, newest first (batch-granular stop)
   max_claims: 50,
   max_outcomes: 30,
   contracts_fresh_ms: 24 * 60 * 60 * 1000,
+  /** A mutable alias (default/sonnet/latest) identity observation is trusted this long. */
+  identity_fresh_ms: 7 * 24 * 60 * 60 * 1000,
 };
 
 export const TRAIT_GATES = {
-  bench_min_cells: 6, // per-spec non-silent
+  bench_min_cells: 6, // per-key non-silent
+  bench_min_runs: 3, // repeats behind one adjudicated {task, defect} opportunity
   bench_min_shared_tasks: 4, // comparator precondition
   bench_min_shared_opportunities: 12, // comparator precondition
   bench_lcb_margin: 0.1, // pay-more jump: candidate LCB ≥ baseline LCB + margin
@@ -74,7 +97,10 @@ export const TRAIT_GATES = {
  * the shipped benchmark is defect-listing code review, not architecture review. */
 export const ROUTABLE_BENCH_ROLES = ['critic', 'verify', 'tests', 'security'];
 
-/** Effort is session policy, not identity: codex:gpt-5.5@high → codex:gpt-5.5 */
+/**
+ * Effort is session policy, not identity: codex:gpt-5.5@high → codex:gpt-5.5.
+ * PRESENTATION / model-author identity only — never a routing evidence key.
+ */
 export function canonicalSpecKey(spec) {
   return String(spec || '').trim().toLowerCase().split('@')[0];
 }
@@ -100,29 +126,162 @@ function withinHorizon(iso, now, horizonDays) {
 }
 
 const opKey = (taskId, defectId) => `${taskId}::${defectId}`;
+const normEffort = (e) => {
+  const s = String(e ?? '').trim().toLowerCase();
+  return s || null;
+};
+
+/** Identity fields of an evidenceKey (xllm-evidence.js layout). null if unparsable. */
+export function parseEvidenceKey(key) {
+  try {
+    const [provider, reported_model, model_revision, effective_effort, surface, cli_version] = JSON.parse(key);
+    if (!provider || !reported_model) return null;
+    return {
+      provider,
+      reported_model,
+      model_revision: model_revision ?? null,
+      effective_effort: effective_effort ?? null,
+      surface: surface ?? null,
+      cli_version: cli_version ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function emptyStructured() {
+  return { first: 0, retry: 0, failed: 0, n: 0, routable: 'tiebreak_only' };
+}
+
+/**
+ * Health per provider from a contracts snapshot. Flags/version and auth are
+ * separate facts, each with its own timestamp/freshness. Only OBSERVED
+ * failures block; unknown auth is never success and never a veto.
+ */
+function deriveHealth(contracts, { now, env }) {
+  const health = {};
+  if (!contracts || (!contracts.providers && !contracts.auth)) return health;
+  const probedAt = Date.parse(contracts.probed_at || '');
+  const probeFresh = Number.isFinite(probedAt) && now - probedAt <= TRAIT_WINDOW.contracts_fresh_ms;
+  const known = contracts.providers || {};
+  // A provider can have an auth observation (runtime/live) without a probe row.
+  for (const p of new Set([...Object.keys(known), ...Object.keys(contracts.auth || {})])) {
+    const r = known[p] || {};
+    const flags = {
+      kind: r.failure ? r.failure.kind : 'ok',
+      retryable: r.failure ? !!r.failure.retryable : null,
+      probed_at: r.probed_at || (known[p] ? contracts.probed_at : null) || null,
+      fresh: !!known[p] && probeFresh,
+    };
+    const version = normalizeCliVersion(r.version);
+    const a = contracts.auth && contracts.auth[p];
+    const auth = { status: 'unknown', kind: null, observed_at: null, fresh: false, source: null, reason: null };
+    if (a && !a.skipped && a.observed_at) {
+      const validity = authObservationValidity(a, { provider: p, env, cliVersion: r.version ?? null });
+      const t = Date.parse(a.observed_at);
+      auth.observed_at = a.observed_at;
+      auth.source = a.source || null;
+      if (!validity.valid) {
+        auth.reason = `observation invalidated: ${validity.reason}`;
+      } else {
+        auth.status = a.auth_verified === true ? 'verified' : a.auth_verified === false ? 'failed' : 'unknown';
+        auth.kind = a.failure ? a.failure.kind : null;
+        auth.fresh = Number.isFinite(t) && now - t <= AUTH_TTL_MS && t <= now + 60000;
+        if (!auth.fresh) auth.reason = 'observation past its TTL';
+      }
+    }
+    // Effective blocking fact: a failing flags/version probe, else an observed auth failure.
+    let eff = { kind: 'ok', retryable: null, fresh: probeFresh, source: 'flags' };
+    const authBlocks = auth.status === 'failed';
+    if (flags.kind !== 'ok' && !(authBlocks && auth.fresh && !flags.fresh)) {
+      eff = { kind: flags.kind, retryable: flags.retryable, fresh: flags.fresh, source: 'flags' };
+    } else if (authBlocks) {
+      eff = { kind: auth.kind || 'auth', retryable: false, fresh: auth.fresh, source: 'auth' };
+    }
+    health[p] = {
+      kind: eff.kind,
+      retryable: eff.retryable,
+      probed_at: flags.probed_at,
+      fresh: eff.fresh,
+      blocking_source: eff.kind === 'ok' ? null : eff.source,
+      version,
+      flags,
+      auth,
+      safety: r.safety || null,
+    };
+  }
+  return health;
+}
 
 /**
  * Pure derivation over evidence inputs. No filesystem access — unit tests
  * pass fixtures; loadTraits() does the IO.
+ *
+ * benchEvidence: entries from xllm-bench readBenchEvidence() — one adjudicated
+ * {evidence_key, task_id, defect_id} opportunity with runs_n/hits_n repeats.
  */
 export function deriveTraitProfiles({
   ledgerRecords = [],
-  benchReports = [],
+  benchEvidence = [],
   contracts = null,
   now = Date.now(),
   horizonDays = TRAIT_WINDOW.horizon_days,
+  env = process.env,
+  legacyBenchFiles = 0,
 } = {}) {
-  const specs = {};
+  const specs = {}; // spec-string keyed, INSPECT-ONLY (unverified identity)
   const warnings = [];
-  let excludedNoTimestamp = 0;
+  const excluded = {
+    no_timestamp: 0,
+    ledger_no_evidence: 0, // adherence rows without a resolved envelope attribution
+    bench_below_min_runs: 0,
+    bench_uncertain: 0,
+    legacy_bench_files: legacyBenchFiles,
+  };
   const spec = (key) =>
     (specs[key] = specs[key] || {
-      structured_output: { first: 0, retry: 0, failed: 0, n: 0, routable: 'tiebreak_only' },
       claim_survival: { survived: 0, killed: 0, unresolved: 0, n: 0, routable: false },
       outcome_useful_adoption: { adopted_helpful: 0, n: 0, routable: false },
-      latency_ms: { attempts: 0, total_ms: 0, routable: false },
-      bench_defect_detection: null, // filled from bench cells below
     });
+
+  const evidence = {}; // evidenceKey -> routable profile
+  const observations = {}; // `${provider}\0${requested_model}\0${requested_effort}` -> newest observed identity
+  const ev = (key, identity) =>
+    (evidence[key] = evidence[key] || {
+      key,
+      identity,
+      structured_output: emptyStructured(),
+      bench_defect_detection: null,
+      latency_ms: { attempts: 0, total_ms: 0, routable: false },
+      latest_t: 0,
+    });
+
+  const observe = (a, tMs) => {
+    const key = evidenceKey(a);
+    if (!key) return null;
+    const id = parseEvidenceKey(key);
+    if (!id) return null;
+    const rec0 = ev(key, id);
+    rec0.latest_t = Math.max(rec0.latest_t, tMs);
+    const ok = `${String(a.executed_provider).toLowerCase()}\0${String(a.requested_model || '').trim()}\0${normEffort(a.requested_effort) || ''}`;
+    const prev = observations[ok];
+    if (!prev || tMs > prev.t) {
+      observations[ok] = {
+        evidence_key: key,
+        t: tMs,
+        observed_at: new Date(tMs).toISOString(),
+        provider: id.provider,
+        requested_model: a.requested_model || null,
+        requested_effort: normEffort(a.requested_effort),
+        reported_model: id.reported_model,
+        model_revision: id.model_revision,
+        effective_effort: id.effective_effort,
+        surface: id.surface,
+        cli_version: a.cli_version || null,
+      };
+    }
+    return key;
+  };
 
   // Newest-first over the append-only ledger.
   const records = [...ledgerRecords].reverse();
@@ -130,38 +289,56 @@ export function deriveTraitProfiles({
   for (const r of records) {
     if (!r || typeof r !== 'object') continue;
     if (!withinHorizon(r.created_at, now, horizonDays)) {
-      if (r.created_at == null) excludedNoTimestamp += 1;
+      if (r.created_at == null) excluded.no_timestamp += 1;
       continue;
     }
     inWindow.push(r);
   }
 
-  // structured_output: panel/debate adherence summaries + tiebreak panelist.
+  // structured_output: adherence joined to the envelope attribution of the SAME
+  // calls. No attribution (legacy), or conflicting attributions → not evidence.
+  const addAdherence = (attr, counts, tMs) => {
+    const key = observe(attr, tMs);
+    if (!key) {
+      excluded.ledger_no_evidence += 1;
+      return;
+    }
+    const s = evidence[key].structured_output;
+    if (s.n >= TRAIT_WINDOW.max_structured_output) return;
+    s.first += counts.first || 0;
+    s.retry += counts.retry || 0;
+    s.failed += counts.failed || 0;
+    s.n = s.first + s.retry + s.failed;
+  };
+  const attributionFor = (r, specName) => {
+    if (r.attribution_conflicts && r.attribution_conflicts[specName]) return null;
+    if (r.attributions && r.attributions[specName]) return r.attributions[specName];
+    const p = Array.isArray(r.panelists) ? r.panelists.find((x) => x && x.spec === specName) : null;
+    return p && p.attribution ? p.attribution : null;
+  };
   for (const r of inWindow) {
-    if ((r.type === 'panel' || r.type === 'debate') && r.adherence && typeof r.adherence === 'object') {
-      for (const [rawSpec, c] of Object.entries(r.adherence)) {
-        const s = spec(canonicalSpecKey(rawSpec)).structured_output;
-        if (s.n >= TRAIT_WINDOW.max_structured_output) continue;
-        s.first += c.first || 0;
-        s.retry += c.retry || 0;
-        s.failed += c.failed || 0;
-        s.n = s.first + s.retry + s.failed;
+    const tMs = Date.parse(r.created_at);
+    if ((r.type === 'panel' || r.type === 'debate' || r.type === 'council') && r.adherence && typeof r.adherence === 'object') {
+      for (const [specName, c] of Object.entries(r.adherence)) {
+        addAdherence(attributionFor(r, specName), c || {}, tMs);
       }
-    } else if (r.type === 'tiebreak' && r.panelist && r.panelist.adherence) {
-      const s = spec(canonicalSpecKey(r.panelist.spec)).structured_output;
-      if (s.n < TRAIT_WINDOW.max_structured_output) {
-        s[r.panelist.adherence] = (s[r.panelist.adherence] || 0) + 1;
-        s.n = s.first + s.retry + s.failed;
+    } else if (r.type === 'panel' && Array.isArray(r.panelists)) {
+      for (const p of r.panelists) {
+        if (p && ['first', 'retry', 'failed'].includes(p.adherence)) {
+          addAdherence(attributionFor(r, p.spec), { [p.adherence]: 1 }, tMs);
+        }
       }
+    } else if (r.type === 'tiebreak' && r.panelist && ['first', 'retry', 'failed'].includes(r.panelist.adherence)) {
+      addAdherence(r.panelist.attribution || null, { [r.panelist.adherence]: 1 }, tMs);
     }
   }
-  for (const s of Object.values(specs)) {
-    const so = s.structured_output;
+  for (const e of Object.values(evidence)) {
+    const so = e.structured_output;
     so.success_rate = so.n ? +(((so.first + so.retry) / so.n).toFixed(3)) : null;
     so.first_pass_rate = so.n ? +((so.first / so.n).toFixed(3)) : null;
   }
 
-  // claim_survival (inspect-only): debate claims per author spec.
+  // claim_survival (inspect-only): debate claims per author spec string.
   const providers = {};
   for (const r of inWindow) {
     if (r.type !== 'debate' || !Array.isArray(r.claims)) continue;
@@ -224,92 +401,88 @@ export function deriveTraitProfiles({
     o.rate = o.n ? +((o.adopted_helpful / o.n).toFixed(3)) : null;
   }
 
-  // bench_defect_detection: newest observation per {canonical_spec, task_id}
-  // (whole-file summation would let reruns manufacture n).
-  const newestCell = {}; // `${key}\u0000${taskId}` -> {t, hits, misses}
-  let benchFilesUsed = 0;
-  for (const rep of benchReports) {
-    if (!rep || typeof rep !== 'object' || !rep.single) continue;
-    if (!withinHorizon(rep.created_at, now, horizonDays)) {
-      if (rep.created_at == null) excludedNoTimestamp += 1;
+  // bench_defect_detection: adjudicated opportunities keyed by evidence key.
+  // Newest observation per {evidence_key, task, defect} (reruns must not
+  // manufacture n); a cell needs ≥ bench_min_runs repeats, is a hit only on a
+  // strict majority of repeats, and is dropped when uncertain-as-negative and
+  // uncertain-as-positive disagree (no fake precision).
+  const newestOp = {};
+  for (const e of benchEvidence) {
+    if (!e || typeof e !== 'object' || !e.evidence_key || !e.task_id || !e.defect_id) continue;
+    if (!withinHorizon(e.created_at, now, horizonDays)) {
+      if (e.created_at == null) excluded.no_timestamp += 1;
       continue;
     }
-    benchFilesUsed += 1;
-    const t = Date.parse(rep.created_at);
-    for (const [rawSpec, s] of Object.entries(rep.single)) {
-      const key = canonicalSpecKey(rawSpec);
-      for (const [taskId, cell] of Object.entries(s.per_task || {})) {
-        if (!cell || cell.error || !Array.isArray(cell.hits)) continue;
-        const k = `${key}\u0000${taskId}`;
-        if (!newestCell[k] || t > newestCell[k].t) {
-          newestCell[k] = { t, key, taskId, hits: cell.hits, misses: cell.misses || [] };
-        }
-      }
-      // latency (inspect-only)
-      if (Number.isFinite(s.duration_ms) && Number.isFinite(s.graded_tasks) && s.graded_tasks > 0) {
-        const lat = spec(key).latency_ms;
-        lat.attempts += s.graded_tasks;
-        lat.total_ms += s.duration_ms;
-      }
+    if (!(e.runs_n >= TRAIT_GATES.bench_min_runs)) {
+      excluded.bench_below_min_runs += 1;
+      continue;
     }
+    const k = `${e.evidence_key}\u0000${opKey(e.task_id, e.defect_id)}`;
+    const t = Date.parse(e.created_at);
+    if (!newestOp[k] || t > newestOp[k].t) newestOp[k] = { t, e };
   }
-  for (const obs of Object.values(newestCell)) {
-    const b = (spec(obs.key).bench_defect_detection = spec(obs.key).bench_defect_detection || {
+  const latencySeen = new Set();
+  for (const { t, e } of Object.values(newestOp)) {
+    const id = parseEvidenceKey(e.evidence_key);
+    if (!id) continue;
+    const majority = e.hits_n * 2 > e.runs_n;
+    const majorityUpper = (Number.isFinite(e.hits_upper_n) ? e.hits_upper_n : e.hits_n) * 2 > e.runs_n;
+    if (majority !== majorityUpper) {
+      excluded.bench_uncertain += 1;
+      continue;
+    }
+    const rec = ev(e.evidence_key, id);
+    rec.latest_t = Math.max(rec.latest_t, t);
+    const b = (rec.bench_defect_detection = rec.bench_defect_detection || {
       detected: 0,
       n: 0,
       tasks: 0,
       cells: {},
+      min_runs: e.runs_n,
       routable: true,
+      _tasks: new Set(),
     });
-    b.tasks += 1;
-    for (const id of obs.hits) {
-      b.cells[opKey(obs.taskId, id)] = true;
-      b.detected += 1;
-      b.n += 1;
-    }
-    for (const id of obs.misses) {
-      b.cells[opKey(obs.taskId, id)] = false;
-      b.n += 1;
+    b.cells[opKey(e.task_id, e.defect_id)] = majority;
+    b.n += 1;
+    if (majority) b.detected += 1;
+    b._tasks.add(e.task_id);
+    b.min_runs = Math.min(b.min_runs, e.runs_n);
+    const lk = `${e.run_id}\u0000${e.evidence_key}\u0000${e.task_id}`;
+    if (!latencySeen.has(lk) && Number.isFinite(e.mean_duration_ms)) {
+      latencySeen.add(lk);
+      rec.latency_ms.attempts += e.runs_n;
+      rec.latency_ms.total_ms += e.mean_duration_ms * e.runs_n;
     }
   }
-  for (const s of Object.values(specs)) {
-    const b = s.bench_defect_detection;
+  for (const rec of Object.values(evidence)) {
+    const b = rec.bench_defect_detection;
     if (b) {
+      b.tasks = b._tasks.size;
+      delete b._tasks;
       b.rate = b.n ? +((b.detected / b.n).toFixed(3)) : null;
       b.wilson95_lower = wilson95Lower(b.detected, b.n);
       b.gated = b.n >= TRAIT_GATES.bench_min_cells;
     }
-    const lat = s.latency_ms;
+    const lat = rec.latency_ms;
     lat.mean_ms_per_task = lat.attempts ? Math.round(lat.total_ms / lat.attempts) : null;
   }
 
-  // health (contracts snapshot; kind-aware consumption is healthDecision()).
-  const health = {};
-  if (contracts && contracts.providers) {
-    const probedAt = Date.parse(contracts.probed_at || '');
-    const fresh = Number.isFinite(probedAt) && now - probedAt <= TRAIT_WINDOW.contracts_fresh_ms;
-    for (const [p, r] of Object.entries(contracts.providers)) {
-      health[p] = {
-        kind: r.failure ? r.failure.kind : 'ok',
-        retryable: r.failure ? !!r.failure.retryable : null,
-        probed_at: contracts.probed_at || null,
-        fresh,
-      };
-    }
-  }
+  const health = deriveHealth(contracts, { now, env });
 
   return {
-    version: 1,
+    version: 2,
     generated_at: new Date(now).toISOString(),
     window: { horizon_days: horizonDays, caps: { ...TRAIT_WINDOW } },
+    evidence,
+    observations,
     specs,
     providers,
     health,
-    excluded: { no_timestamp: excludedNoTimestamp },
+    excluded,
     provenance: {
       ledger_records: ledgerRecords.length,
       ledger_records_in_window: inWindow.length,
-      bench_files_used: benchFilesUsed,
+      bench_opportunities_used: Object.keys(newestOp).length - excluded.bench_uncertain,
       contracts: !!contracts,
     },
     warnings,
@@ -318,8 +491,8 @@ export function deriveTraitProfiles({
 
 /**
  * Kind-aware health filter (design C). Explicit user --ready= is authority;
- * with detected/absent ready sets only FRESH failures act, and only the kinds
- * binary-presence detection cannot see may veto.
+ * with detected/absent ready sets only FRESH observed failures act, and only
+ * the kinds binary-presence detection cannot see may veto.
  */
 export function healthDecision(provider, healthMap, { readySource = 'detected', detectedReady = null } = {}) {
   if (readySource === 'explicit') return 'ignore';
@@ -334,9 +507,9 @@ export function healthDecision(provider, healthMap, { readySource = 'detected', 
   return 'demote';
 }
 
-/** suggestTiebreaker adherence veto (design D′): known ≥25% abstainer at n≥10. */
-export function adherenceVeto(specKey, traits) {
-  const so = traits && traits.specs && traits.specs[canonicalSpecKey(specKey)]?.structured_output;
+/** suggestTiebreaker adherence veto (design D′): known ≥25% abstainer at n≥10, by evidence key. */
+export function adherenceVeto(key, traits) {
+  const so = key && traits && traits.evidence && traits.evidence[key]?.structured_output;
   if (!so || so.n < TRAIT_GATES.adherence_veto_n) return false;
   return so.failed / so.n >= TRAIT_GATES.adherence_veto_failed_rate;
 }
@@ -360,34 +533,83 @@ export function sharedBenchComparison(candBench, baseBench) {
   };
 }
 
-/** Resolve the trait key a routed pick would actually RUN (no sibling rollup). */
-export function resolveCandidateKey(provider, route, profiles) {
-  const model =
-    (route && route.model) || (profiles && profiles.providers && profiles.providers[provider]?.default_model) || '';
-  return canonicalSpecKey(model ? `${provider}:${model}` : provider);
+/**
+ * Evidence key a routed candidate WOULD produce — or null with the reason it
+ * has no measured basis. Never infers the reported model from the request:
+ *
+ *  - mutable/default request (alias, 'latest', no model): needs an observed
+ *    envelope for exactly this {provider, requested model, requested effort}
+ *    whose identity was observed recently (identity_fresh_ms);
+ *  - explicit immutable model ID: may also match any evidence whose REPORTED
+ *    model is exactly that ID with the same effective effort;
+ *  - both require the evidence's CLI version cohort to equal the current CLI
+ *    version from a fresh contracts probe (unknown/changed → no basis).
+ *
+ * @returns {{key:string|null, basis:string|null, reason:string|null, identity?:object}}
+ */
+export function resolveCandidateEvidence(provider, model, effort, traits, { now = Date.now() } = {}) {
+  const none = (reason) => ({ key: null, basis: null, reason });
+  if (!traits || !traits.evidence) return none('no trait evidence loaded');
+  const p = String(provider || '').toLowerCase();
+  const m = String(model || '').trim();
+  const eff = normEffort(effort);
+  const h = traits.health && traits.health[p];
+  const cliNow = h && h.flags?.fresh && h.version ? h.version : null;
+  const cliCheck = (was) => {
+    const w = normalizeCliVersion(was);
+    if (!w) return null; // no CLI version cohort in this key
+    if (!cliNow) return 'current CLI version unknown (run xllm-contracts)';
+    if (w !== cliNow) return `evidence cohort is CLI ${w}, current is ${cliNow}`;
+    return null;
+  };
+
+  const obs = (traits.observations || {})[`${p}\0${m}\0${eff || ''}`];
+  if (obs) {
+    const bad = cliCheck(obs.cli_version);
+    if (bad) return none(bad);
+    if (isMutableModel(m) && now - obs.t > TRAIT_WINDOW.identity_fresh_ms) {
+      return none('mutable alias/default identity not observed recently');
+    }
+    return { key: obs.evidence_key, basis: 'observed-identity', reason: null, identity: obs };
+  }
+  if (m && !isMutableModel(m)) {
+    const want = m.toLowerCase();
+    let best = null;
+    for (const e of Object.values(traits.evidence)) {
+      const id = e.identity;
+      if (!id || id.provider !== p || String(id.reported_model).toLowerCase() !== want) continue;
+      if (normEffort(id.effective_effort) !== eff) continue;
+      if (cliCheck(id.cli_version)) continue;
+      if (!best || (e.latest_t ?? 0) > (best.latest_t ?? 0)) best = e;
+    }
+    if (best) return { key: best.key, basis: 'explicit-immutable-id', reason: null, identity: best.identity };
+  }
+  return none(
+    m && !isMutableModel(m)
+      ? 'no evidence for this exact model ID, effort and current CLI version'
+      : 'no observed current identity for this request (mutable/default model)'
+  );
 }
 
 // ---------------------------------------------------------------------------
 // IO (thin; the derivation above stays pure)
 // ---------------------------------------------------------------------------
 
-export function readBenchResults(root = process.cwd()) {
-  const dir = path.join(root, 'benchmarks', 'results');
-  let files = [];
+/** Adjudicated bench evidence (project <state>/benchmarks/results via xllm-bench). */
+export function readBenchResults(root = process.cwd(), env = process.env) {
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    return readBenchEvidence(root, env);
   } catch {
     return [];
   }
-  const out = [];
-  for (const f of files) {
-    try {
-      out.push({ _file: f, ...JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) });
-    } catch {
-      /* malformed report: skipped (visible via provenance count difference) */
-    }
+}
+
+function countLegacyBenchFiles(root) {
+  try {
+    return fs.readdirSync(path.join(root, 'benchmarks', 'results')).filter((f) => f.endsWith('.json')).length;
+  } catch {
+    return 0;
   }
-  return out;
 }
 
 export function readContractsCache(env = process.env) {
@@ -401,9 +623,11 @@ export function readContractsCache(env = process.env) {
 export function loadTraits(root = process.cwd(), { env = process.env, now = Date.now() } = {}) {
   return deriveTraitProfiles({
     ledgerRecords: readLedgerFile(root),
-    benchReports: readBenchResults(root),
+    benchEvidence: readBenchResults(root, env),
     contracts: readContractsCache(env),
+    legacyBenchFiles: countLegacyBenchFiles(root),
     now,
+    env,
   });
 }
 
@@ -411,33 +635,56 @@ export function loadTraits(root = process.cwd(), { env = process.env, now = Date
 // CLI
 // ---------------------------------------------------------------------------
 
+export function describeEvidenceIdentity(id) {
+  if (!id) return '(unknown)';
+  const rev = id.model_revision ? `#${String(id.model_revision).slice(0, 12)}` : '';
+  return `${id.provider}:${id.reported_model}${rev}@${id.effective_effort ?? '-'} ${id.surface || '?'} cli ${id.cli_version || '-'}`;
+}
+
 export function formatTraitsTable(t) {
   const fmt = (v) => (v == null ? '—' : String(v));
   const lines = [
     `xllm traits — derived ${t.generated_at} (window ${t.window.horizon_days}d)`,
-    `sources: ledger ${t.provenance.ledger_records_in_window}/${t.provenance.ledger_records} records in window · bench files ${t.provenance.bench_files_used} · contracts ${t.provenance.contracts ? 'yes' : 'no'}${t.excluded.no_timestamp ? ` · excluded(no timestamp) ${t.excluded.no_timestamp}` : ''}`,
+    `sources: ledger ${t.provenance.ledger_records_in_window}/${t.provenance.ledger_records} records in window · bench opportunities ${t.provenance.bench_opportunities_used} · contracts ${t.provenance.contracts ? 'yes' : 'no'}`,
+    `excluded (never routed): ledger rows without resolved attribution ${t.excluded.ledger_no_evidence} · bench < ${TRAIT_GATES.bench_min_runs} runs ${t.excluded.bench_below_min_runs} · bench uncertain ${t.excluded.bench_uncertain} · legacy bench files ${t.excluded.legacy_bench_files}${t.excluded.no_timestamp ? ` · no timestamp ${t.excluded.no_timestamp}` : ''}`,
     '',
-    'key                        structured(n)   rate   claims(n)  survive  bench(n)  rate   LCB     routing',
+    'measured identity (provider:reported-model@effective-effort surface CLI)   structured(n) rate   bench(n) rate   LCB     routing',
   ];
-  const keys = Object.keys(t.specs).sort();
-  if (!keys.length) lines.push('  (no evidence yet — run panel/debate/council or xllm-bench)');
+  const keys = Object.keys(t.evidence || {}).sort();
+  if (!keys.length) {
+    lines.push('  (no measured basis — no run with a resolved model identity yet; legacy/bare/mutable records are not used)');
+  }
   for (const k of keys) {
-    const s = t.specs[k];
-    const so = s.structured_output;
-    const cs = s.claim_survival;
-    const b = s.bench_defect_detection;
+    const e = t.evidence[k];
+    const so = e.structured_output;
+    const b = e.bench_defect_detection;
     lines.push(
-      `${k.padEnd(26)} ${String(so.n).padStart(6)}        ${fmt(so.success_rate).padEnd(6)} ${String(cs.n).padStart(6)}     ${fmt(cs.rate).padEnd(8)} ${String(b ? b.n : 0).padStart(5)}     ${fmt(b && b.rate).padEnd(6)} ${fmt(b && b.wilson95_lower).padEnd(7)} ${b && b.gated ? 'bench:eligible' : 'below gates'}`
+      `${describeEvidenceIdentity(e.identity).padEnd(70)} ${String(so.n).padStart(6)}   ${fmt(so.success_rate).padEnd(6)} ${String(b ? b.n : 0).padStart(5)}   ${fmt(b && b.rate).padEnd(6)} ${fmt(b && b.wilson95_lower).padEnd(7)} ${b && b.gated ? 'bench:eligible' : 'below gates'}`
     );
   }
-  const health = Object.entries(t.health).filter(([, h]) => h.kind !== 'ok');
+  const specKeys = Object.keys(t.specs || {}).sort();
+  if (specKeys.length) {
+    lines.push('', 'inspect-only (spec-string keyed, identity unverified — never routed):');
+    for (const k of specKeys) {
+      const cs = t.specs[k].claim_survival;
+      lines.push(`  ${k.padEnd(28)} claims n=${cs.n} survive=${fmt(cs.rate)}`);
+    }
+  }
+  const health = Object.entries(t.health || {});
   if (health.length) {
-    lines.push('', 'health (contracts):');
-    for (const [p, h] of health) lines.push(`  ${p}: ${h.kind}${h.fresh ? '' : ' (stale — ignored by routing)'}`);
+    lines.push('', 'health (contracts; flags/version and auth are separate facts):');
+    for (const [p, h] of health) {
+      const flags = h.flags.kind === 'ok' ? 'flags ok' : `flags ${h.flags.kind}${h.flags.fresh ? '' : ' (stale)'}`;
+      const auth =
+        h.auth.status === 'unknown'
+          ? `auth unknown${h.auth.reason ? ` (${h.auth.reason})` : ''}`
+          : `auth ${h.auth.status}${h.auth.fresh ? '' : ' (past TTL — ignored)'} @${h.auth.observed_at}`;
+      lines.push(`  ${p.padEnd(12)} ${flags} · ${auth}${h.version ? ` · cli ${h.version}` : ''}${h.safety ? ` · safety ${h.safety.boundary}` : ''}`);
+    }
   }
   lines.push(
     '',
-    'routable: bench LCB → judgment roles (critic|verify|tests|security) under shared-opportunity gates;',
+    'routable: bench LCB → judgment roles (critic|verify|tests|security) under shared-opportunity gates, per evidence identity;',
     'structured_output → tiebreak veto only; survival/outcomes/latency/decisive-refutation: inspect-only.',
     `ledger: ${traitsLedgerPath()}`
   );

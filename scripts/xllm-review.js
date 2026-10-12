@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * xllm review — one entry point for the deliberation family (umbrella-5).
+ * xllm review — one entry point for the review family.
  *
+ *   blind   → panel run        (measured: identical prompt, ledger, agreement) — default
  *   roles   → advisor --multi  (coverage; synthesis labels, NOT measured)
- *   blind   → panel run        (measured: identical prompt, ledger, agreement)
- *   debate  → debate run       (adversarial refutation)
- *   council → council run      (blind → debate pipeline)
+ *   debate  → debate run       (EXPERIMENTAL adversarial refutation)
+ *   council → council run      (EXPERIMENTAL blind → debate pipeline)
  *   stats   → panel stats      · outcome → panel outcome
  *
  * Old top-level nouns (multi/panel/debate/council) were removed in v0.28.0.
@@ -19,21 +19,25 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export const REVIEW_USAGE = `xllm review — cross-vendor deliberation (one noun, four modes)
+export const REVIEW_USAGE = `xllm review — cross-vendor review (blind is the default; debate/council are EXPERIMENTAL)
 Usage:
+  xllm review blind   p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c] [--json] [--no-artifacts]
   xllm review roles   p1,p2[,p3] "<prompt>"
-  xllm review blind   p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
-  xllm review debate  p1,p2[,p3] "<claim>"
-  xllm review council p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]
+  xllm review debate  p1,p2[,p3] "<claim>"                                  [--json] [--no-artifacts]   (experimental)
+  xllm review council p1,p2[,p3] "<question>" [--tiebreak] [--ready=a,b,c]  [--json] [--no-artifacts]   (experimental)
   xllm review stats [--json]
   xllm review outcome <run-id> --adopted <spec|majority|minority|none> --helpful yes|no
 
-Diff input (any deliberation mode; collected deterministically, never persisted):
-  --staged | --base <ref> | --diff-file <path>
+Diff input (any mode): --staged | --base <ref> | --diff-file <path>
+  Collected deterministically and cut to a 24KB budget; omitted files/hunks are listed in a
+  DIFF COVERAGE manifest. The diff body is NOT written to the ledger or md index, but the
+  default per-advisor artifacts DO contain the prompt (diff included, secrets redacted);
+  --no-artifacts suppresses them. --json prints one result object on stdout.
 
-roles = coverage (synthesis labels, NOT measured) · blind = measured panel
-(ledger + pairwise agreement) · debate = adversarial refutation · council =
-blind→debate.`;
+blind = measured panel (ledger + pairwise agreement; strict-identity evidence only) ·
+roles = coverage (synthesis labels, NOT measured) · debate/council = experimental, benefit
+unproven (re-evaluation pending): not a basis for high-stakes recommendations.
+Local-only execution_policy and read-only eligibility apply to every advisor call.`;
 
 const MODE_TARGETS = {
   roles: { script: 'advisor', prefix: ['--multi'] },

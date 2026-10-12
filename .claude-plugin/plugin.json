@@ -1,7 +1,7 @@
 {
   "name": "xllm",
-  "version": "0.35.4",
-  "description": "Cross-vendor LLM advisors for Claude Code: ask codex, gemini, grok, cursor, or local ollama/lmstudio from inside a session and synthesize their independent opinions. Read-only by default.",
+  "version": "0.36.0",
+  "description": "Cross-vendor LLM advisors for Claude Code: ask codex or a local ollama/lmstudio model, or run a blind independent review across several, from inside a session. Read-only by default on adapters whose boundary is verified; debate/council are experimental.",
   "author": {
     "name": "xllm contributors"
   },

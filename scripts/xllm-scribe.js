@@ -25,11 +25,12 @@ import {
   runAdvisor,
   parseProviderSpec,
   detectAvailableProviders,
-  getProviderCostMeta,
+  buildInventory,
   loadProviderProfiles,
   cleanModelText,
 } from './xllm-advisor.js';
 import { pickAdvisorForRole } from './xllm-routing.js';
+import { loadTraits } from './xllm-traits.js';
 
 const MAX_CONTEXT_BYTES = 24 * 1024;
 
@@ -202,40 +203,24 @@ export function validateScribeOutput(chore, text) {
 // Provider selection (cost-routed, escalation for release-grade prose)
 // ---------------------------------------------------------------------------
 
-export function pickScribeProvider(chore, { providerSpec = null, ready = null, profiles = null } = {}) {
+export function pickScribeProvider(chore, { providerSpec = null, ready = null, profiles = null, inventory = null, env = process.env } = {}) {
   if (providerSpec) {
     const parsed = parseProviderSpec(providerSpec);
     if (!parsed) return { error: `Unknown provider spec: ${providerSpec}` };
     return { spec: parsed.spec, parsed, source: 'explicit' };
   }
-  const readySet = ready || detectAvailableProviders();
-  const prof = profiles || loadProviderProfiles();
-  const pick = pickAdvisorForRole('scribe', {
-    taskText: `write ${chore} message`,
-    forceCli: true,
-    readyProviders: readySet,
-    profiles: prof,
-  });
-  // Release/changelog narrative needs judgment — escalate off local models
-  // when any cloud advisor is healthy.
-  if (
-    (chore === 'release' || chore === 'notes') &&
-    getProviderCostMeta(pick.provider, prof).tier === 'local'
-  ) {
-    const nonLocal = readySet.filter(
-      (p) => getProviderCostMeta(p, prof).tier !== 'local'
-    );
-    if (nonLocal.length) {
-      const esc = pickAdvisorForRole('scribe', {
-        taskText: `write ${chore} notes`,
-        forceCli: true,
-        readyProviders: nonLocal,
-        profiles: prof,
-      });
-      return { spec: esc.spec, parsed: esc, source: 'escalated' };
-    }
+  try {
+    const pick = pickAdvisorForRole('scribe', {
+      taskText: `write ${chore} message`, forceCli: true,
+      readyProviders: ready || detectAvailableProviders(),
+      profiles: profiles || loadProviderProfiles(), inventory: inventory || buildInventory({ env }), env,
+      traits: loadTraits(),
+    });
+    return { spec: pick.spec, parsed: pick, source: pick.pinned ? 'pinned' : 'routed' };
+  } catch (error) {
+    if (error.code === 'ROUTING_UNSATISFIABLE') return { error: error.message };
+    throw error;
   }
-  return { spec: pick.spec, parsed: pick, source: pick.pinned ? 'pinned' : 'routed' };
 }
 
 // ---------------------------------------------------------------------------

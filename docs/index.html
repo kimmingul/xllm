@@ -229,7 +229,7 @@
       <div class="rung">
         <div class="n">01 · opinion</div>
         <h3>ask</h3>
-        <p>Get one authentic answer from another vendor — or a free local model. Read-only. Its opinion lands as a persisted artifact.</p>
+        <p>Get one authentic answer from another vendor — or a free local model. Read-only on adapters whose boundary xllm can verify. Its opinion lands as a persisted artifact, or as one JSON result with full model attribution (<code>--json</code>).</p>
       </div>
       <div class="rung">
         <div class="n">02 · static diff</div>
@@ -259,13 +259,13 @@
       </div>
       <div class="card">
         <div class="ico">⚔️</div>
-        <h3>Adversarial debate</h3>
-        <p>Models attack each other's claims; only a decisive, checkable falsifier can kill — mere disagreement never does, and no judge LLM decides. Identity is the model, not the provider: two models on one local runtime refute each other too.</p>
+        <h3>Adversarial debate <span style="font-size:.7em;opacity:.7">· experimental</span></h3>
+        <p>Models attack each other's claims; only a decisive, checkable falsifier can kill — mere disagreement never does, and no judge LLM decides. A failed round is unresolved, never survived. Benefit is unproven and re-evaluation is pending: don't base high-stakes recommendations on it.</p>
       </div>
       <div class="card">
         <div class="ico">🏛️</div>
-        <h3>Council pipeline</h3>
-        <p>Independent panel first (no anchoring, diversity measured), then hostile debate over the surfaced claims — survived / killed / unresolved. For the calls where being wrong is expensive.</p>
+        <h3>Council pipeline <span style="font-size:.7em;opacity:.7">· experimental</span></h3>
+        <p>Independent panel first (no anchoring, diversity measured), then hostile debate over the surfaced claims — survived / killed / unresolved. Experimental for the same reason as debate: earlier measurements found no quality discrimination.</p>
       </div>
       <div class="card">
         <div class="ico">📊</div>
@@ -280,7 +280,7 @@
       <div class="card">
         <div class="ico">💸</div>
         <h3>Measured routing</h3>
-        <p>Light work goes to free local models; hard judgment goes to the strong tier — and measured bench quality may cross the tier line, under strict shared-opportunity gates. Tiny local models are barred from voting on security calls.</p>
+        <p>Light work goes to free local models; hard judgment goes to the strong tier — and measured bench quality may cross the tier line, under strict shared-opportunity gates and only for evidence whose model identity is resolved (legacy and unresolved records never route). Tiny local models are barred from voting on security calls.</p>
       </div>
       <div class="card">
         <div class="ico">✍️</div>
@@ -311,14 +311,16 @@
     <div class="section-head">
       <h2>We measured it.</h2>
       <p>xllm ships a seeded-defect benchmark that can refute its own core claim.
-         Here's what it told us — and it keeps measuring.</p>
+         Here's what it told us — historical results from before strict model-identity evidence;
+         they no longer route, and the current method (<code>xllm bench</code>: repeats, held-out set,
+         human adjudication, budgeted opt-in live runs) is re-measuring them.</p>
     </div>
 
     <div class="stat-row">
       <div class="stat"><div class="big">1.0</div><div class="lbl">error correlation<br>on textbook defects</div></div>
       <div class="stat"><div class="big">0.75</div><div class="lbl">error correlation<br>on hard defects</div></div>
       <div class="stat"><div class="big">+2</div><div class="lbl">panel dividend when<br>no model dominates</div></div>
-      <div class="stat"><div class="big">203</div><div class="lbl">unit tests<br>green</div></div>
+      <div class="stat"><div class="big">278</div><div class="lbl">unit tests<br>green</div></div>
     </div>
 
     <div class="finding">
@@ -576,10 +578,10 @@
       <p>The boundary is enforced by execution flags and sandboxes, not by asking nicely.</p>
     </div>
     <div class="safe">
-      <div class="item"><div class="dot">✓</div><div><b>Read-only advisors</b><p>codex runs <code>--sandbox read-only</code>; no <code>--yolo</code>, no <code>--dangerously-*</code>. Mutation is an explicit opt-in.</p></div></div>
+      <div class="item"><div class="dot">✓</div><div><b>Read-only advisors, verified</b><p>Only adapters whose read-only boundary xllm can verify (codex <code>--sandbox read-only</code>, claude restricted tools, prompt-only local HTTP) are default advisors; installed &ne; eligible. Mutation is a separate explicit opt-in.</p></div></div>
       <div class="item"><div class="dot">✓</div><div><b>Your checkout is untouchable</b><p><code>exec</code> works in a separate-<code>.git</code> clone; results return fetch-only as <code>refs/xllm/exec/&lt;id&gt;</code>.</p></div></div>
       <div class="item"><div class="dot">✓</div><div><b>No same-vendor nesting</b><p>A claude advisor inside Claude Code — or codex inside Codex — is refused by default.</p></div></div>
-      <div class="item"><div class="dot">✓</div><div><b>Secrets stay out of disk</b><p>Well-known key/token formats are redacted before any artifact is written; scribe never persists your diff.</p></div></div>
+      <div class="item"><div class="dot">✓</div><div><b>Secrets redacted, <code>local-only</code> available</b><p>Well-known key/token formats are redacted before any artifact is written (advisor artifacts hold the prompt, diff included &mdash; <code>--no-artifacts</code> skips them). <code>execution_policy = local-only</code> admits only verified-local providers; unknown is refused.</p></div></div>
       <div class="item"><div class="dot">✓</div><div><b>Merge, push, creds — host-side</b><p>xllm never runs <code>git push</code>, creates tags, or forwards credentials. You stay in control.</p></div></div>
       <div class="item"><div class="dot">✓</div><div><b>Honest failure</b><p>Unavailable providers fail loudly instead of emitting synthetic output; executor-green is evidence, not trust.</p></div></div>
     </div>
@@ -626,7 +628,7 @@ codex plugin add xllm@xllm</code></pre>
         <tr><td>Machine inventory</td><td>probe installed advisor CLIs, local models, tier &amp; cost (24h cache)</td><td><code>~/.xllm</code> (per machine)</td></tr>
         <tr><td>Marker + artifacts</td><td>let the host resolve the advisor script from this project; secret-redacting artifact dirs</td><td><code>.xllm/xllm-advisor-path</code>, <code>.xllm/artifacts/</code></td></tr>
         <tr><td>Role-pin wizard</td><td>pin <code>provider:model@effort</code> per role — overrides built-in routing exactly</td><td><code>.xllm/xllm-providers.toml</code></td></tr>
-        <tr><td>Discipline block (opt-in)</td><td>install a ≤25-line process-discipline block after a full-text preview; idempotent, removable</td><td><code>CLAUDE.md</code> / <code>AGENTS.md</code></td></tr>
+        <tr><td>Execution policy</td><td><code>any</code> (default) or <code>local-only</code> &mdash; strict, fails closed on unknown location; the <code>local</code> pack persists it</td><td><code>.xllm/xllm-providers.toml</code></td></tr>
       </table>
       <p style="margin-top:14px; margin-bottom:0">Skipping setup still works via built-in routing —
          but without the marker, skills fall back to path heuristics, and without role pins there is
@@ -672,10 +674,10 @@ codex plugin add xllm@xllm</code></pre>
       <h3>Advanced — say what you need; the measurements picked the mode</h3>
       <table class="bt" style="margin-top:12px">
         <tr><th>You want…</th><th>Just say</th><th>Why it works (measured)</th></tr>
-        <tr><td>a review of actual code</td><td>"review my <b>staged diff</b>" / "review this branch <b>against main</b>"</td><td>the diff is collected deterministically, size-capped, never persisted</td></tr>
-        <tr><td>to find defects cheaply</td><td>"run a <b>blind panel</b> of three free local models on this diff"</td><td>largest measured dividend — +3.33 with three free local models (act nine)</td></tr>
-        <tr><td>to settle a disagreement</td><td>"the panel split — <b>spend the tiebreaker</b>"</td><td>tiebreaker = lowest <em>measured</em> agreement, never vendor pedigree (act seven)</td></tr>
-        <tr><td>to stress-test one claim</td><td>"<b>debate</b> this claim: the cache change is thread-safe"</td><td>hostile refutation of a specific claim; for finding defects use the blind panel instead (act ten)</td></tr>
+        <tr><td>a review of actual code</td><td>"review my <b>staged diff</b>" / "review this branch <b>against main</b>"</td><td>the diff is collected deterministically, cut to a 24KB budget, and omitted hunks are listed; ledger/index keep metadata only, advisor artifacts keep the prompt</td></tr>
+        <tr><td>independent opinions on a diff</td><td>"run a <b>blind panel</b> of three local models on this diff"</td><td>identical blind prompt, measured agreement; earlier measurements favoured blind over deliberation (historical, pre-strict-identity)</td></tr>
+        <tr><td>to settle a disagreement</td><td>"the panel split — <b>spend the tiebreaker</b>"</td><td>tiebreaker = lowest <em>measured</em> agreement, never vendor pedigree</td></tr>
+        <tr><td>to stress-test one claim</td><td>"<b>debate</b> this claim: the cache change is thread-safe" (experimental)</td><td>hostile refutation of a specific claim; benefit unproven, not for high-stakes decisions</td></tr>
         <tr><td>a change, not an opinion</td><td>"have codex <b>propose a patch</b>" → "have codex <b>implement it in an isolated clone</b>"</td><td>a static .patch, then a verified branch — your working tree is never touched</td></tr>
         <tr><td>routing that fits this project</td><td>"set up xllm for this project, <b>frugal</b>"</td><td>role pins + evidence-derived traits (sample sizes always shown)</td></tr>
       </table>

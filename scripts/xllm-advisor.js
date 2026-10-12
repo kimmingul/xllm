@@ -33,11 +33,13 @@ import {
   LOCAL_PROVIDERS,
   KNOWN_EFFORTS,
 } from './xllm-constants.js';
+import { makeResult, parseProviderOutput, isMutableModel, executionLocation, executionPolicyDecision } from './xllm-evidence.js';
+import { recordProviderResult } from './xllm-health.js';
 
 // Re-exported so the 8 modules that import these from here keep working.
 export { PROVIDER_BINARIES, CLOUD_PROVIDERS, LOCAL_PROVIDERS, KNOWN_EFFORTS };
 
-const VERSION = '0.35.4';
+const VERSION = '0.36.0';
 const PRODUCT = 'xllm';
 const PLUGIN_NAMES = ['xllm', 'oh-my-grok'];
 
@@ -90,6 +92,7 @@ const BUILTIN_PROFILES = {
     design_provider: 'antigravity',
     design_fallback: 'gemini',
     timeout_ms: 300000,
+    execution_policy: 'any',
   },
   providers: {
     // tier: strong | balanced | local — coarse capability class
@@ -146,7 +149,7 @@ const BUILTIN_PROFILES = {
       latency_class: 'medium',
     },
     ollama: {
-      default_model: 'llama3.2',
+      default_model: '',
       default_effort: '',
       timeout_ms: 300000,
       tier: 'local',
@@ -154,7 +157,7 @@ const BUILTIN_PROFILES = {
       latency_class: 'medium',
     },
     lmstudio: {
-      default_model: 'local-model',
+      default_model: '',
       default_effort: '',
       temperature: 0.7,
       timeout_ms: 300000,
@@ -163,7 +166,7 @@ const BUILTIN_PROFILES = {
       latency_class: 'medium',
     },
     lemonade: {
-      default_model: 'default',
+      default_model: '',
       default_effort: '',
       timeout_ms: 300000,
       tier: 'local',
@@ -187,6 +190,7 @@ export function getProviderCostMeta(provider, profiles = null) {
       prof.relative_cost ?? builtin.relative_cost ?? 5
     ),
     latency_class: prof.latency_class || builtin.latency_class || 'medium',
+    basis: 'heuristic',
   };
 }
 
@@ -216,18 +220,23 @@ export function getProviderMeta() {
   };
 }
 
+export function getLocalModelDetails(provider, env = process.env) {
+  const base = provider === 'ollama' ? ollamaBaseUrl(env) : (env.LMSTUDIO_BASE || 'http://localhost:1234');
+  const endpoint = provider === 'ollama' ? '/api/tags' : '/api/v0/models';
+  const res = spawnSync(IS_WINDOWS ? 'curl.exe' : 'curl',
+    ['-fsS', '--max-time', '3', `${base}${endpoint}`],
+    { encoding: 'utf8', shell: false, windowsHide: true, timeout: 4000, maxBuffer: 1024 * 1024 });
+  if (res.error || res.status !== 0) return {};
+  try {
+    const json = JSON.parse(res.stdout);
+    return Object.fromEntries((json.models || json.data || [])
+      .filter((m) => m && (m.name || m.id || m.model))
+      .map((m) => [m.name || m.id || m.model, m]));
+  } catch { return {}; }
+}
+
 export function getOllamaModels() {
-  const res = spawnSync('ollama', ['list'], {
-    encoding: 'utf8',
-    shell: false,
-    timeout: 8000,
-  });
-  if (res.error || res.status !== 0) return [];
-  return (res.stdout || '')
-    .split('\n')
-    .slice(1)
-    .map((l) => l.trim().split(/\s+/)[0])
-    .filter(Boolean);
+  return Object.keys(getLocalModelDetails('ollama'));
 }
 
 export function checkServerHealth(provider) {
@@ -273,30 +282,6 @@ export function ollamaThinkFromEffort(effort, model) {
   return !low;
 }
 
-/** Parse /api/generate output: { response } on success, { error } from the server. */
-export function parseOllamaHttpResponse(stdout) {
-  try {
-    const v = JSON.parse(String(stdout || '').trim());
-    if (v && typeof v.error === 'string') return { error: v.error, response: null };
-    if (v && typeof v.response === 'string') return { error: null, response: v.response };
-  } catch {
-    /* not JSON */
-  }
-  return { error: null, response: null };
-}
-
-export function parseLMStudioResponse(stdout) {
-  try {
-    const json = JSON.parse(stdout);
-    const choice = json.choices && json.choices[0];
-    if (choice?.message?.content) return choice.message.content;
-    if (json.content) return json.content;
-    if (json.error) return `Error: ${JSON.stringify(json.error)}`;
-    return stdout;
-  } catch {
-    return stdout;
-  }
-}
 
 export function slugify(s) {
   return (
@@ -696,9 +681,14 @@ export function validateSetupPin(spec, role, inventory, options = {}) {
   if (parsed.model && p.kind === 'local' && Array.isArray(p.models) && !p.models.includes(parsed.model)) {
     return { ok: false, error: `local model not pulled: ${parsed.model}` };
   }
+  const policy = executionPolicyDecision(parsed.provider, parsed.model, {
+    profiles: { defaults: { execution_policy: options.execution_policy || 'any' } },
+    modelInfo: p.model_details?.[parsed.model],
+  });
+  if (!policy.allowed) return { ok: false, error: policy.reason };
   if (options.sensitive === 'yes') {
     const prov = inventory.providers?.[parsed.provider];
-    const isLocal = prov && prov.kind === 'local';
+    const isLocal = executionLocation(parsed.provider, parsed.model, { modelInfo: prov?.model_details?.[parsed.model] }) === 'local';
     if (role === 'critic' && !isLocal) {
       return { ok: false, error: `sensitive=yes: paid critic pin not allowed (${spec})` };
     }
@@ -716,10 +706,13 @@ export function validateSetupPin(spec, role, inventory, options = {}) {
  */
 export function applySetupPlan(plan, { inventory, apply = false, root = process.cwd(), sensitive = 'no' } = {}) {
   const errors = [];
+  if (plan.errors?.length) errors.push(...plan.errors);
+  if (plan.ok === false && !errors.length) errors.push(plan.error || 'setup plan is unsatisfiable');
+  const executionPolicy = plan.execution_policy || loadProviderProfiles().defaults.execution_policy || 'any';
   for (const role of SETUP_ROLE_KEYS) {
     const spec = plan.roles[role];
     if (spec == null) continue; // OPEN
-    const v = validateSetupPin(spec, role, inventory, { sensitive });
+    const v = validateSetupPin(spec, role, inventory, { sensitive, execution_policy: executionPolicy });
     if (!v.ok) errors.push(`${role}: ${v.error}`);
   }
   if (errors.length) {
@@ -729,11 +722,20 @@ export function applySetupPlan(plan, { inventory, apply = false, root = process.
   const written = [];
   const deleted = [];
   if (apply) {
+    const dir = resolveStateDir(root);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'xllm-providers.toml');
+    let text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : PROFILE_TEMPLATE;
     for (const role of SETUP_ROLE_KEYS) {
       const spec = plan.roles[role];
-      if (spec == null) { deleteProfileKey('roles', role, root); deleted.push(role); }
-      else { setProfileValue('roles', role, spec, root); written.push(role); }
+      if (spec == null) { text = deleteTomlKey(text, 'roles', role); deleted.push(role); }
+      else { text = upsertTomlKey(text, 'roles', role, spec); written.push(role); }
     }
+    if (plan.execution_policy === 'local-only') text = upsertTomlKey(text, 'defaults', 'execution_policy', 'local-only');
+    const temporary = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, text, 'utf8');
+    fs.renameSync(temporary, file);
+    _profilesCache = null;
   }
   return { written, deleted, errors: [] };
 }
@@ -810,278 +812,133 @@ export function pickDefaultXllmPair(readyCloud = [], readyLocal = [], profiles =
  * options: { effort, timeoutMs, temperature, profiles }
  */
 export function resolveSpawnConfig(
-  provider,
-  model = null,
-  prompt = '',
-  env = process.env,
-  options = {}
+  provider, model = null, prompt = '', env = process.env, options = {}
 ) {
   const profiles = options.profiles || loadProviderProfiles();
   const pconf = profiles.providers[provider] || {};
   const effort = options.effort || null;
   const allowMutation = !!options.allowMutation;
-  // Advisors give opinions; by default they must not be able to edit the tree.
-  const codexSafety = allowMutation
-    ? ['--dangerously-bypass-approvals-and-sandbox']
-    : ['--sandbox', 'read-only'];
-  // Precedence: explicit call arg > XLLM_ADVISOR_TIMEOUT_MS > per-provider
-  // profile > global default. The env var has to outrank pconf, otherwise the
-  // built-in per-provider timeout_ms makes it unreachable (measured: with
-  // XLLM_ADVISOR_TIMEOUT_MS=900000 a codex dry-run still reported 300000).
-  const envTimeoutMs = Number(env.XLLM_ADVISOR_TIMEOUT_MS || 0) || null;
-  const timeoutMs =
-    options.timeoutMs ||
-    envTimeoutMs ||
-    pconf.timeout_ms ||
-    profiles.defaults.timeout_ms ||
-    300000;
-
-  const resolvedModel =
-    model ||
-    pconf.default_model ||
-    (provider === 'ollama' ? env.OLLAMA_DEFAULT_MODEL : null) ||
-    (provider === 'lmstudio' ? env.LMSTUDIO_MODEL : null) ||
-    (provider === 'lemonade' ? env.LEMONADE_MODEL : null) ||
-    null;
-
-  const needsStdin =
-    (provider === 'codex' || provider === 'claude') &&
-    (IS_WINDOWS ||
-      prompt.length > 400 ||
-      prompt.includes('\n') ||
-      /[^\x00-\x7F]/.test(prompt));
-
-  /** Insert model/effort flags into args (before trailing prompt or `-`). */
-  function withModelEffort(baseArgs, promptMode) {
-    // promptMode: 'arg' | 'stdin-dash' | 'none'
-    const args = [...baseArgs];
-    const tail = [];
-    if (promptMode === 'arg') {
-      // last element is prompt — pop, add flags, re-push
-      const p = args.pop();
-      appendModelEffortFlags(provider, args, resolvedModel, effort, pconf);
-      args.push(p);
-      return args;
-    }
-    if (promptMode === 'stdin-dash') {
-      // last is '-'
-      const dash = args.pop();
-      appendModelEffortFlags(provider, args, resolvedModel, effort, pconf);
-      args.push(dash);
-      return args;
-    }
-    appendModelEffortFlags(provider, args, resolvedModel, effort, pconf);
-    return args;
+  const timeoutMs = options.timeoutMs || Number(env.XLLM_ADVISOR_TIMEOUT_MS)
+    || pconf.timeout_ms || profiles.defaults.timeout_ms || 300000;
+  const resolvedModel = model || pconf.default_model
+    || (provider === 'ollama' ? env.OLLAMA_DEFAULT_MODEL : null)
+    || (provider === 'lmstudio' ? env.LMSTUDIO_MODEL : null) || null;
+  const cfg = {
+    binary: PROVIDER_BINARIES[provider], args: [], usesStdin: false,
+    timeoutMs, model: resolvedModel, effort, effectiveEffort: effort, mutation: allowMutation,
+    safety: 'unverified', nativeSchema: false,
+  };
+  if (options.execution && provider !== 'codex') {
+    return { ...cfg, unavailable: 'Isolated execution requires the verified Codex OS sandbox.' };
   }
-
-  if (needsStdin) {
-    if (provider === 'codex') {
-      return {
-        binary: 'codex',
-        args: withModelEffort(['exec', ...codexSafety, '-'], 'stdin-dash'),
-        usesStdin: true,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-        mutation: allowMutation,
-      };
-    }
-    // claude: flags before -p; prompt via stdin
-    const claudeArgs = [];
-    if (resolvedModel) claudeArgs.push('--model', resolvedModel);
-    if (effort) claudeArgs.push('--effort', effort);
-    claudeArgs.push('-p');
-    return {
-      binary: 'claude',
-      args: claudeArgs,
-      usesStdin: true,
-      timeoutMs,
-      model: resolvedModel,
-      effort,
-    };
-  }
-
-  switch (provider) {
-    case 'codex':
-      return {
-        binary: 'codex',
-        args: withModelEffort(['exec', ...codexSafety, prompt], 'arg'),
-        usesStdin: false,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-        mutation: allowMutation,
-      };
-    case 'gemini': {
-      const args = [];
-      if (resolvedModel) args.push('--model', resolvedModel);
-      args.push('-p', prompt);
-      if (allowMutation) args.push('--yolo');
-      return {
-        binary: 'gemini',
-        args,
-        usesStdin: false,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-        mutation: allowMutation,
-      };
-    }
-    case 'antigravity': {
-      // This case assembles argv directly (it does not route through
-      // withModelEffort), so the --effort flag has to be pushed here too.
-      const args = allowMutation ? ['--dangerously-skip-permissions'] : [];
-      if (resolvedModel) args.push('--model', resolvedModel);
-      const agyEffort = agyEffortFromEffort(effort);
-      if (agyEffort) args.push('--effort', agyEffort);
-      args.push('-p', prompt);
-      return {
-        binary: 'agy',
-        args,
-        usesStdin: false,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-        mutation: allowMutation,
-      };
-    }
-    case 'grok': {
-      const args = [];
-      if (resolvedModel) args.push('-m', resolvedModel);
-      if (effort) args.push('--reasoning-effort', effort);
-      args.push('-p', prompt);
-      if (allowMutation) args.push('--always-approve');
-      return {
-        binary: 'grok',
-        args,
-        usesStdin: false,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-        mutation: allowMutation,
-      };
-    }
-    case 'cursor': {
-      const cursorArgs = allowMutation
-        ? ['--print', '--force', '--trust', '--sandbox', 'disabled', prompt]
-        : ['--print', prompt];
-      return {
-        binary: 'cursor-agent',
-        args: withModelEffort(cursorArgs, 'arg'),
-        usesStdin: false,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-        mutation: allowMutation,
-      };
-    }
-    case 'claude':
-      return {
-        binary: 'claude',
-        args: withModelEffort(['-p', prompt], 'arg'),
-        usesStdin: false,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-      };
-    case 'ollama': {
-      // HTTP API instead of `ollama run`: the CLI renders TTY-style (spinner,
-      // wrap-redraw) even through a pipe — the source of the fragment
-      // duplication that corrupted long JSON blocks — and argv delivery hits
-      // Windows' ~32KB limit. The API returns clean JSON; the payload rides
-      // stdin (`-d @-`), so prompt size is unbounded on every platform.
-      const ollamaModel = resolvedModel || 'llama3.2';
-      const curlBin = IS_WINDOWS ? 'curl.exe' : 'curl';
-      const think = ollamaThinkFromEffort(effort, ollamaModel);
-      return {
-        binary: curlBin,
-        args: [
-          '-s',
-          '--max-time',
-          String(Math.floor(timeoutMs / 1000)),
-          `${ollamaBaseUrl(env)}/api/generate`,
-          '-H',
-          'Content-Type: application/json',
-          '-d',
-          '@-',
-        ],
-        usesStdin: true,
-        stdinPayload: JSON.stringify({
-          model: ollamaModel,
-          prompt,
-          stream: false,
-          ...(think !== undefined ? { think } : {}),
-        }),
-        timeoutMs,
-        model: ollamaModel,
-        effort,
-      };
-    }
-    case 'lmstudio': {
-      const lmModel = resolvedModel || 'local-model';
-      const temperature =
-        options.temperature ?? pconf.temperature ?? 0.7;
-      const body = {
-        model: lmModel,
-        messages: [{ role: 'user', content: prompt }],
-        temperature,
-      };
-      // some local servers accept reasoning effort in body
-      if (effort) body.reasoning_effort = effort;
-      const curlBin = IS_WINDOWS ? 'curl.exe' : 'curl';
-      return {
-        binary: curlBin,
-        args: [
-          '-s',
-          '--max-time',
-          String(Math.floor(timeoutMs / 1000)),
-          `${LMSTUDIO_BASE}/v1/chat/completions`,
-          '-H',
-          'Content-Type: application/json',
-          '-d',
-          JSON.stringify(body),
-        ],
-        usesStdin: false,
-        timeoutMs,
-        model: lmModel,
-        effort,
-      };
-    }
-    case 'lemonade': {
-      const lemonadeModel = resolvedModel || 'default';
-      if (!env.LEMONADE_BIN) {
-        // No synthetic fallback: an unavailable advisor must fail loudly,
-        // otherwise its "opinion" gets synthesized into real decisions.
-        return {
-          binary: null,
-          args: [],
-          usesStdin: false,
-          timeoutMs,
-          model: lemonadeModel,
-          effort,
-          unavailable:
-            'LEMONADE_BIN is not set — lemonade advisor is unavailable',
-        };
+  if (provider === 'codex') {
+    if (options.execution) {
+      const args = options.execution.providerArgs;
+      if (!Array.isArray(args) || args.some((a) => /^--dangerously|^--bypass|^--sandbox(?:=|$)|^-s$|danger-full-access|(?:^|[\s{,])sandbox_mode\s*=/i.test(String(a)))) {
+        return { ...cfg, unavailable: 'Execution requires a verified, non-bypass OS permission profile.' };
       }
-      return {
-        binary: env.LEMONADE_BIN,
-        args: ['run', lemonadeModel, prompt],
-        usesStdin: false,
-        timeoutMs,
-        model: lemonadeModel,
-        effort,
-      };
+      cfg.args = ['exec', ...args, '--json'];
+    } else {
+      cfg.args = ['exec', '--ignore-user-config', '--ignore-rules', '--ephemeral', '--json',
+        '--sandbox', 'read-only', '-c', 'mcp_servers={}', '-c', 'features.hooks=false',
+        '-c', 'features.multi_agent=false', '-c', 'approval_policy="never"'];
     }
-    default:
-      return {
-        binary: 'claude',
-        args: withModelEffort(['-p', prompt], 'arg'),
-        usesStdin: false,
-        timeoutMs,
-        model: resolvedModel,
-        effort,
-      };
+    if (allowMutation && !options.execution) {
+      return { ...cfg, unavailable: 'Use xllm exec for sandboxed changes; advisor sandbox bypass is not supported.' };
+    }
+    appendModelEffortFlags(provider, cfg.args, resolvedModel, effort, pconf);
+    if (options.schemaPath) {
+      cfg.args.push('--output-schema', options.schemaPath);
+      cfg.nativeSchema = true;
+    }
+    cfg.args.push('-');
+    cfg.usesStdin = true;
+    cfg.safety = options.execution ? 'os-workspace' : 'os-read-only';
+    return cfg;
   }
+  if (provider === 'claude') {
+    cfg.args = ['--safe-mode', '--restricted', '--strict-mcp-config', '--no-session-persistence',
+      '--tools', 'Read,Glob,Grep', '--permission-mode', 'dontAsk',
+      '--permission-prompts', 'none', '--output-format', 'json'];
+    if (allowMutation) return { ...cfg, unavailable: 'Claude advisors are read-only; isolated exec requires an OS sandbox.' };
+    if (resolvedModel) cfg.args.push('--model', resolvedModel);
+    if (effort) cfg.args.push('--effort', effort);
+    if (options.schema) {
+      cfg.args.push('--json-schema', JSON.stringify(options.schema));
+      cfg.nativeSchema = true;
+    }
+    cfg.args.push('-p');
+    cfg.usesStdin = true;
+    cfg.safety = 'read-tools-only';
+    return cfg;
+  }
+  if (provider === 'ollama' || provider === 'lmstudio') {
+    if (!resolvedModel) return { ...cfg, unavailable: `Select an installed ${provider} model explicitly (no hard-coded model default).` };
+    cfg.binary = IS_WINDOWS ? 'curl.exe' : 'curl';
+    const base = provider === 'ollama' ? ollamaBaseUrl(env) : (env.LMSTUDIO_BASE || 'http://localhost:1234');
+    const body = provider === 'ollama'
+      ? { model: resolvedModel, prompt, stream: false }
+      : { model: resolvedModel, messages: [{ role: 'user', content: prompt }], temperature: options.temperature ?? pconf.temperature ?? 0.7, stream: false };
+    if (provider === 'ollama') {
+      const think = ollamaThinkFromEffort(effort, resolvedModel);
+      if (think !== undefined) body.think = think;
+      cfg.effectiveEffort = typeof think === 'boolean' ? (think ? 'thinking' : 'off') : think || null;
+      if (options.schema && executionLocation(provider, resolvedModel, { env, modelInfo: options.modelInfo }) === 'local') {
+        body.format = options.schema;
+        cfg.nativeSchema = true;
+      }
+    } else {
+      cfg.effectiveEffort = null; // OpenAI-compatible servers do not guarantee effort support.
+      if (options.schema) {
+        body.response_format = { type: 'json_schema', json_schema: { name: 'xllm_response', strict: true, schema: options.schema } };
+        cfg.nativeSchema = true;
+      }
+    }
+    cfg.args = ['-sS', '--max-time', String(Math.ceil(timeoutMs / 1000)),
+      `${base}${provider === 'ollama' ? '/api/generate' : '/v1/chat/completions'}`,
+      '-H', 'Content-Type: application/json', '-d', '@-'];
+    cfg.stdinPayload = JSON.stringify(body);
+    cfg.usesStdin = true;
+    cfg.safety = 'completion-only';
+    return cfg;
+  }
+  // No permission-mode guess is a security boundary. Preserve explicit unsafe
+  // opt-in for these adapters, but never advertise their defaults as read-only.
+  if (!allowMutation) {
+    return { ...cfg, unavailable: `${provider}: read-only enforcement is unverified; use a verified advisor (codex, claude, local HTTP), or explicitly opt in with --allow-write.` };
+  }
+  cfg.safety = 'unrestricted-opt-in';
+  if (provider === 'antigravity') {
+    cfg.binary = 'agy';
+    cfg.args = ['--output-format', 'json', '--disable-slash-commands',
+      '--dangerously-skip-permissions', '--print-timeout', `${timeoutMs}ms`];
+    if (resolvedModel) cfg.args.push('--model', resolvedModel);
+    cfg.effectiveEffort = agyEffortFromEffort(effort);
+    if (cfg.effectiveEffort) cfg.args.push('--effort', cfg.effectiveEffort);
+    if (options.schemaPath) { cfg.args.push('--json-schema', options.schemaPath); cfg.nativeSchema = true; }
+    cfg.args.push('-p', prompt);
+  } else if (provider === 'grok') {
+    cfg.args = ['--output-format', 'json', '--always-approve'];
+    if (resolvedModel) cfg.args.push('-m', resolvedModel);
+    if (effort) cfg.args.push('--reasoning-effort', effort);
+    if (options.schema) { cfg.args.push('--json-schema', JSON.stringify(options.schema)); cfg.nativeSchema = true; }
+    cfg.args.push('-p', prompt);
+  } else if (provider === 'gemini') {
+    cfg.args = ['--output-format', 'json', '--approval-mode', 'yolo'];
+    if (resolvedModel) cfg.args.push('--model', resolvedModel);
+    cfg.args.push('-p', prompt);
+    cfg.effectiveEffort = null;
+  } else if (provider === 'cursor') {
+    cfg.args = ['--print', '--output-format', 'json', '--force', '--trust', '--sandbox', 'disabled'];
+    if (resolvedModel) cfg.args.push('--model', resolvedModel);
+    cfg.args.push(prompt);
+    cfg.effectiveEffort = null;
+  } else if (provider === 'lemonade' && env.LEMONADE_BIN) {
+    cfg.binary = env.LEMONADE_BIN;
+    cfg.args = ['run', resolvedModel || 'default', prompt];
+    cfg.effectiveEffort = null;
+  } else cfg.unavailable = `${provider}: no executable adapter configured`;
+  return cfg;
 }
 
 /**
@@ -1226,26 +1083,6 @@ export function cleanModelText(raw) {
   return s;
 }
 
-export function cleanOllamaOutput(raw) {
-  return cleanModelText(raw);
-}
-
-export function cleanCodexOutput(raw) {
-  let s = String(raw || '');
-  const markers = [
-    /\nOpenAI Codex v/i,
-    /\n--------\nworkdir:/i,
-    /\nsession id:/i,
-    /\nhook: SessionStart/i,
-  ];
-  let cut = -1;
-  for (const re of markers) {
-    const m = s.search(re);
-    if (m > 0 && (cut < 0 || m < cut)) cut = m;
-  }
-  if (cut > 0) s = s.slice(0, cut);
-  return cleanModelText(s);
-}
 
 /** Conservative patterns for well-known credential formats. */
 export const SECRET_PATTERNS = [
@@ -1382,6 +1219,10 @@ export function writeArtifact({
     `- Host: ${process.platform}`,
     meta.multi ? `- Multi-run: yes` : null,
     meta.substituted ? `- Substituted from: ${meta.from}` : null,
+    meta.attribution ? `- Execution evidence: ${JSON.stringify(meta.attribution)}` : null,
+    meta.failure ? `- Failure: ${redactSecrets(JSON.stringify(meta.failure))}` : null,
+    meta.usage ? `- Usage: ${JSON.stringify(meta.usage)}` : null,
+    meta.cost_estimate != null ? `- Estimated cost USD: ${meta.cost_estimate}` : null,
     '',
     '## Original task',
     '',
@@ -1472,6 +1313,10 @@ export function writeMultiIndex({
           exit_code: r.code,
           artifact: r.artifact || null,
           patch: r.patch || null,
+          attribution: r.result?.attribution || null,
+          failure: r.result?.failure || null,
+          usage: r.result?.usage || null,
+          cost_estimate: r.result?.cost_estimate ?? null,
         })),
         consensus_labels: CONSENSUS_LABELS,
       },
@@ -1547,13 +1392,14 @@ Usage:
   node scripts/xllm-advisor.js --clean-artifacts [--older-than=DAYS]
   node scripts/xllm-advisor.js --setup <pack> [--apply] [--role R=SPEC] [--json] [--sensitive auto|yes|no]
                        (posture packs: balanced|quality|frugal|local|skip; preview unless --apply)
-  node scripts/xllm-advisor.js --discipline show|install|remove [--target <path>]
-                       (≤25-line process-discipline block for CLAUDE.md/AGENTS.md;
-                        idempotent marker block, explicit opt-in — preview with show)
+  node scripts/xllm-advisor.js --discipline remove [--target <path>] (uninstall an old block)
+  --json                 one execution-result envelope on stdout; diagnostics on stderr
+  --schema-file <path>    native JSON schema where supported; callers validate fallback output
 
 Safety (defaults):
-  Advisors run READ-ONLY (no approvals bypass / no sandbox escape).
-    --allow-write | XLLM_ALLOW_MUTATION=1   opt in to mutating advisors
+  codex/claude enforce read-only; ollama/lmstudio use completion-only HTTP.
+  Other adapters fail closed unless --allow-write explicitly opts into unrestricted operation.
+  Codex/Claude advisors never bypass isolation; use xllm exec for verified sandboxed changes.
   Same-provider advising inside that provider's own CLI is refused.
     --allow-self  | XLLM_ALLOW_SELF=1       override
   Artifacts persist prompts/outputs (secrets redacted).
@@ -1569,32 +1415,6 @@ Env: XLLM_ADVISOR_PATH, XLLM_PLUGIN_ROOT, XLLM_PROVIDERS_PATH,
   process.exit(exitCode);
 }
 
-// ---------------------------------------------------------------------------
-// Process-discipline block (setup-distillation — docs/superpowers-absorption-design.md)
-// ---------------------------------------------------------------------------
-
-const DISCIPLINE_VERSION = 'v2';
-const DISCIPLINE_BEGIN = `<!-- xllm:discipline ${DISCIPLINE_VERSION} -->`;
-const DISCIPLINE_END = '<!-- /xllm:discipline -->';
-/** Hard cap, enforced in code: this block must never grow into an agent-OS. */
-export const DISCIPLINE_MAX_LINES = 25;
-
-const DISCIPLINE_BODY = [
-  '## 작업 규율 (xllm setup 설치본 — `xllm discipline remove`로 제거)',
-  '',
-  '- 모호한 요구는 코드 전에 설계 문답으로 좁힌다; 로직 변경은 red→green(실패 테스트 먼저).',
-  '- 실행 증거 없이 "done"이라 주장하지 않는다 — 테스트/빌드 출력을 확인하고 인용한다.',
-  '- 버그는 고치기 전에 근본 원인부터 찾는다(증상 패치 금지).',
-  '- 병렬 작업·플랜·워크트리는 호스트 네이티브 기능을 쓴다; xllm은 오케스트레이션하지 않는다.',
-  '- 틀리면 비싼 결정만 크로스-벤더 심의로: `xllm review blind`(측정) · `review debate`(반박) · `review council`(둘 다).',
-  '  review stats의 쌍별 일치율이 낮은 곳이 다양성이 배당을 내는 곳이다.',
-  '- 리뷰 코멘트가 미심쩍으면 수용 전에 다른 벤더로 반박 검증(`xllm ask`/`review debate`).',
-  '- 커밋/PR/릴리스 산문은 `xllm scribe`(최저가 모델); git 실행은 항상 사람이 한다.',
-].join('\n');
-
-export function disciplineBlock() {
-  return `${DISCIPLINE_BEGIN}\n${DISCIPLINE_BODY}\n${DISCIPLINE_END}`;
-}
 
 /** Locate an existing block (any version). Throws on an unterminated block. */
 function findDisciplineSpan(content) {
@@ -1610,20 +1430,6 @@ function findDisciplineSpan(content) {
   return { start: begin.index, end: begin.index + end.index + end[0].length };
 }
 
-/** Idempotent install: replace an existing block in place, else append. Pure. */
-export function spliceDisciplineBlock(content, block = disciplineBlock()) {
-  const lines = block.split('\n');
-  if (lines.length > DISCIPLINE_MAX_LINES) {
-    throw new Error(
-      `discipline block is ${lines.length} lines; the cap is ${DISCIPLINE_MAX_LINES} — trim it, do not raise the cap`
-    );
-  }
-  const s = String(content ?? '');
-  const span = findDisciplineSpan(s);
-  if (span) return s.slice(0, span.start) + block + s.slice(span.end);
-  if (!s.trim()) return `${block}\n`;
-  return `${s.replace(/\n+$/, '')}\n\n${block}\n`;
-}
 
 /** Remove the block; collapses the seam to a single blank line. Pure. */
 export function removeDisciplineBlock(content) {
@@ -1742,16 +1548,6 @@ function binaryOnPath(binary) {
   return !which.error && which.status === 0;
 }
 
-function ensureBinary(binary, { isLocal = false, optional = false, isAvailable = binaryOnPath } = {}) {
-  if (isAvailable(binary)) return true;
-  const msg = `[ask] Missing binary: ${binary}. Install it and ensure it is in PATH.`;
-  if (isLocal || optional) {
-    console.error(msg + ' (continuing)');
-    return false;
-  }
-  console.error(msg);
-  process.exit(1);
-}
 
 /** Host session variables that must never leak into a spawned advisor CLI. */
 export const HOST_SESSION_ENV_VARS = [
@@ -1855,7 +1651,7 @@ export function buildInventory({
       const st = fs.statSync(file);
       if (Date.now() - st.mtimeMs < ttlMs) {
         const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
-        return { ...cached, cached: true, path: file };
+        if (cached.inventory_version === 2) return { ...cached, cached: true, path: file };
       }
     } catch {
       /* probe fresh */
@@ -1873,11 +1669,16 @@ export function buildInventory({
       auth_verified: null,
       notes: [],
       ...getProviderCostMeta(p, profiles),
+      advisor_eligible: ['codex', 'claude', 'ollama', 'lmstudio'].includes(p),
     };
     if (p === 'lmstudio') {
       entry.installed = binaryOnPath('curl') || binaryOnPath('curl.exe');
       entry.healthy = checkServerHealth('lmstudio');
       if (!entry.healthy) entry.notes.push(`server not responding at ${LMSTUDIO_BASE}`);
+      if (entry.healthy) {
+        entry.model_details = getLocalModelDetails(p, env);
+        entry.models = Object.keys(entry.model_details);
+      }
     } else if (p === 'lemonade') {
       entry.installed = !!env.LEMONADE_BIN && binaryOnPath(env.LEMONADE_BIN);
       entry.healthy = entry.installed;
@@ -1886,21 +1687,26 @@ export function buildInventory({
       entry.installed = binaryOnPath(PROVIDER_BINARIES[p]);
       if (LOCAL_PROVIDERS.includes(p)) {
         entry.healthy = entry.installed && checkServerHealth(p);
-        if (p === 'ollama' && entry.healthy) entry.models = getOllamaModels();
+        if (p === 'ollama' && entry.healthy) {
+          entry.model_details = getLocalModelDetails(p, env);
+          entry.models = Object.keys(entry.model_details);
+        }
       } else {
         entry.healthy = entry.installed;
         if (entry.installed) entry.notes.push('binary found; auth unverified (smoke --live)');
       }
     }
+    if (!entry.advisor_eligible) entry.notes.push('Read-only enforcement unverified; excluded from automatic advising.');
     providers[p] = entry;
   }
 
   const inv = {
-    inventory_version: 1,
+    inventory_version: 2,
     advisor_version: VERSION,
     created_at: new Date().toISOString(),
     platform: process.platform,
     host_cli: detectHostCli(env),
+    execution_policy: profiles.defaults.execution_policy,
     providers,
   };
   try {
@@ -2084,337 +1890,190 @@ export function rememberAdvisorPath(projectRoot = process.cwd()) {
 // ---------------------------------------------------------------------------
 
 export function runAdvisor({
-  provider,
-  model = null,
-  effort = null,
-  prompt,
-  originalTask = null,
-  dryRun = false,
-  multi = false,
-  allowWrite = false,
-  allowSelf = false,
-  noArtifacts = false,
-  propose = false,
-  quiet = false,
-  // Callers that went through parseProviderSpec have already had the name
-  // corrected, so runAdvisor's own alias lookup sees nothing to do. Without
-  // this hand-off the correction would be invisible on every real path.
-  modelAliased = null,
-  // Test seam. Everything above this line is decided before any process is
-  // started, but until now the spawn itself was hard-wired to spawnSync, so the
-  // whole orchestration layer — substitution notices, alias hand-off, timeout
-  // precedence — could only be checked by making real LLM calls. That is why
-  // three separate defects in it shipped silently. Injecting the spawn keeps CI
-  // free of live calls (a project rule) while covering this code.
-  spawnFn = spawnSync,
-  // Paired with spawnFn: a stubbed spawn is useless if the PATH probe in front
-  // of it calls process.exit(1) on a machine without the CLI installed, which
-  // is exactly what CI is. Injecting the probe keeps the orchestration tests
-  // honest without pretending the binaries exist.
-  isBinaryAvailable = binaryOnPath,
+  provider, model = null, effort = null, prompt, originalTask = null,
+  dryRun = false, multi = false, allowWrite = false, allowSelf = false,
+  noArtifacts = false, propose = false, quiet = false, modelAliased = null,
+  schema = null, execution = null, env: baseEnv = process.env,
+  profiles: suppliedProfiles = null, modelInfo: suppliedModelInfo = null,
+  spawnFn = spawnSync, isBinaryAvailable = binaryOnPath,
 }) {
-  const profiles = loadProviderProfiles();
-  let meta = {};
-  // Snapshot the request before provider substitution or model correction
-  // rewrite these locals.
+  const profiles = suppliedProfiles || loadProviderProfiles();
   const requestedProvider = provider;
-  const requestedModel = model;
-
-  // Prefer antigravity (agy); fall back only when its binary is missing
-  const pref = resolvePreferredProvider(provider, profiles);
+  const requestedModel = modelAliased?.from || model;
+  const meta = {};
+  const pref = execution ? { provider, substituted: false } : resolvePreferredProvider(provider, profiles);
   if (pref.substituted) {
-    console.error(
-      `[xllm] ${pref.reason} → using ${pref.provider} instead of ${pref.from}`
-    );
-    meta = { substituted: true, from: pref.from };
+    console.error(`[xllm] ${pref.reason} → using ${pref.provider} instead of ${pref.from}`);
+    Object.assign(meta, { substituted: true, from: pref.from });
     provider = pref.provider;
   }
-
-  // A retired model name reaching here (direct call, or a default_model pinned
-  // in xllm-providers.toml) is corrected and announced — silent substitution
-  // would misattribute the evidence.
-  const modelAlias = resolveModelAlias(provider, model, profiles);
-  if (modelAlias.aliased) model = modelAlias.model;
-  // Either the caller corrected it (spec path) or we just did (direct call /
-  // TOML pin). Announce exactly once, and carry it into the evidence.
-  const correction = modelAliased || modelAlias.aliased;
+  const alias = resolveModelAlias(provider, model, profiles);
+  if (alias.aliased) model = alias.model;
+  const correction = modelAliased || alias.aliased;
   if (correction) {
-    const origin =
-      correction.source === 'toml'
-        ? ' (from [aliases] in xllm-providers.toml)'
-        : '';
-    console.error(
-      `[xllm] ${provider} no longer accepts '${correction.from}' → using '${correction.to}'${origin}`
-    );
+    console.error(`[xllm] ${provider}: '${correction.from}' → '${correction.to}' (${correction.source || 'builtin'})`);
     meta.modelAliased = correction;
   }
-
-  const allowMutation = mutationAllowed(process.env, { allowWrite });
-  const env = buildAdvisorEnv(provider);
-  const original =
-    originalTask ||
-    process.env.XLLM_ASK_ORIGINAL_TASK ||
-    process.env.OMC_ASK_ORIGINAL_TASK ||
-    prompt;
-
+  const env = buildAdvisorEnv(provider, { ...baseEnv, ...(execution?.env || {}) });
+  const allowMutation = !execution && mutationAllowed(env, { allowWrite });
   const pconf = profiles.providers[provider] || {};
   const resolvedEffort = effort || pconf.default_effort || null;
-  let resolvedModel = model || pconf.default_model || null;
-  if (provider === 'ollama' && !resolvedModel) {
-    resolvedModel = env.OLLAMA_DEFAULT_MODEL || pconf.default_model || 'llama3.2';
-  }
-
-  if (['ollama', 'lmstudio', 'lemonade'].includes(provider)) {
-    if (!checkServerHealth(provider)) {
-      console.error(
-        `[${provider}] Server health check failed. Is the server running? Proceeding anyway.`
-      );
-    }
-  }
-
-  if (provider === 'ollama' && !model) {
-    const models = getOllamaModels();
-    if (models.length) {
-      console.error(`[ollama] Available models: ${models.join(', ')}`);
-    }
-  }
-
-  const promptToSend = propose ? buildProposalPrompt(prompt) : prompt;
-
-  const cfg = resolveSpawnConfig(provider, resolvedModel, promptToSend, env, {
-    effort: resolvedEffort || null,
-    profiles,
-    allowMutation,
-  });
-  const finalModel = cfg.model || resolvedModel;
-  const finalEffort = cfg.effort || resolvedEffort;
-
-  if (dryRun) {
-    console.log(
-      JSON.stringify(
-        {
-          provider,
-          model: finalModel,
-          effort: finalEffort,
-          binary: cfg.binary,
-          args: cfg.args.map((a) =>
-            typeof a === 'string' && a.length > 120 ? a.slice(0, 120) + '…' : a
-          ),
-          usesStdin: cfg.usesStdin,
-          timeoutMs: cfg.timeoutMs,
-          mutation: allowMutation,
-          unavailable: cfg.unavailable || false,
-          substituted: meta.substituted || false,
-          modelAliased: meta.modelAliased || null,
-        },
-        null,
-        2
-      )
-    );
-    return { artifactPath: null, exitCode: 0, raw: '', durationMs: 0, dryRun: true };
-  }
-
-  if (cfg.unavailable) {
-    const msg = `[${provider}] ${cfg.unavailable}`;
-    console.error(msg);
-    return { artifactPath: null, exitCode: 1, raw: msg, durationMs: 0 };
-  }
-
-  // Windows caps the whole CreateProcess command line at ~32K chars. For
-  // providers that receive the prompt via argv (usesStdin:false) an oversize
-  // prompt cannot be delivered at all — fail fast with a real message instead
-  // of a cryptic spawn error. codex/claude (stdin delivery) are unaffected.
-  if (!cfg.usesStdin && promptTooLongForArgv([cfg.binary, ...cfg.args].join(' ').length)) {
-    const msg =
-      `[${provider}] prompt too long for argv delivery on Windows (~32KB CreateProcess limit). ` +
-      `Use a stdin-based provider (codex, claude) or shorten the prompt.`;
-    console.error(msg);
-    return { artifactPath: null, exitCode: 1, raw: msg, durationMs: 0, error: 'prompt-too-long' };
-  }
-
-  // Same-provider advising from inside that provider's own CLI nests
-  // sessions and shares auth/sandbox state — refuse unless explicitly allowed.
-  const host = detectHostCli();
-  if (
-    host &&
-    host === provider &&
-    !allowSelf &&
-    process.env.XLLM_ALLOW_SELF !== '1'
-  ) {
-    const msg =
-      `[xllm] Refusing same-provider advising: host CLI is '${host}'. ` +
-      `Pass --allow-self or set XLLM_ALLOW_SELF=1 to override.`;
-    console.error(msg);
-    return { artifactPath: null, exitCode: 1, raw: msg, durationMs: 0 };
-  }
-
-  if (provider !== 'lmstudio') {
-    const isLocal = LOCAL_PROVIDERS.includes(provider);
-    ensureBinary(cfg.binary, { isLocal, isAvailable: isBinaryAvailable });
-  } else {
-    ensureBinary(cfg.binary, { isLocal: true, optional: true, isAvailable: isBinaryAvailable });
-  }
-
-  const target = resolveSpawnTarget(cfg.binary);
-
-  let finalCommand = target.command;
-  let finalArgs = [...(target.argsPrefix || []), ...cfg.args];
-
-  if (target.viaCmd) {
-    finalCommand = process.env.ComSpec || 'cmd.exe';
-    const bat = resolveBinaryPath(cfg.binary);
-    const quotedArgs = cfg.args
-      .map((a) => (/\s|"/.test(a) ? `"${String(a).replace(/"/g, '\\"')}"` : a))
-      .join(' ');
-    finalArgs = ['/d', '/s', '/c', `"${bat}" ${quotedArgs}`];
-  }
-
-  const runOpts = {
-    encoding: 'utf8',
-    maxBuffer: 12 * 1024 * 1024,
-    env,
-    shell: false,
-    timeout: cfg.timeoutMs,
-    killSignal: 'SIGKILL',
-    windowsHide: true,
-    ...(cfg.usesStdin ? { input: cfg.stdinPayload ?? promptToSend } : {}),
+  const resolvedModel = model || pconf.default_model
+    || (provider === 'ollama' ? env.OLLAMA_DEFAULT_MODEL : null)
+    || (provider === 'lmstudio' ? env.LMSTUDIO_MODEL : null) || null;
+  let modelInfo = suppliedModelInfo;
+  let policy = executionPolicyDecision(provider, resolvedModel, { profiles, env, modelInfo });
+  const attribution = {
+    requested_provider: requestedProvider, requested_model: requestedModel,
+    executed_provider: provider, transmitted_model: resolvedModel,
+    substituted_from: pref.substituted ? pref.from : null,
+    model_correction_source: correction?.source || (correction ? 'builtin' : null),
+    requested_effort: resolvedEffort, effective_effort: null, cli_version: null,
+    surface: ['ollama', 'lmstudio'].includes(provider) ? 'http-completion' : 'cli-agentic',
+    execution_location: policy.location,
   };
-
-  const started = Date.now();
-  // Contract floor: bounded jittered retry, transient failures only.
-  const result = withRetry(() => spawnFn(finalCommand, finalArgs, runOpts));
-  const durationMs = Date.now() - started;
-  if (result.attempts > 1) {
-    console.error(
-      `[${provider}] transient failure — retried (${result.attempts} attempts)`
-    );
+  const fail = (kind, hint) => {
+    console.error(`[${provider}] ${hint}`);
+    return makeResult({ attribution, failure: { kind, retryable: false, hint } });
+  };
+  // A positively remote endpoint/model is refused before any network request.
+  if (!policy.allowed && policy.location === 'remote') return fail('policy-denied', policy.reason);
+  if (!modelInfo && ['ollama', 'lmstudio'].includes(provider) && spawnFn === spawnSync) {
+    const details = getLocalModelDetails(provider, env);
+    modelInfo = details[resolvedModel] || null;
   }
-
-  let stdout = result.stdout || '';
-  const stderr = result.stderr || '';
-  let raw = [stdout, stderr].filter(Boolean).join('\n\n');
-  let code = typeof result.status === 'number' ? result.status : 1;
-
-  if (result.error) {
-    raw = `[spawn error] ${result.error.message}\n\n${raw}`;
-    code = code || 1;
-  }
-  if (result.signal) {
-    raw = `[killed by signal ${result.signal}]\n\n${raw}`;
-    code = code || 1;
-  }
-  if (code !== 0 && result.failure && result.failure.kind !== 'ok') {
-    console.error(
-      `[${provider}] failure class: ${result.failure.kind}${result.failure.hint ? ` — ${result.failure.hint}` : ''}`
-    );
-    // Model-name failures are the ones a user can actually fix in the next
-    // command, so spend two extra lines on them: where the bad name came from,
-    // and how to ask this CLI what it accepts.
-    if (
-      result.failure.kind === 'unknown-model' ||
-      result.failure.kind === 'account-unsupported'
-    ) {
-      const pinHint = stalePinHint(provider, cfg.model, profiles);
-      if (pinHint) console.error(`[${provider}] ${pinHint}`);
-      const listCmd = MODEL_LIST_COMMANDS[provider];
-      if (listCmd) console.error(`[${provider}] list what this CLI accepts: ${listCmd}`);
+  policy = executionPolicyDecision(provider, resolvedModel, { profiles, env, modelInfo });
+  attribution.execution_location = policy.location;
+  if (!policy.allowed) return fail('policy-denied', policy.reason);
+  if (execution && provider !== 'codex') return fail('permanent', 'exec requires the verified Codex OS sandbox');
+  const original = originalTask || env.XLLM_ASK_ORIGINAL_TASK || env.OMC_ASK_ORIGINAL_TASK || prompt;
+  const promptToSend = propose ? buildProposalPrompt(prompt) : prompt;
+  let tempDir = null;
+  try {
+    let schemaPath = null;
+    if (schema) {
+      if (typeof schema !== 'object' || Array.isArray(schema)) return fail('permanent', 'schema must be a JSON object');
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xllm-schema-'));
+      schemaPath = path.join(tempDir, 'response.json');
+      fs.writeFileSync(schemaPath, JSON.stringify(schema), { mode: 0o600 });
     }
-  }
-
-  if (provider === 'lmstudio' && stdout) {
-    raw = parseLMStudioResponse(stdout);
-  }
-  if (provider === 'ollama') {
-    let parsed = parseOllamaHttpResponse(stdout);
-    // Effort is best-effort for local models: a model that rejects the
-    // `think` parameter gets one retry without it instead of a hard failure.
-    if (
-      parsed.error &&
-      /think/i.test(parsed.error) &&
-      (cfg.stdinPayload || '').includes('"think"')
-    ) {
-      console.error(`[ollama] ${cfg.model}: server rejected "think" — retrying without (effort ignored)`);
-      const fallback = JSON.parse(cfg.stdinPayload);
-      delete fallback.think;
-      const retry = withRetry(() =>
-        spawnSync(finalCommand, finalArgs, { ...runOpts, input: JSON.stringify(fallback) })
-      );
-      stdout = retry.stdout || '';
-      code = typeof retry.status === 'number' ? retry.status : 1;
-      raw = [stdout, retry.stderr || ''].filter(Boolean).join('\n\n');
-      parsed = parseOllamaHttpResponse(stdout);
-    }
-    if (parsed.error) {
-      code = code || 1;
-      raw = `[ollama] ${parsed.error}`;
-    } else if (parsed.response != null) {
-      raw = parsed.response;
-    } else {
-      // not JSON (connection refused text, proxy page, …) — keep raw output
-      raw = cleanOllamaOutput(raw);
-      if (code === 0) code = 1;
-    }
-  }
-  if (provider === 'codex') {
-    raw = cleanCodexOutput(raw);
-  }
-  if (provider === 'antigravity' && code === 0 && raw.trim() === '') {
-    code = 1;
-    raw = raw || '(empty output from antigravity — treated as failure)';
-  }
-
-  let artifactPath = null;
-  let patchPath = null;
-  if (noArtifacts || process.env.XLLM_NO_ARTIFACTS === '1') {
-    if (!quiet) console.log(raw || '(no output)');
-  } else {
-    artifactPath = writeArtifact({
-      provider,
-      model: finalModel,
-      effort: finalEffort,
-      original,
-      finalPrompt: promptToSend,
-      raw,
-      exitCode: code,
-      durationMs,
-      meta: { multi, propose, ...meta },
-      kind: propose ? 'proposals' : 'ask',
+    const cfg = resolveSpawnConfig(provider, resolvedModel, promptToSend, env, {
+      profiles, effort: resolvedEffort, allowMutation, execution, schema, schemaPath, modelInfo,
+      timeoutMs: execution?.timeoutMs,
     });
-    if (propose && code === 0) {
-      const patch = extractProposalPatch(raw);
-      if (patch) {
-        patchPath = artifactPath.replace(/\.md$/, '.patch');
-        fs.writeFileSync(patchPath, patch, 'utf8');
-        console.error(`[${provider}] patch: ${patchPath}`);
-        console.error(
-          `[${provider}] review then apply with: git apply --check "${patchPath}"`
-        );
-      } else {
-        console.error(
-          `[${provider}] proposal contained no diff block — read the artifact for its explanation`
-        );
+    attribution.transmitted_model = cfg.model;
+    attribution.effective_effort = cfg.effectiveEffort;
+    if (dryRun) {
+      const preview = {
+        provider, model: cfg.model, effort: cfg.effort, effective_effort: cfg.effectiveEffort,
+        binary: cfg.binary, args: cfg.args.map((a) => String(a).length > 200 ? `${String(a).slice(0, 200)}…` : a),
+        usesStdin: cfg.usesStdin, timeoutMs: cfg.timeoutMs, mutation: !!execution || allowMutation,
+        safety: cfg.safety, execution_location: policy.location, native_schema: cfg.nativeSchema,
+        unavailable: cfg.unavailable || false, substituted: !!pref.substituted, modelAliased: correction || null,
+      };
+      if (!quiet) console.log(JSON.stringify(preview, null, 2));
+      return makeResult({ exitCode: cfg.unavailable ? 1 : 0, attribution, dryRun: true, preview,
+        failure: cfg.unavailable ? { kind: 'safety-unverified', retryable: false, hint: cfg.unavailable } : null });
+    }
+    if (cfg.unavailable) return fail('safety-unverified', cfg.unavailable);
+    const host = detectHostCli(baseEnv);
+    if (host === provider && !allowSelf && env.XLLM_ALLOW_SELF !== '1') {
+      return fail('permanent', `Refusing same-provider advising: host CLI is '${host}'. Pass --allow-self to override.`);
+    }
+    if (!cfg.binary || !isBinaryAvailable(cfg.binary)) return fail('missing-binary', `Install ${cfg.binary || provider} and ensure it is on PATH.`);
+    const target = resolveSpawnTarget(cfg.binary);
+    if (target.viaCmd) return fail('permanent', 'Unsafe cmd shim quoting is unsupported; install a directly executable CLI or Node shim.');
+    let args = [...(target.argsPrefix || []), ...cfg.args];
+    if (!cfg.usesStdin && promptTooLongForArgv([target.command, ...args].join(' ').length)) {
+      if (provider === 'grok') {
+        if (!tempDir) tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xllm-prompt-'));
+        const promptPath = path.join(tempDir, 'prompt.txt');
+        fs.writeFileSync(promptPath, promptToSend, { mode: 0o600 });
+        const at = args.lastIndexOf('-p');
+        args.splice(at, 2, '--prompt-file', promptPath);
+      } else return fail('prompt-too-long', 'Prompt exceeds Windows argv capacity; use codex, claude or local HTTP stdin delivery.');
+    }
+    // Version probes contain no model generation. Test transports do not probe the host.
+    if (spawnFn === spawnSync) {
+      const versionTarget = ['ollama', 'lmstudio'].includes(provider) ? resolveSpawnTarget('ollama') : target;
+      if (provider !== 'lmstudio') {
+        const v = spawnSync(versionTarget.command, [...(versionTarget.argsPrefix || []), '--version'], {
+          env, encoding: 'utf8', shell: false, windowsHide: true, timeout: 5000, maxBuffer: 16384,
+        });
+        if (v.status === 0) attribution.cli_version = (v.stdout || v.stderr || '').trim().split(/\r?\n/)[0].slice(0, 120) || null;
       }
     }
-    if (!quiet) console.log(artifactPath);
+    const runOpts = {
+      encoding: 'utf8', maxBuffer: 12 * 1024 * 1024, env, shell: false,
+      timeout: cfg.timeoutMs, killSignal: 'SIGKILL', windowsHide: true,
+      ...(execution?.cwd ? { cwd: execution.cwd } : {}),
+      ...(cfg.usesStdin ? { input: cfg.stdinPayload ?? promptToSend } : {}),
+    };
+    const started = Date.now();
+    let run = withRetry(() => spawnFn(target.command, args, runOpts));
+    let attempts = run.attempts;
+    let decoded = parseProviderOutput(provider, run.stdout);
+    if (provider === 'ollama' && decoded.error && /think/i.test(decoded.error) && cfg.stdinPayload?.includes('"think"')) {
+      const body = JSON.parse(cfg.stdinPayload);
+      delete body.think;
+      attribution.effective_effort = null;
+      console.error(`[ollama] ${cfg.model}: think rejected; one retry without it (effort unconfirmed)`);
+      run = withRetry(() => spawnFn(target.command, args, { ...runOpts, input: JSON.stringify(body) }));
+      attempts += run.attempts;
+      decoded = parseProviderOutput(provider, run.stdout);
+    }
+    const durationMs = Date.now() - started;
+    let code = typeof run.status === 'number' ? run.status : 1;
+    if (run.error || run.signal || decoded.error || !decoded.raw.trim()) code = code || 1;
+    const reported = decoded.reported_model;
+    attribution.reported_model = reported;
+    attribution.model_revision = provider === 'ollama' && reported === cfg.model ? modelInfo?.digest || null : null;
+    attribution.identity_status = !reported ? 'unresolved'
+      : isMutableModel(reported) && !attribution.model_revision ? 'mutable' : 'resolved';
+    const failure = code === 0 ? null : classifyFailure({
+      ...run, status: code, stdout: decoded.error || decoded.raw, stderr: run.stderr || '',
+    });
+    if (failure) {
+      failure.message = redactSecrets([decoded.error, run.error?.message, run.stderr?.trim()].filter(Boolean).join('\n') || 'Provider returned no final response').slice(-4000);
+      console.error(`[${provider}] ${failure.kind}: ${failure.message}\n${failure.hint || ''}`);
+      if (['unknown-model', 'account-unsupported'].includes(failure.kind)) {
+        const hint = stalePinHint(provider, cfg.model, profiles);
+        if (hint) console.error(`[${provider}] ${hint}`);
+        if (MODEL_LIST_COMMANDS[provider]) console.error(`[${provider}] model list: ${MODEL_LIST_COMMANDS[provider]}`);
+      }
+    }
+    if (schema && cfg.nativeSchema && decoded.structured == null && code === 0) {
+      try { decoded.structured = JSON.parse(decoded.raw); } catch { /* Caller validates fallback prose. */ }
+    }
+    const result = makeResult({
+      raw: decoded.raw, exitCode: code, durationMs, attribution, failure,
+      usage: decoded.usage, cost_estimate: attempts === 1 ? decoded.cost_estimate : null,
+      structured: decoded.structured, attempts, safety: cfg.safety, native_schema: cfg.nativeSchema,
+    });
+    if (!noArtifacts && env.XLLM_NO_ARTIFACTS !== '1') {
+      result.artifactPath = writeArtifact({
+        provider, model: reported, effort: attribution.effective_effort,
+        original, finalPrompt: promptToSend, raw: result.raw, exitCode: code, durationMs,
+        meta: { multi, propose, ...meta, attribution, failure, usage: result.usage, cost_estimate: result.cost_estimate },
+        kind: propose ? 'proposals' : 'ask',
+      });
+      if (propose && code === 0) {
+        const patch = extractProposalPatch(result.raw);
+        if (patch) {
+          result.patchPath = result.artifactPath.replace(/\.md$/, '.patch');
+          fs.writeFileSync(result.patchPath, redactSecrets(patch), 'utf8');
+          console.error(`[${provider}] patch: ${result.patchPath}`);
+        }
+      }
+    }
+    if (spawnFn === spawnSync) recordProviderResult(result, { env: baseEnv });
+    if (!quiet) console.log(result.artifactPath || result.raw || '(no output)');
+    return result;
+  } catch (error) {
+    return fail('permanent', error.message || String(error));
+  } finally {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   }
-  if (result.error) {
-    console.error(`[${provider}] ${result.error.message}`);
-  }
-
-  // Attribution: what was asked for vs what actually ran. The index and the
-  // ledger must key off the executed values — the same agy run recorded once
-  // as `gemini:X` and once as `antigravity:X` splits the sample and makes the
-  // measured router decide on halves. `requested_*` is audit/UX only.
-  const attribution = {
-    requested_provider: requestedProvider,
-    requested_model: modelAliased ? modelAliased.from : requestedModel,
-    executed_provider: provider,
-    transmitted_model: cfg.model || null,
-    substituted_from: meta.substituted ? meta.from : null,
-    model_correction_source: meta.modelAliased ? meta.modelAliased.source : null,
-  };
-
-  return { artifactPath, patchPath, exitCode: code, raw, durationMs, attribution };
 }
 
 export function runDoctor() {
@@ -2429,7 +2088,8 @@ export function runDoctor() {
     defaults: profiles.defaults,
     safety: {
       advisors_read_only: !mutationAllowed(),
-      mutation_opt_in: '--allow-write or XLLM_ALLOW_MUTATION=1',
+      execution_policy: profiles.defaults.execution_policy,
+      mutation_opt_in: '--allow-write explicitly opts into unrestricted adapters; exec never bypasses its sandbox',
     },
     providers: {},
     recommendations: [],
@@ -2444,6 +2104,7 @@ export function runDoctor() {
       notes: [],
       default_model: profiles.providers[p]?.default_model || '',
       default_effort: profiles.providers[p]?.default_effort || '',
+      advisor_eligible: ['codex', 'claude', 'ollama', 'lmstudio'].includes(p),
     };
 
     if (p === 'lmstudio') {
@@ -2483,7 +2144,7 @@ export function runDoctor() {
   }
 
   const isReady = (p) =>
-    report.providers[p].binaryOk && report.providers[p].healthOk === true;
+    report.providers[p].binaryOk && report.providers[p].healthOk === true && report.providers[p].advisor_eligible;
 
   const readyCloud = CLOUD_PROVIDERS.filter(isReady);
   const readyLocal = LOCAL_PROVIDERS.filter(isReady);
@@ -2492,32 +2153,18 @@ export function runDoctor() {
 
   if (readyCloud.length === 0 && readyLocal.length === 0) {
     report.recommendations.push(
-      'No advisors ready. Install codex/antigravity/grok or start ollama.'
+      'No verified advisors ready. Install codex/claude or start a local HTTP model server.'
     );
   } else {
-    const pair = pickDefaultXllmPair(readyCloud, readyLocal, profiles);
-    report.recommendations.push(
-      `Suggested /xllm default (antigravity>gemini for design): ${pair.join(',')}`
-    );
+    report.recommendations.push('Start with the host; use `pick` before requesting an independent advisor.');
   }
-  report.recommendations.push(
-    'Design side prefers antigravity (agy) on every platform; the standalone gemini CLI is used only when agy is absent'
-  );
+  report.recommendations.push('READY proves binary/server availability only; auth, model support and execution policy are separate.');
   report.recommendations.push(
     'Spec syntax: provider[:model][@effort]  e.g. codex@high  antigravity:model  ollama:qwen3.6:latest'
   );
 
-  ensureArtifactDirs(process.cwd());
-  report.artifactsReady = true;
-
-  try {
-    const remembered = rememberAdvisorPath(process.cwd());
-    report.advisorPath = remembered.advisor;
-    report.advisorMarker = remembered.marker;
-    report.recommendations.push(`Advisor script: ${remembered.advisor}`);
-  } catch {
-    report.advisorPath = resolveAdvisorScriptPath();
-  }
+  report.artifactsReady = fs.existsSync(path.join(resolveStateDir(), 'artifacts'));
+  report.advisorPath = resolveAdvisorScriptPath();
 
   console.log(JSON.stringify(report, null, 2));
   return report;
@@ -2540,9 +2187,16 @@ function parseArgs(argv) {
   let olderThan = null;
   let promptFilePath = null;
   let expectPromptFile = false;
+  let schemaFilePath = null;
+  let expectSchemaFile = false;
   const args = [];
   for (const a of argv.slice(2)) {
-    if (expectPromptFile) {
+    if (expectSchemaFile) {
+      schemaFilePath = a;
+      expectSchemaFile = false;
+    } else if (a === '--schema-file') {
+      expectSchemaFile = true;
+    } else if (expectPromptFile) {
       promptFilePath = a;
       expectPromptFile = false;
     } else if (a === '--prompt-file') {
@@ -2571,24 +2225,25 @@ function parseArgs(argv) {
   // hatch for Windows' ~32K CreateProcess command-line limit on the
   // caller→advisor hop; the file content wins over any positional prompt.
   let filePrompt = null;
-  if (expectPromptFile) {
-    console.error('--prompt-file requires a path');
-    process.exit(1);
+  if (expectPromptFile) throw new Error('--prompt-file requires a path');
+  if (expectSchemaFile) throw new Error('--schema-file requires a path');
+  if (schemaFilePath) {
+    flags.schema = JSON.parse(fs.readFileSync(schemaFilePath, 'utf8'));
+    flags.schemaPath = path.resolve(schemaFilePath);
+    if (!flags.schema || typeof flags.schema !== 'object' || Array.isArray(flags.schema)) throw new Error('schema must be a JSON object');
   }
   if (promptFilePath) {
     try {
       filePrompt = fs.readFileSync(promptFilePath, 'utf8').trim();
     } catch {
-      console.error(`--prompt-file: cannot read ${promptFilePath}`);
-      process.exit(1);
+      throw new Error(`--prompt-file: cannot read ${promptFilePath}`);
     }
     if (!filePrompt) {
-      console.error(`--prompt-file: ${promptFilePath} is empty`);
-      process.exit(1);
+      throw new Error(`--prompt-file: ${promptFilePath} is empty`);
     }
   }
 
-  if (args.length === 0) usage();
+  if (args.length === 0) throw new Error('A provider spec and prompt are required; use --help.');
 
   if (args[0] === '--list-providers') return { mode: 'list', flags };
   if (args[0] === '--doctor') return { mode: 'doctor', flags };
@@ -2598,15 +2253,13 @@ function parseArgs(argv) {
   if (args[0] === '--profile-show') return { mode: 'profile-show', flags };
   if (args[0] === '--set-role') {
     if (args.length < 3) {
-      console.error('Usage: --set-role <role> <provider[:model][@effort]>');
-      process.exit(1);
+      throw new Error('Usage: --set-role <role> <provider[:model][@effort]>');
     }
     return { mode: 'set-role', role: args[1], spec: args[2], flags };
   }
   if (args[0] === '--set-default') {
     if (args.length < 3) {
-      console.error('Usage: --set-default <key> <value>');
-      process.exit(1);
+      throw new Error('Usage: --set-default <key> <value>');
     }
     return { mode: 'set-default', key: args[1], value: args[2], flags };
   }
@@ -2615,14 +2268,12 @@ function parseArgs(argv) {
   }
   if (args[0] === '--discipline') {
     const action = args[1];
-    if (!['show', 'install', 'remove'].includes(action || '')) {
-      console.error('Usage: --discipline show|install|remove [--target <path>]');
-      process.exit(1);
+    if (action !== 'remove') {
+      throw new Error('Discipline installation was removed; only --discipline remove is supported.');
     }
     const ti = args.indexOf('--target');
     if (ti !== -1 && !args[ti + 1]) {
-      console.error('--target requires a path');
-      process.exit(1);
+      throw new Error('--target requires a path');
     }
     return { mode: 'discipline', action, target: ti !== -1 ? args[ti + 1] : null, flags };
   }
@@ -2646,14 +2297,13 @@ function parseArgs(argv) {
   if (args[0] === '--dry-run') {
     const spec = parseProviderSpec(args[1]);
     const prompt = filePrompt ?? args.slice(2).join(' ').trim();
-    if (!spec || !prompt) usage();
+    if (!spec || !prompt) throw new Error('dry-run requires a valid provider and prompt');
     return { mode: 'dry-run', ...spec, prompt, flags };
   }
   if (args[0] === '--multi') {
     const dr = parseDiffFlags(args.slice(2));
     if (dr.error) {
-      console.error(`[multi] ${dr.error}`);
-      process.exit(1);
+      throw new Error(`[multi] ${dr.error}`);
     }
     const list = (args[1] || '')
       .split(',')
@@ -2661,35 +2311,21 @@ function parseArgs(argv) {
       .filter(Boolean);
     const prompt = filePrompt ?? dr.rest.join(' ').trim();
     if (list.length < 2 || !prompt) {
-      console.error('--multi requires at least two providers and a prompt');
-      usage();
+      throw new Error('--multi requires at least two providers and a prompt');
     }
     const providers = list.map((s) => {
       const p = parseProviderSpec(s);
       if (!p) {
-        console.error(`Unknown provider: ${s}`);
-        process.exit(1);
+        throw new Error(`Unknown provider: ${s}`);
       }
-      // Children re-parse and re-correct on their own. Hand them the string the
-      // user typed, not p.spec — p.spec already carries the corrected name, so
-      // passing it down would hide the correction from the child's evidence.
-      //
-      // The parent still needs to know what will actually run, because the
-      // index it writes is the entry point every reader (and every aggregation)
-      // starts from. Resolving here is deterministic: the child runs the same
-      // pure functions against the same PATH a moment later.
-      const executedProvider = resolvePreferredProvider(p.provider).provider;
-      const executedSpec =
-        (p.model ? executedProvider + ':' + p.model : executedProvider) +
-        (p.effort ? '@' + p.effort : '');
-      return { ...p, rawSpec: s, executedProvider, executedSpec };
+      return { ...p, rawSpec: s };
     });
     return { mode: 'multi', providers, prompt, diffOpts: dr.diffOpts, flags };
   }
 
   const spec = parseProviderSpec(args[0]);
   const prompt = filePrompt ?? args.slice(1).join(' ').trim();
-  if (!spec || !prompt) usage();
+  if (!spec || !prompt) throw new Error('A valid provider spec and non-empty prompt are required');
   return { mode: 'run', ...spec, prompt, flags };
 }
 
@@ -2712,10 +2348,6 @@ async function main() {
     process.exit(0);
   }
   if (parsed.mode === 'discipline') {
-    if (parsed.action === 'show') {
-      console.log(disciplineBlock());
-      process.exit(0);
-    }
     const target = resolveDisciplineTarget(process.cwd(), parsed.target);
     let existing = '';
     try {
@@ -2724,13 +2356,6 @@ async function main() {
       /* new file */
     }
     try {
-      if (parsed.action === 'install') {
-        const had = /<!--\s*xllm:discipline\b/.test(existing);
-        fs.writeFileSync(target, spliceDisciplineBlock(existing));
-        console.error(`discipline ${DISCIPLINE_VERSION} ${had ? 'updated' : 'installed'}: ${target}`);
-        console.log(target);
-        process.exit(0);
-      }
       const res = removeDisciplineBlock(existing);
       if (!res.removed) {
         console.error(`no discipline block in ${target}`);
@@ -2787,6 +2412,9 @@ async function main() {
     process.exit(0);
   }
   if (parsed.mode === 'set-default') {
+    if (parsed.key === 'execution_policy' && !['any', 'local-only'].includes(parsed.value)) {
+      throw new Error('execution_policy must be any or local-only');
+    }
     const file = setProfileValue('defaults', parsed.key, parsed.value);
     console.log(`${file}: defaults.${parsed.key} = "${parsed.value}"`);
     process.exit(0);
@@ -2799,6 +2427,7 @@ async function main() {
       const sensitive = parsed.sensitive === 'auto' ? 'no' : parsed.sensitive; // bare CLI has no host skim
       const plan = resolveSetupPlan(inv, {
         pack: parsed.pack, host: inv.host_cli, overrides: parsed.overrides, sensitive,
+        executionPolicy: loadProviderProfiles().defaults.execution_policy,
       });
       let applied = { written: [], deleted: [], errors: [] };
       if (parsed.flags.apply) {
@@ -2809,7 +2438,7 @@ async function main() {
       } else {
         console.log(formatSetupPlanHuman(plan, { apply: !!parsed.flags.apply, applied }));
       }
-      process.exit(0);
+      process.exit(plan.ok === false ? 2 : 0);
     } catch (e) {
       console.error(String(e?.message || e));
       process.exit(1);
@@ -2817,7 +2446,7 @@ async function main() {
   }
 
   if (parsed.mode === 'dry-run') {
-    runAdvisor({
+    const result = runAdvisor({
       provider: parsed.provider,
       model: parsed.model,
       effort: parsed.effort,
@@ -2826,14 +2455,18 @@ async function main() {
       allowWrite: parsed.flags.allowWrite,
       propose: parsed.flags.propose,
       modelAliased: parsed.modelAliased,
+      schema: parsed.flags.schema || null,
+      quiet: parsed.flags.json,
     });
-    process.exit(0);
+    if (parsed.flags.json) console.log(JSON.stringify(result));
+    process.exit(result.exitCode);
   }
 
   if (parsed.mode === 'multi') {
     // Each provider runs as its own child process, concurrently.
     const self = fileURLToPath(import.meta.url);
-    const childFlags = [];
+    const childFlags = ['--json'];
+    if (parsed.flags.schemaPath) childFlags.push('--schema-file', parsed.flags.schemaPath);
     if (parsed.flags.allowWrite) childFlags.push('--allow-write');
     if (parsed.flags.allowSelf) childFlags.push('--allow-self');
     if (parsed.flags.noArtifacts) childFlags.push('--no-artifacts');
@@ -2844,8 +2477,7 @@ async function main() {
     if (hasDiffSource(parsed.diffOpts)) {
       const diff = collectReviewDiff(parsed.diffOpts);
       if (diff.error) {
-        console.error(`[multi] ${diff.error}`);
-        process.exit(1);
+        throw new Error(`[multi] ${diff.error}`);
       }
       fullPrompt = `${parsed.prompt}\n${buildReviewContext(diff)}`;
       diffContext = diffMeta(diff);
@@ -2863,8 +2495,8 @@ async function main() {
         );
         fs.writeFileSync(tmpPromptFile, fullPrompt, 'utf8');
         childPromptArgs = ['--prompt-file', tmpPromptFile];
-      } catch {
-        tmpPromptFile = null; // best-effort: fall back to argv
+      } catch (error) {
+        throw new Error(`Cannot safely deliver multi prompt: ${error.message}`);
       }
     }
 
@@ -2873,24 +2505,22 @@ async function main() {
     const runOne = (p) =>
       new Promise((resolve) => {
         console.error(`[multi] running ${p.spec}...`);
-        const child = spawn(
-          process.execPath,
+        const child = spawn(process.execPath,
           [self, ...childFlags, p.rawSpec || p.spec, ...childPromptArgs],
-          { env: process.env, windowsHide: true }
-        );
+          { env: process.env, windowsHide: true });
         let out = '';
-        let errBuf = '';
         child.stdout.on('data', (d) => (out += d));
-        child.stderr.on('data', (d) => {
-          errBuf += d;
-          process.stderr.write(d);
+        child.stderr.on('data', (d) => process.stderr.write(d));
+        const failedResult = (hint) => makeResult({ failure: { kind: 'permanent', retryable: false, hint } });
+        child.on('error', (e) => resolve({ p, result: failedResult(e.message) }));
+        child.on('close', (code) => {
+          try {
+            const result = JSON.parse(out.trim());
+            if (result.schema_version !== 2 || typeof result.raw !== 'string') throw new Error('Invalid advisor result envelope');
+            if (code !== 0 && result.exitCode === 0) result.exitCode = code || 1;
+            resolve({ p, result });
+          } catch (e) { resolve({ p, result: failedResult(e.message) }); }
         });
-        child.on('error', (e) =>
-          resolve({ spec: p.spec, executedSpec: p.executedSpec, requestedSpec: s0(p), code: 1, out: `[spawn error] ${e.message}`, err: '' })
-        );
-        child.on('close', (code) =>
-          resolve({ spec: p.spec, executedSpec: p.executedSpec, requestedSpec: s0(p), code: code ?? 1, out: out.trim(), err: errBuf })
-        );
       });
 
     const raw = await Promise.all(parsed.providers.map(runOne));
@@ -2901,14 +2531,21 @@ async function main() {
         /* best-effort */
       }
     }
-    const results = raw.map((r) => {
-      const artifact = r.code === 0 && r.out ? r.out.split(/\r?\n/).pop() : null;
-      const patchMatch = (r.err || '').match(/patch: (.+\.patch)/);
-      return { spec: r.spec, executedSpec: r.executedSpec, requestedSpec: r.requestedSpec, code: r.code, artifact, patch: patchMatch ? patchMatch[1].trim() : null, out: r.out };
+    const results = raw.map(({ p, result }) => {
+      const a = result.attribution;
+      const executedSpec = a?.executed_provider
+        ? `${a.executed_provider}${a.reported_model || a.transmitted_model ? ':' + (a.reported_model || a.transmitted_model) : ''}${a.effective_effort ? '@' + a.effective_effort : ''}`
+        : null;
+      return { spec: p.spec, executedSpec, requestedSpec: s0(p), code: result.exitCode,
+        artifact: result.artifactPath, patch: result.patchPath, out: result.raw, result };
     });
     const failed = results.filter((r) => r.code !== 0).length;
 
     if (parsed.flags.noArtifacts || process.env.XLLM_NO_ARTIFACTS === '1') {
+      if (parsed.flags.json) {
+        console.log(JSON.stringify({ schema_version: 2, measurement: false, diff_context: diffContext, results }));
+        process.exit(failed === results.length ? 1 : 0);
+      }
       for (const r of results) {
         console.log(`\n===== ${r.spec} (exit ${r.code}) =====\n`);
         console.log(r.out || '(no output)');
@@ -2922,7 +2559,7 @@ async function main() {
       propose: parsed.flags.propose,
       diffContext,
     });
-    console.log(index.mdPath);
+    console.log(parsed.flags.json ? JSON.stringify({ schema_version: 2, measurement: false, ...index, diff_context: diffContext, results }) : index.mdPath);
     process.exit(failed > 0 && failed === results.length ? 1 : 0);
   }
 
@@ -2936,7 +2573,10 @@ async function main() {
     noArtifacts: parsed.flags.noArtifacts,
     propose: parsed.flags.propose,
     modelAliased: parsed.modelAliased,
+    schema: parsed.flags.schema || null,
+    quiet: parsed.flags.json,
   });
+  if (parsed.flags.json) console.log(JSON.stringify(result));
   process.exit(result.exitCode === 0 ? 0 : result.exitCode || 1);
 }
 
@@ -2952,7 +2592,10 @@ function isMain() {
 
 if (isMain()) {
   main().catch((err) => {
-    console.error(err);
+    console.error(err.message || String(err));
+    if (process.argv.includes('--json')) console.log(JSON.stringify(makeResult({
+      failure: { kind: 'permanent', retryable: false, hint: err.message || String(err) },
+    })));
     process.exit(1);
   });
 }

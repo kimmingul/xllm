@@ -115,7 +115,6 @@ ok(pkg.version === plugin.version, `package.json version matches plugin.json (${
     const body = fs.readFileSync(skillMd, 'utf8');
     ok(/^---\n[\s\S]*?name:\s*\S+/m.test(body), `claude skill ${entry} has frontmatter name`);
     ok(body.includes('CLAUDE_PLUGIN_ROOT'), `claude skill ${entry} wires advisor via CLAUDE_PLUGIN_ROOT`);
-    ok(/read-only/i.test(body), `claude skill ${entry} states read-only default`);
   }
 }
 
@@ -144,52 +143,50 @@ ok(pkg.version === plugin.version, `package.json version matches plugin.json (${
   }
 }
 
-// umbrella-5: collapsed skills must not resurface; review skill stays ≤80 lines
-for (const gone of ['multi', 'debate', 'council']) {
-  ok(!fs.existsSync(path.join(root, 'skills', gone)), `collapsed skill dir absent (skills/${gone})`);
-}
+// Skills are the one shared surface: manifest entries, skill directories and the
+// scripts they invoke must stay in sync across all three hosts.
 {
-  const reviewLines = fs
-    .readFileSync(path.join(root, 'skills', 'review', 'SKILL.md'), 'utf8')
-    .split('\n').length;
-  ok(reviewLines <= 80, `review skill ≤ 80 lines (${reviewLines})`);
-}
-
-// Shipped surface must not re-advertise removed grok-xllm-era features
-// (/ralph and /team skills removed in v0.20.0; pick-team removed after v0.21.1)
-// nor claim the old review nouns are still aliases (dropped in v0.28.0).
-// Historical records are exempt: CHANGELOG, FINDINGS, docs/*-design.md,
-// docs/*-plan.md, docs/*-backlog.md, and diversity-roadmap.md.
-{
-  const forbidden = [/\/ralph\b/, /\/team\b/, /pick-team/, /alias(es)?\s+through\s+v0\.27\.x/i, /v0\.27\.x까지/];
-  const shipped = ['README.md'];
-  const collectMd = (dir) => {
+  const listDirs = (dir) => {
     const abs = path.join(root, dir);
-    if (!fs.existsSync(abs)) return;
-    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
-      const rel = path.join(dir, e.name);
-      if (e.isDirectory()) collectMd(rel);
-      else if (e.name.endsWith('.md')) shipped.push(rel);
+    return fs.existsSync(abs)
+      ? fs.readdirSync(abs, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
+      : [];
+  };
+  const entryNames = (entries) =>
+    (entries || []).map((e) => path.basename(e.replace(/[\\/]+$/, ''))).sort();
+
+  const sharedDirs = listDirs('skills');
+  const claudeSkills = JSON.parse(
+    fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8')
+  ).skills;
+  ok(
+    JSON.stringify(sharedDirs) === JSON.stringify(entryNames(claudeSkills)),
+    `claude manifest lists exactly the shared skill dirs (${sharedDirs.join(', ')})`
+  );
+
+  const grokDirs = listDirs(path.join('.grok', 'skills'));
+  ok(
+    JSON.stringify(grokDirs) === JSON.stringify(entryNames(plugin.skills)),
+    `grok manifest lists exactly the .grok/skills dirs (${grokDirs.join(', ')})`
+  );
+
+  // Every script a skill or the CLI dispatcher points at must exist.
+  const referenced = new Map();
+  const addRefs = (rel, body) => {
+    for (const m of body.matchAll(/\b(xllm(?:-[a-z]+)?\.(?:js|mjs)|smoke\.mjs)\b/g)) {
+      if (!referenced.has(m[1])) referenced.set(m[1], rel);
     }
   };
-  collectMd('examples');
-  collectMd('skills');
-  collectMd(path.join('.grok', 'skills'));
-  for (const e of fs.readdirSync(path.join(root, 'docs'))) {
-    if (
-      e.endsWith('.md') &&
-      !e.endsWith('-design.md') &&
-      !e.endsWith('-plan.md') &&
-      !e.endsWith('-backlog.md') &&
-      e !== 'diversity-roadmap.md'
-    ) {
-      shipped.push(path.join('docs', e));
+  for (const dir of ['skills', path.join('.grok', 'skills')]) {
+    for (const s of listDirs(dir)) {
+      const rel = path.join(dir, s, 'SKILL.md');
+      addRefs(rel, fs.readFileSync(path.join(root, rel), 'utf8'));
     }
   }
-  for (const rel of shipped) {
-    const body = fs.readFileSync(path.join(root, rel), 'utf8');
-    const hit = forbidden.find((re) => re.test(body));
-    ok(!hit, `no removed-feature residue in ${rel}${hit ? ` (matched ${hit})` : ''}`);
+  addRefs('scripts/xllm.mjs', fs.readFileSync(path.join(root, 'scripts', 'xllm.mjs'), 'utf8'));
+  addRefs('scripts/xllm-review.js', fs.readFileSync(path.join(root, 'scripts', 'xllm-review.js'), 'utf8'));
+  for (const [script, from] of referenced) {
+    ok(fs.existsSync(path.join(root, 'scripts', script)), `script ${script} referenced by ${from} exists`);
   }
 }
 

@@ -9,7 +9,11 @@ description: >
   the git/gh commands.
 ---
 
-# scribe — Cheap-prose lane for git chores (xllm)
+# scribe — Optional cheap-prose lane for git chores (xllm)
+
+Optional: only worth it when cost matters and the prose is mechanical.
+You can always write the message yourself. Using scribe sends the diff/log
+to the routed provider — a privacy and cost decision, not a default.
 
 Split of labor: deterministic collectors gather the diff/log (no LLM), the
 **cheapest healthy advisor** writes only the prose, and **you** execute the
@@ -39,16 +43,19 @@ MSG=$(node <xllm-scribe.js> commit) && git commit -m "$MSG"
 
 ## Contract
 
-- Routing: `scribe` role — local-first (free), `release`/`notes` auto-escalate
-  to a cloud model when one is healthy (narrative needs judgment). Pin per
-  project: `--set-role scribe ollama:qwen3.6:latest@low`.
+- Routing: `scribe` role resolved once through the routing policy (local-first
+  when eligible); if nothing satisfies the policy the run fails instead of
+  falling back. Pin per project: `--set-role scribe ollama:qwen3.6:latest@low`.
 - Output is validated deterministically (Conventional Commits format, subject
   ≤72 chars, no fences, no invented facts instruction) with one corrective
   retry; **exit 3** means validation failed — show the raw text to the user
   for review instead of using it blindly.
-- Privacy: the diff goes only to the routed advisor and is **never persisted**
-  by xllm (no artifact) — the git object itself is the record. For sensitive
-  repos keep scribe on local models.
+- Privacy: the diff/log is sent to the routed provider (remote for cloud
+  providers). xllm writes no artifact for it (`--no-artifacts` internally), but
+  that does not control what a remote provider retains. For private code pin
+  scribe to a local model (`profile set-role scribe ollama:qwen3.6:latest@low`)
+  and set `execution_policy = "local-only"` — unknown-location providers are
+  then refused, not assumed local.
 - Show the generated message to the user (or apply directly if they asked you
   to commit), then run the git command yourself. xllm never runs git.
 - Advisors stay read-only throughout — this lane generates text, nothing else.

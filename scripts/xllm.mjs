@@ -5,8 +5,9 @@
  *   node scripts/xllm.mjs which
  *   node scripts/xllm.mjs remember
  *   node scripts/xllm.mjs doctor
- *   node scripts/xllm.mjs ask <provider> "<prompt>"
- *   node scripts/xllm.mjs review roles p1,p2 "<prompt>"
+ *   node scripts/xllm.mjs ask <provider> "<prompt>" [--json]
+ *   node scripts/xllm.mjs review blind p1,p2 "<prompt>"
+ *   node scripts/xllm.mjs bench <subcommand> …
  *   node scripts/xllm.mjs smoke [--live]
  */
 
@@ -24,6 +25,7 @@ const scribe = path.join(__dirname, 'xllm-scribe.js');
 const contracts = path.join(__dirname, 'xllm-contracts.js');
 const review = path.join(__dirname, 'xllm-review.js');
 const traits = path.join(__dirname, 'xllm-traits.js');
+const bench = path.join(__dirname, 'xllm-bench.js');
 
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -39,37 +41,49 @@ function run(script, args) {
 }
 
 function help() {
-  console.log(`xllm CLI — multi-LLM orchestration for Grok Build
+  console.log(`xllm CLI — cross-vendor LLM advisors (read-only by default)
+
+Workflow: host alone → ask one other vendor → blind independent review, by need.
+Start with the host; escalate only when an independent, different-model
+opinion is worth its cost.
 
 Commands:
   which              Print resolved advisor script path
   remember           Write xllm-advisor-path marker (.xllm/, legacy .grok/)
   doctor             Provider + path health (human)
   ask <p> <prompt>   Single advisor call (read-only by default; --allow-write to opt in)
+                     --json → ONE machine-readable result object on stdout
+                     (progress on stderr); --schema-file <path> → structured output
+                     (native when the provider supports it, else prompt contract + bounded retry)
+  review blind p1,p2 <q>         BLIND independent panel → ledger + agreement [--tiebreak] [--ready=] [--json] [--no-artifacts]
   review roles p1,p2 <prompt>    Parallel advisors + host synthesis (coverage — NOT measured)
-  review blind p1,p2 <q>         BLIND measured panel → ledger + agreement [--tiebreak] [--ready=]
-  review debate p1,p2 <q>        ADVERSARIAL refutation → survived/killed/unresolved
-  review council p1,p2 <q>       blind → debate pipeline (highest stakes)
-  review stats [--json]          Pairwise agreement matrix (measured decorrelation)
+  review debate p1,p2 <q>        EXPERIMENTAL adversarial refutation (not for high-stakes calls)
+  review council p1,p2 <q>       EXPERIMENTAL blind → debate pipeline (not for high-stakes calls)
+  review stats [--json]          Pairwise agreement matrix (measured, strict-identity evidence only)
   review outcome <id> …          Record what the host adopted
-    diff input for any mode: --staged | --base <ref> | --diff-file <path>
-  traits [--json]        Evidence-based provider trait profiles (measured, gated, never lore)
+    diff input for any mode: --staged | --base <ref> | --diff-file <path> (24KB budget; omitted hunks listed)
+  traits [--json]        Evidence-based provider trait profiles (strict identity; legacy data never routes)
+  bench <subcommand>     Seeded-defect evaluation (passes args to scripts/xllm-bench.js;
+                         run 'xllm bench' for its usage; live runs are explicit opt-in)
   propose <p> <change>   Read-only change proposal → artifact + .patch (host applies)
   exec <p> <task>        Isolated executor: ephemeral clone → verified ref + evidence
-                         (capable providers only; user's checkout never touched)
-  exec list | exec cleanup <id>|--all
-  scribe commit|pr|release|notes   Cheap-model prose for git chores → stdout
-                                   (advisor writes text; YOU run git/gh)
+                         (codex only, verified OS sandbox, fail-closed; no bypass flags;
+                         user's checkout never touched; --test-cmd runs inside the sandbox)
+  exec sandbox-check | exec list | exec cleanup <id>|--all
+  scribe commit|pr|release|notes   OPTIONAL cheap-model prose for git chores → stdout
+                                   (diff goes to the routed provider: use a local model for
+                                   private code; advisor writes text, YOU run git/gh)
   inventory [--refresh]  Machine capability cache (installed CLIs, ollama models)
   contracts [--live]     Provider contract probes: flag drift, failure class,
                          auth (--live sends one tiny call per cloud provider)
   profile show           Resolved provider profile + state dir
   profile set-role <role> <spec>     Pin a role for THIS project (e.g. analysis codex@high)
   profile set-default <key> <value>  Set a [defaults] key in the project profile
+                                     (execution_policy local-only keeps every call on this machine)
   clean [--older-than=DAYS]   Delete persisted advisor artifacts
-  discipline show|install|remove [--target <path>]
-                     Process-discipline block for CLAUDE.md/AGENTS.md
-                     (≤25 lines, idempotent marker block, opt-in via setup)
+  discipline remove [--target <path>]
+                     Uninstall a previously installed xllm marker block from CLAUDE.md/AGENTS.md
+                     (uninstall only; xllm no longer installs instruction blocks)
   setup [pack] [--apply]  Resolve inventory→role pins (posture packs); preview unless --apply
                           packs: balanced(default)|quality|frugal|local|skip; --role R=SPEC --json --sensitive
   smoke [--live]     Dry smoke or live READY provider
@@ -84,8 +98,8 @@ Examples:
   node scripts/xllm.mjs remember
   node scripts/xllm.mjs ask codex@high "ping"
   node scripts/xllm.mjs pick security "auth token refresh"
+  node scripts/xllm.mjs review blind codex,grok,gemini "is this cache design safe?" --staged
   node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "review risks"
-  node scripts/xllm.mjs review blind codex,grok,gemini "이 캐시 설계가 안전한가?" --staged
   node scripts/xllm.mjs propose codex@high "add input validation to login()"
   node scripts/xllm.mjs profile set-role critic ollama:qwen3.6:latest@low
   node scripts/xllm.mjs clean --older-than=7
@@ -141,7 +155,14 @@ switch (cmd) {
     run(advisor, ['--clean-artifacts', ...rest]);
     break;
   case 'discipline':
+    if (rest[0] !== 'remove') {
+      console.error('[xllm] discipline show/install were removed — only: xllm discipline remove [--target <path>]');
+      process.exit(1);
+    }
     run(advisor, ['--discipline', ...rest]);
+    break;
+  case 'bench':
+    run(bench, rest);
     break;
   case 'inventory':
     run(advisor, ['--inventory', ...rest]);
@@ -170,7 +191,7 @@ switch (cmd) {
     run(scribe, rest);
     break;
   case 'exec':
-    if (rest[0] === 'list' || rest[0] === 'cleanup') {
+    if (rest[0] === 'list' || rest[0] === 'cleanup' || rest[0] === 'sandbox-check') {
       run(exec, rest);
     } else {
       if (rest.length < 2) {

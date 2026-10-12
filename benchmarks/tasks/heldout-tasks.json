@@ -1,0 +1,381 @@
+{
+  "version": 1,
+  "split": "heldout",
+  "note": "Held-out evaluation set. Do not tune prompts, routing or panels against these tasks; select baselines on dev tasks (tasks.json, hard-tasks.json) and evaluate here. Defect patterns are regex CANDIDATES for human adjudication, not ground truth. All tasks here are synthetic and labelled as such.",
+  "question": "You are reviewing a pull request. Below are the unified diff and the resulting files (changed files plus unchanged context files). List EVERY defect the change introduces or exposes, one per line, and briefly say why each is a problem. Report only real defects, not style preferences.",
+  "tasks": [
+    {
+      "id": "ho1-refund-service",
+      "title": "Partial refunds with idempotency (4 files, API + service + store)",
+      "kind": "multi-file-diff",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "SYNTHETIC: authored for xllm as a realistic multi-file change with defects planted by the author. Not derived from a real incident or repository; no real-world provenance is claimed. Real retrospective bugs are added with `xllm-bench import-cases`."
+      },
+      "diff": "diff --git a/src/api/routes.js b/src/api/routes.js\n--- a/src/api/routes.js\n+++ b/src/api/routes.js\n@@ -2,18 +2,31 @@\n const express = require('express');\n const { refundPayment, RefundError } = require('../refunds/service');\n \n function buildRouter(deps) {\n   const router = express.Router();\n \n-  router.post('/payments/:id/refund', deps.requireAuth, async (req, res) => {\n+  router.post('/payments/:id/refunds', deps.requireAuth, async (req, res) => {\n+    // Clients send dollars as a decimal number, e.g. { \"amount\": 19.99 }.\n+    const amountCents = Math.floor(Number(req.body.amount) * 100);\n     try {\n-      const refund = await refundPayment({ paymentId: req.params.id, actor: req.user.id }, deps);\n+      const refund = await refundPayment(\n+        {\n+          paymentId: req.params.id,\n+          amountCents,\n+          idempotencyKey: req.get('Idempotency-Key'),\n+          actor: req.body.actor || req.user.id,\n+        },\n+        deps\n+      );\n       res.status(201).json(refund);\n     } catch (err) {\n-      if (err instanceof RefundError) return res.status(409).json({ error: err.message });\n+      if (err instanceof RefundError) {\n+        const status = err.code === 'not_found' ? 404 : err.code === 'bad_amount' ? 422 : 409;\n+        return res.status(status).json({ error: err.message, code: err.code });\n+      }\n       res.status(500).json({ error: 'internal' });\n     }\n   });\n \n   return router;\n }\ndiff --git a/src/payments/store.js b/src/payments/store.js\n--- a/src/payments/store.js\n+++ b/src/payments/store.js\n@@ -12,9 +12,18 @@ class PaymentStore {\n \n   async update(id, patch) {\n     const cur = this.db.payments.get(id);\n     if (!cur) throw new Error('unknown payment ' + id);\n     this.db.payments.set(id, { ...cur, ...patch });\n   }\n+\n+  async saveRefund(refund) {\n+    this.db.refunds.push({ ...refund });\n+  }\n+\n+  /** Returns the refund previously recorded for this payment + idempotency key, if any. */\n+  async findRefundByKey(paymentId, key) {\n+    return this.db.refunds.find((r) => r.payment_id === paymentId && r.idempotency_key === key) || null;\n+  }\n }\n \n module.exports = { PaymentStore };\ndiff --git a/src/refunds/service.js b/src/refunds/service.js\n--- a/src/refunds/service.js\n+++ b/src/refunds/service.js\n@@ -1,26 +1,64 @@\n 'use strict';\n const ledger = require('./ledger');\n \n-class RefundError extends Error {}\n+class RefundError extends Error {\n+  constructor(message, code) {\n+    super(message);\n+    this.code = code;\n+  }\n+}\n+\n+const MAX_PARTIAL_REFUNDS = 10;\n \n-/** Full refund of a captured payment. */\n-async function refundPayment({ paymentId, actor }, deps) {\n+/**\n+ * Refund part or all of a captured payment. Callers send an idempotency key so\n+ * that client retries after a timeout never refund twice.\n+ */\n+async function refundPayment({ paymentId, amountCents, idempotencyKey, actor }, deps) {\n   const { store, processor, clock } = deps;\n   const payment = await store.get(paymentId);\n-  if (!payment) throw new RefundError('unknown payment');\n-  if (payment.status !== 'captured') throw new RefundError('payment not refundable');\n+  if (!payment) throw new RefundError('unknown payment', 'not_found');\n+  if (payment.status !== 'captured' && payment.status !== 'partially_refunded') {\n+    throw new RefundError('payment not refundable', 'bad_state');\n+  }\n+  if (!Number.isInteger(amountCents) || amountCents <= 0) {\n+    throw new RefundError('amount must be a positive integer number of cents', 'bad_amount');\n+  }\n+  if (amountCents > payment.amount_cents) {\n+    throw new RefundError('refund exceeds payment amount', 'bad_amount');\n+  }\n+  if (payment.refund_count >= MAX_PARTIAL_REFUNDS) {\n+    throw new RefundError('too many partial refunds', 'limit');\n+  }\n+\n+  const prior = await store.findRefundByKey(paymentId, idempotencyKey);\n+  if (prior) return prior;\n \n-  const result = await processor.refund(payment.processor_ref, payment.amount_cents);\n-  await store.update(paymentId, { status: 'refunded', refunded_cents: payment.amount_cents });\n+  const result = await processor.refund(payment.processor_ref, amountCents);\n+  const refund = {\n+    id: result.id,\n+    payment_id: paymentId,\n+    amount_cents: amountCents,\n+    idempotency_key: idempotencyKey,\n+    created_at: clock.now(),\n+  };\n+  await store.saveRefund(refund);\n+\n+  const refunded = payment.refunded_cents + amountCents;\n+  await store.update(paymentId, {\n+    refunded_cents: refunded,\n+    refund_count: payment.refund_count + 1,\n+    status: refunded === payment.amount_cents ? 'refunded' : 'partially_refunded',\n+  });\n   await ledger.append({\n     type: 'refund',\n     payment_id: paymentId,\n-    amount_cents: payment.amount_cents,\n+    amount_cents: amountCents,\n     actor,\n     at: clock.now(),\n     processor_id: result.id,\n   });\n-  return { id: result.id, payment_id: paymentId, amount_cents: payment.amount_cents };\n+  return refund;\n }\n \n-module.exports = { refundPayment, RefundError };\n+module.exports = { refundPayment, RefundError, MAX_PARTIAL_REFUNDS };\n",
+      "files": [
+        {
+          "path": "src/api/routes.js",
+          "content": "'use strict';\nconst express = require('express');\nconst { refundPayment, RefundError } = require('../refunds/service');\n\nfunction buildRouter(deps) {\n  const router = express.Router();\n\n  router.post('/payments/:id/refunds', deps.requireAuth, async (req, res) => {\n    // Clients send dollars as a decimal number, e.g. { \"amount\": 19.99 }.\n    const amountCents = Math.floor(Number(req.body.amount) * 100);\n    try {\n      const refund = await refundPayment(\n        {\n          paymentId: req.params.id,\n          amountCents,\n          idempotencyKey: req.get('Idempotency-Key'),\n          actor: req.body.actor || req.user.id,\n        },\n        deps\n      );\n      res.status(201).json(refund);\n    } catch (err) {\n      if (err instanceof RefundError) {\n        const status = err.code === 'not_found' ? 404 : err.code === 'bad_amount' ? 422 : 409;\n        return res.status(status).json({ error: err.message, code: err.code });\n      }\n      res.status(500).json({ error: 'internal' });\n    }\n  });\n\n  return router;\n}\n\nmodule.exports = { buildRouter };\n"
+        },
+        {
+          "path": "src/payments/store.js",
+          "content": "'use strict';\n\nclass PaymentStore {\n  constructor(db) {\n    this.db = db;\n  }\n\n  async get(id) {\n    const row = this.db.payments.get(id);\n    return row ? { ...row } : null;\n  }\n\n  async update(id, patch) {\n    const cur = this.db.payments.get(id);\n    if (!cur) throw new Error('unknown payment ' + id);\n    this.db.payments.set(id, { ...cur, ...patch });\n  }\n\n  async saveRefund(refund) {\n    this.db.refunds.push({ ...refund });\n  }\n\n  /** Returns the refund previously recorded for this payment + idempotency key, if any. */\n  async findRefundByKey(paymentId, key) {\n    return this.db.refunds.find((r) => r.payment_id === paymentId && r.idempotency_key === key) || null;\n  }\n}\n\nmodule.exports = { PaymentStore };\n"
+        },
+        {
+          "path": "src/refunds/ledger.js",
+          "content": "'use strict';\n// Append-only audit ledger. Entries are never updated; corrections are new entries.\nconst entries = [];\nlet seq = 0;\n\nasync function append(entry) {\n  seq += 1;\n  const row = Object.freeze({ seq, ...entry });\n  entries.push(row);\n  return row;\n}\n\nfunction forPayment(paymentId) {\n  return entries.filter((e) => e.payment_id === paymentId);\n}\n\nmodule.exports = { append, forPayment };\n"
+        },
+        {
+          "path": "src/refunds/service.js",
+          "content": "'use strict';\nconst ledger = require('./ledger');\n\nclass RefundError extends Error {\n  constructor(message, code) {\n    super(message);\n    this.code = code;\n  }\n}\n\nconst MAX_PARTIAL_REFUNDS = 10;\n\n/**\n * Refund part or all of a captured payment. Callers send an idempotency key so\n * that client retries after a timeout never refund twice.\n */\nasync function refundPayment({ paymentId, amountCents, idempotencyKey, actor }, deps) {\n  const { store, processor, clock } = deps;\n  const payment = await store.get(paymentId);\n  if (!payment) throw new RefundError('unknown payment', 'not_found');\n  if (payment.status !== 'captured' && payment.status !== 'partially_refunded') {\n    throw new RefundError('payment not refundable', 'bad_state');\n  }\n  if (!Number.isInteger(amountCents) || amountCents <= 0) {\n    throw new RefundError('amount must be a positive integer number of cents', 'bad_amount');\n  }\n  if (amountCents > payment.amount_cents) {\n    throw new RefundError('refund exceeds payment amount', 'bad_amount');\n  }\n  if (payment.refund_count >= MAX_PARTIAL_REFUNDS) {\n    throw new RefundError('too many partial refunds', 'limit');\n  }\n\n  const prior = await store.findRefundByKey(paymentId, idempotencyKey);\n  if (prior) return prior;\n\n  const result = await processor.refund(payment.processor_ref, amountCents);\n  const refund = {\n    id: result.id,\n    payment_id: paymentId,\n    amount_cents: amountCents,\n    idempotency_key: idempotencyKey,\n    created_at: clock.now(),\n  };\n  await store.saveRefund(refund);\n\n  const refunded = payment.refunded_cents + amountCents;\n  await store.update(paymentId, {\n    refunded_cents: refunded,\n    refund_count: payment.refund_count + 1,\n    status: refunded === payment.amount_cents ? 'refunded' : 'partially_refunded',\n  });\n  await ledger.append({\n    type: 'refund',\n    payment_id: paymentId,\n    amount_cents: amountCents,\n    actor,\n    at: clock.now(),\n    processor_id: result.id,\n  });\n  return refund;\n}\n\nmodule.exports = { refundPayment, RefundError, MAX_PARTIAL_REFUNDS };\n"
+        }
+      ],
+      "defects": [
+        {
+          "id": "cumulative-limit",
+          "pattern": "cumulative|already refunded|refunded_cents|remaining|total (refund|amount)|exceed.*(remaining|previous)|multiple partial|over-?refund",
+          "description": "Refund cap compares only against the full payment amount, not amount minus already refunded, so repeated partial refunds can exceed the payment."
+        },
+        {
+          "id": "concurrent-update",
+          "pattern": "race|concurren|atomic|stale|lost update|read-modify-write|TOCTOU|transaction|lock",
+          "description": "refunded_cents/refund_count are computed from a stale read of the payment and written back non-atomically; concurrent refunds overwrite each other and bypass the cap."
+        },
+        {
+          "id": "idempotency-order",
+          "pattern": "idempoten.*(after|before|order|record|persist)|(record|save).*after.*(processor|refund)|timeout.*(double|twice|duplicate)|double.refund|refund(ed)? twice",
+          "description": "The processor refund (side effect) happens before the idempotency key is recorded, so a crash/timeout between them lets a retry refund twice."
+        },
+        {
+          "id": "missing-key-collision",
+          "pattern": "undefined.*(key|idempoten)|missing.*(idempotency|key|header)|no idempotency key|(idempotency|key).*(optional|absent|undefined|null)|collid|same key",
+          "description": "A missing Idempotency-Key is undefined and matches any earlier refund with an undefined key, so a later legitimate refund is silently swallowed and returns the old refund."
+        },
+        {
+          "id": "float-cents",
+          "pattern": "floor|floating|float|rounding|truncat|19\\.99|1998|\\* ?100",
+          "description": "Math.floor(Number(amount) * 100) truncates binary floating-point results (19.99 * 100 = 1998.999...), refunding a cent less than requested."
+        },
+        {
+          "id": "actor-spoof",
+          "pattern": "req\\.body\\.actor|client-supplied actor|actor.*(spoof|forg|body|untrusted|request body)|audit.*(spoof|forg|attribut)|authenticated user",
+          "description": "The audit actor is taken from the request body before the authenticated user, so any caller can forge who performed the refund."
+        }
+      ]
+    },
+    {
+      "id": "ho2-tenant-cache",
+      "title": "Per-tenant project cache layer (4 files, cache + service + middleware)",
+      "kind": "multi-file-diff",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "SYNTHETIC: authored for xllm as a realistic multi-file change with defects planted by the author. Not derived from a real incident or repository; no real-world provenance is claimed. Real retrospective bugs are added with `xllm-bench import-cases`."
+      },
+      "diff": "diff --git a/after/src/cache/keys.js b/src/cache/keys.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/cache/keys.js\n@@ -0,0 +1,11 @@\n+'use strict';\n+\n+function projectKey(tenantId, projectId) {\n+  return 'project:' + projectId;\n+}\n+\n+function projectListKey(tenantId) {\n+  return 'tenant:' + tenantId + ':projects';\n+}\n+\n+module.exports = { projectKey, projectListKey };\ndiff --git a/after/src/cache/tenantCache.js b/src/cache/tenantCache.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/cache/tenantCache.js\n@@ -0,0 +1,36 @@\n+'use strict';\n+\n+/**\n+ * Tiny in-process TTL cache. ttlSeconds is the entry lifetime.\n+ */\n+class TenantCache {\n+  constructor({ ttlSeconds = 300, now = () => Date.now() } = {}) {\n+    this.ttlSeconds = ttlSeconds;\n+    this.now = now;\n+    this.map = new Map();\n+  }\n+\n+  get(key) {\n+    const hit = this.map.get(key);\n+    if (!hit) return undefined;\n+    if (hit.expiresAt <= this.now()) {\n+      this.map.delete(key);\n+      return undefined;\n+    }\n+    return hit.value;\n+  }\n+\n+  set(key, value, ttlSeconds = this.ttlSeconds) {\n+    this.map.set(key, { value, expiresAt: this.now() + ttlSeconds });\n+  }\n+\n+  delete(key) {\n+    this.map.delete(key);\n+  }\n+\n+  deleteByPrefix(prefix) {\n+    for (const k of this.map.keys()) if (k.startsWith(prefix)) this.map.delete(k);\n+  }\n+}\n+\n+module.exports = { TenantCache };\ndiff --git a/after/src/http/middleware.js b/src/http/middleware.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/http/middleware.js\n@@ -0,0 +1,21 @@\n+'use strict';\n+\n+function projectLoader(service) {\n+  return async (req, res, next) => {\n+    const project = await service.getProject(req.tenant.id, req.params.projectId);\n+    if (!project) return res.status(404).json({ error: 'not found' });\n+    req.project = project;\n+    next();\n+  };\n+}\n+\n+function addMember(service) {\n+  return async (req, res) => {\n+    // req.project comes straight from the service (and its cache).\n+    req.project.members.push(req.body.userId);\n+    await service.updateProject(req.tenant.id, req.project.id, { members: req.project.members });\n+    res.status(204).end();\n+  };\n+}\n+\n+module.exports = { projectLoader, addMember };\ndiff --git a/src/services/projects.js b/src/services/projects.js\n--- a/src/services/projects.js\n+++ b/src/services/projects.js\n@@ -1,17 +1,29 @@\n 'use strict';\n+const { projectKey, projectListKey } = require('../cache/keys');\n \n class ProjectService {\n-  constructor({ db }) {\n+  constructor({ db, cache }) {\n     this.db = db;\n+    this.cache = cache;\n   }\n \n   async getProject(tenantId, projectId) {\n-    return this.db.projects.findOne({ tenant_id: tenantId, id: projectId });\n+    const key = projectKey(tenantId, projectId);\n+    const cached = this.cache.get(key);\n+    if (cached !== undefined) return cached;\n+\n+    const project = await this.db.projects.findOne({ tenant_id: tenantId, id: projectId });\n+    // Cache misses too, so repeated lookups of unknown ids do not hit the database.\n+    this.cache.set(key, project || null, 24 * 60 * 60);\n+    return project;\n   }\n \n   async updateProject(tenantId, projectId, patch) {\n+    // Drop the cached copy first so no reader can observe the old value after we start.\n+    this.cache.delete(projectKey(tenantId, projectId));\n+    this.cache.delete(projectListKey(tenantId));\n     return this.db.projects.update({ tenant_id: tenantId, id: projectId }, patch);\n   }\n }\n \n module.exports = { ProjectService };\n",
+      "files": [
+        {
+          "path": "src/cache/keys.js",
+          "content": "'use strict';\n\nfunction projectKey(tenantId, projectId) {\n  return 'project:' + projectId;\n}\n\nfunction projectListKey(tenantId) {\n  return 'tenant:' + tenantId + ':projects';\n}\n\nmodule.exports = { projectKey, projectListKey };\n"
+        },
+        {
+          "path": "src/cache/tenantCache.js",
+          "content": "'use strict';\n\n/**\n * Tiny in-process TTL cache. ttlSeconds is the entry lifetime.\n */\nclass TenantCache {\n  constructor({ ttlSeconds = 300, now = () => Date.now() } = {}) {\n    this.ttlSeconds = ttlSeconds;\n    this.now = now;\n    this.map = new Map();\n  }\n\n  get(key) {\n    const hit = this.map.get(key);\n    if (!hit) return undefined;\n    if (hit.expiresAt <= this.now()) {\n      this.map.delete(key);\n      return undefined;\n    }\n    return hit.value;\n  }\n\n  set(key, value, ttlSeconds = this.ttlSeconds) {\n    this.map.set(key, { value, expiresAt: this.now() + ttlSeconds });\n  }\n\n  delete(key) {\n    this.map.delete(key);\n  }\n\n  deleteByPrefix(prefix) {\n    for (const k of this.map.keys()) if (k.startsWith(prefix)) this.map.delete(k);\n  }\n}\n\nmodule.exports = { TenantCache };\n"
+        },
+        {
+          "path": "src/http/middleware.js",
+          "content": "'use strict';\n\nfunction projectLoader(service) {\n  return async (req, res, next) => {\n    const project = await service.getProject(req.tenant.id, req.params.projectId);\n    if (!project) return res.status(404).json({ error: 'not found' });\n    req.project = project;\n    next();\n  };\n}\n\nfunction addMember(service) {\n  return async (req, res) => {\n    // req.project comes straight from the service (and its cache).\n    req.project.members.push(req.body.userId);\n    await service.updateProject(req.tenant.id, req.project.id, { members: req.project.members });\n    res.status(204).end();\n  };\n}\n\nmodule.exports = { projectLoader, addMember };\n"
+        },
+        {
+          "path": "src/services/projects.js",
+          "content": "'use strict';\nconst { projectKey, projectListKey } = require('../cache/keys');\n\nclass ProjectService {\n  constructor({ db, cache }) {\n    this.db = db;\n    this.cache = cache;\n  }\n\n  async getProject(tenantId, projectId) {\n    const key = projectKey(tenantId, projectId);\n    const cached = this.cache.get(key);\n    if (cached !== undefined) return cached;\n\n    const project = await this.db.projects.findOne({ tenant_id: tenantId, id: projectId });\n    // Cache misses too, so repeated lookups of unknown ids do not hit the database.\n    this.cache.set(key, project || null, 24 * 60 * 60);\n    return project;\n  }\n\n  async updateProject(tenantId, projectId, patch) {\n    // Drop the cached copy first so no reader can observe the old value after we start.\n    this.cache.delete(projectKey(tenantId, projectId));\n    this.cache.delete(projectListKey(tenantId));\n    return this.db.projects.update({ tenant_id: tenantId, id: projectId }, patch);\n  }\n}\n\nmodule.exports = { ProjectService };\n"
+        }
+      ],
+      "defects": [
+        {
+          "id": "no-tenant-in-key",
+          "pattern": "tenant.*(key|scope|prefix|isolat)|cross-tenant|another tenant|other tenants|leak|projectKey|key.*(omit|ignor|missing|does not include).*tenant",
+          "description": "projectKey ignores tenantId, so two tenants with the same project id share one cache entry and read each other's data."
+        },
+        {
+          "id": "ttl-units",
+          "pattern": "ttl|seconds?.*(milli|ms)|milli.*second|unit|expiresAt|now\\(\\) \\+",
+          "description": "expiresAt = now() + ttlSeconds mixes seconds with milliseconds: entries expire after ~300 ms, and the 24h negative entry after ~86 s."
+        },
+        {
+          "id": "invalidate-before-write",
+          "pattern": "invalidat.*(before|first)|delete.*before|stale|repopulat|race|concurrent|after the (db|write|update)|ordering",
+          "description": "The cache is invalidated before the DB write commits; a concurrent read repopulates the old value which then persists until TTL (stale cache after update)."
+        },
+        {
+          "id": "negative-cache-24h",
+          "pattern": "negative|null.*cach|cach.*null|not.found.*(cach|24)|24 ?\\* ?60|day|created.*(404|not found)|miss(es)?.*cach",
+          "description": "Missing projects are cached for 24 hours and never invalidated on create, so a newly created project keeps returning 404."
+        },
+        {
+          "id": "shared-mutable-object",
+          "pattern": "mutat|same (object|reference)|reference|clone|copy|push\\(|members\\.push|shared",
+          "description": "The cache returns the same object reference; addMember mutates req.project.members in place, corrupting the cached entry even if the DB update fails."
+        }
+      ]
+    },
+    {
+      "id": "ho3-cursor-pagination",
+      "title": "Cursor pagination for the events API (4 files incl. SQL migration)",
+      "kind": "multi-file-diff",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "SYNTHETIC: authored for xllm as a realistic multi-file change with defects planted by the author. Not derived from a real incident or repository; no real-world provenance is claimed. Real retrospective bugs are added with `xllm-bench import-cases`."
+      },
+      "diff": "diff --git a/after/db/migrations/0042_events_cursor_index.sql b/db/migrations/0042_events_cursor_index.sql\nnew file mode 100644\n--- /dev/null\n+++ b/db/migrations/0042_events_cursor_index.sql\n@@ -0,0 +1,5 @@\n+-- Supports cursor pagination on (tenant_id, created_at).\n+BEGIN;\n+CREATE INDEX CONCURRENTLY IF NOT EXISTS events_tenant_created_idx\n+  ON events (tenant_id, created_at DESC);\n+COMMIT;\ndiff --git a/src/api/listEvents.js b/src/api/listEvents.js\n--- a/src/api/listEvents.js\n+++ b/src/api/listEvents.js\n@@ -1,9 +1,11 @@\n 'use strict';\n const { listEvents } = require('../repo/events');\n \n module.exports = (deps) => async (req, res) => {\n-  const limit = Math.min(Number(req.query.limit) || 50, 200);\n-  const offset = Number(req.query.offset) || 0;\n-  const rows = await listEvents(deps.db, req.tenant.id, { offset, limit });\n-  res.json({ items: rows });\n+  const limit = Number(req.query.limit) || 50;\n+  const page = await listEvents(deps.db, req.tenant.id, {\n+    cursor: req.query.cursor || null,\n+    limit,\n+  });\n+  res.json(page);\n };\ndiff --git a/after/src/pagination/cursor.js b/src/pagination/cursor.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/pagination/cursor.js\n@@ -0,0 +1,12 @@\n+'use strict';\n+\n+function encodeCursor(row) {\n+  return Buffer.from(JSON.stringify({ t: row.created_at })).toString('base64url');\n+}\n+\n+function decodeCursor(cursor) {\n+  if (!cursor) return null;\n+  return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));\n+}\n+\n+module.exports = { encodeCursor, decodeCursor };\ndiff --git a/src/repo/events.js b/src/repo/events.js\n--- a/src/repo/events.js\n+++ b/src/repo/events.js\n@@ -1,11 +1,25 @@\n 'use strict';\n+const { decodeCursor, encodeCursor } = require('../pagination/cursor');\n \n-async function listEvents(db, tenantId, { offset = 0, limit = 50 }) {\n+/**\n+ * Newest-first page of events for a tenant. Pass the previous page's\n+ * next_cursor to continue.\n+ */\n+async function listEvents(db, tenantId, { cursor = null, limit = 50 }) {\n+  const c = decodeCursor(cursor);\n+  const where = c ? `AND created_at > '${c.t}'` : '';\n   const { rows } = await db.query(\n-    'SELECT id, tenant_id, type, created_at FROM events WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',\n-    [tenantId, limit, offset]\n+    `SELECT id, tenant_id, type, created_at FROM events\n+     WHERE tenant_id = $1 ${where}\n+     ORDER BY created_at DESC\n+     LIMIT $2`,\n+    [tenantId, limit]\n   );\n-  return rows;\n+  const last = rows[rows.length - 1];\n+  return {\n+    items: rows,\n+    next_cursor: rows.length === limit && last ? encodeCursor(last) : null,\n+  };\n }\n \n module.exports = { listEvents };\n",
+      "files": [
+        {
+          "path": "db/migrations/0042_events_cursor_index.sql",
+          "content": "-- Supports cursor pagination on (tenant_id, created_at).\nBEGIN;\nCREATE INDEX CONCURRENTLY IF NOT EXISTS events_tenant_created_idx\n  ON events (tenant_id, created_at DESC);\nCOMMIT;\n"
+        },
+        {
+          "path": "src/api/listEvents.js",
+          "content": "'use strict';\nconst { listEvents } = require('../repo/events');\n\nmodule.exports = (deps) => async (req, res) => {\n  const limit = Number(req.query.limit) || 50;\n  const page = await listEvents(deps.db, req.tenant.id, {\n    cursor: req.query.cursor || null,\n    limit,\n  });\n  res.json(page);\n};\n"
+        },
+        {
+          "path": "src/pagination/cursor.js",
+          "content": "'use strict';\n\nfunction encodeCursor(row) {\n  return Buffer.from(JSON.stringify({ t: row.created_at })).toString('base64url');\n}\n\nfunction decodeCursor(cursor) {\n  if (!cursor) return null;\n  return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));\n}\n\nmodule.exports = { encodeCursor, decodeCursor };\n"
+        },
+        {
+          "path": "src/repo/events.js",
+          "content": "'use strict';\nconst { decodeCursor, encodeCursor } = require('../pagination/cursor');\n\n/**\n * Newest-first page of events for a tenant. Pass the previous page's\n * next_cursor to continue.\n */\nasync function listEvents(db, tenantId, { cursor = null, limit = 50 }) {\n  const c = decodeCursor(cursor);\n  const where = c ? `AND created_at > '${c.t}'` : '';\n  const { rows } = await db.query(\n    `SELECT id, tenant_id, type, created_at FROM events\n     WHERE tenant_id = $1 ${where}\n     ORDER BY created_at DESC\n     LIMIT $2`,\n    [tenantId, limit]\n  );\n  const last = rows[rows.length - 1];\n  return {\n    items: rows,\n    next_cursor: rows.length === limit && last ? encodeCursor(last) : null,\n  };\n}\n\nmodule.exports = { listEvents };\n"
+        }
+      ],
+      "defects": [
+        {
+          "id": "non-unique-cursor",
+          "pattern": "tie|same (timestamp|created_at)|identical timestamp|non-unique|not unique|tiebreak|tie-break|\\bid\\b.*(cursor|order)|skip(s|ped)? (rows|events)|duplicate(s|d)? (rows|events)",
+          "description": "The cursor is only created_at; rows sharing a timestamp are skipped or repeated across pages because there is no unique tiebreaker (id) in the cursor and ORDER BY."
+        },
+        {
+          "id": "wrong-operator",
+          "pattern": "DESC.*(>|greater)|operator|direction|comparison|should be <|wrong (sign|operator|comparison)|newest-first.*>",
+          "description": "Rows are ordered DESC but the cursor filter uses created_at > cursor, which returns newer rows than the cursor (wrong direction) instead of older ones."
+        },
+        {
+          "id": "no-extra-row",
+          "pattern": "limit ?\\+ ?1|extra row|has.?more|empty (last )?page|exactly (limit|a full page)|next_cursor.*(non-?null|even when|always|exactly)|full page",
+          "description": "next_cursor is emitted whenever a full page is returned; without fetching limit+1 the final page that exactly fills the limit yields a cursor to an empty page."
+        },
+        {
+          "id": "cursor-sql-injection",
+          "pattern": "sql injection|injection|interpolat|concatenat|string template|parameteri[sz]|prepared|untrusted cursor|unvalidated|decode",
+          "description": "The decoded, client-controlled cursor value is interpolated directly into the SQL string (SQL injection); it is also never validated after JSON.parse."
+        },
+        {
+          "id": "concurrently-in-transaction",
+          "pattern": "concurrently.*(transaction|begin)|(transaction|begin).*concurrently|cannot run inside a transaction|CREATE INDEX CONCURRENTLY",
+          "description": "CREATE INDEX CONCURRENTLY cannot run inside BEGIN/COMMIT in PostgreSQL; the migration fails."
+        },
+        {
+          "id": "unbounded-limit",
+          "pattern": "max(imum)?.*(limit|page)|unbounded|no (upper )?(bound|cap|limit)|clamp|cap the limit|negative|limit.*(huge|large|dos|exhaust)|Math\\.min",
+          "description": "The previous Math.min(limit, 200) cap was dropped: clients can request arbitrarily large or negative limits."
+        }
+      ]
+    },
+    {
+      "id": "ho4-queue-worker",
+      "title": "At-least-once queue worker with retries and dead-lettering (4 files)",
+      "kind": "multi-file-diff",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "SYNTHETIC: authored for xllm as a realistic multi-file change with defects planted by the author. Not derived from a real incident or repository; no real-world provenance is claimed. Real retrospective bugs are added with `xllm-bench import-cases`."
+      },
+      "diff": "diff --git a/src/handlers/email.js b/src/handlers/email.js\n--- a/src/handlers/email.js\n+++ b/src/handlers/email.js\n@@ -1,7 +1,8 @@\n 'use strict';\n \n async function sendWelcomeEmail(body, deps) {\n+  await deps.db.users.update(body.userId, { welcome_sent_at: new Date() });\n   await deps.mailer.send({ to: body.email, template: 'welcome', vars: { name: body.name } });\n }\n \n module.exports = { sendWelcomeEmail };\ndiff --git a/after/src/queue/backoff.js b/src/queue/backoff.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/queue/backoff.js\n@@ -0,0 +1,10 @@\n+'use strict';\n+\n+const BASE_MS = 500;\n+\n+/** Exponential backoff: 500ms, 1s, 2s, 4s ... */\n+function nextDelayMs(attempt) {\n+  return BASE_MS * 2 ** attempt;\n+}\n+\n+module.exports = { nextDelayMs, BASE_MS };\ndiff --git a/after/src/queue/deadLetter.js b/src/queue/deadLetter.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/queue/deadLetter.js\n@@ -0,0 +1,15 @@\n+'use strict';\n+\n+/**\n+ * Park a message that exhausted its retries so an operator can inspect it.\n+ */\n+async function deadLetter(queue, msg, err) {\n+  await queue.publish('dead-letter', {\n+    id: msg.id,\n+    failed_at: new Date().toISOString(),\n+    error: String(err && err.message),\n+    attempts: msg.deliveries,\n+  });\n+}\n+\n+module.exports = { deadLetter };\ndiff --git a/src/queue/worker.js b/src/queue/worker.js\n--- a/src/queue/worker.js\n+++ b/src/queue/worker.js\n@@ -1,10 +1,41 @@\n 'use strict';\n+const { nextDelayMs } = require('./backoff');\n+const { deadLetter } = require('./deadLetter');\n \n-async function runOnce(queue, handler) {\n-  const msg = await queue.receive();\n-  if (!msg) return;\n-  await handler(msg.body);\n-  await queue.ack(msg.id);\n+const MAX_ATTEMPTS = 8;\n+const attempts = new Map(); // message id -> failed attempts so far\n+\n+/**\n+ * Pull a batch, process messages concurrently, retry failures with backoff and\n+ * dead-letter what keeps failing. Delivery is at-least-once.\n+ */\n+async function runBatch(queue, handler, { batchSize = 10, logger = console } = {}) {\n+  const batch = await queue.receiveBatch(batchSize);\n+  if (!batch.length) return { processed: 0 };\n+\n+  // Acknowledge up front so a slow handler cannot make the broker redeliver\n+  // the message while we are still working on it.\n+  await Promise.all(batch.map((m) => queue.ack(m.id)));\n+\n+  await Promise.all(\n+    batch.map(async (msg) => {\n+      try {\n+        await handler(msg.body);\n+        attempts.delete(msg.id);\n+      } catch (err) {\n+        const n = (attempts.get(msg.id) || 0) + 1;\n+        attempts.set(msg.id, n);\n+        if (n >= MAX_ATTEMPTS) {\n+          await deadLetter(queue, msg, err);\n+          attempts.delete(msg.id);\n+          return;\n+        }\n+        logger.warn('handler failed', { id: msg.id, attempt: n, error: err.message });\n+        await queue.publishDelayed(msg.body, nextDelayMs(n));\n+      }\n+    })\n+  );\n+  return { processed: batch.length };\n }\n \n-module.exports = { runOnce };\n+module.exports = { runBatch, MAX_ATTEMPTS };\n",
+      "files": [
+        {
+          "path": "src/handlers/email.js",
+          "content": "'use strict';\n\nasync function sendWelcomeEmail(body, deps) {\n  await deps.db.users.update(body.userId, { welcome_sent_at: new Date() });\n  await deps.mailer.send({ to: body.email, template: 'welcome', vars: { name: body.name } });\n}\n\nmodule.exports = { sendWelcomeEmail };\n"
+        },
+        {
+          "path": "src/queue/backoff.js",
+          "content": "'use strict';\n\nconst BASE_MS = 500;\n\n/** Exponential backoff: 500ms, 1s, 2s, 4s ... */\nfunction nextDelayMs(attempt) {\n  return BASE_MS * 2 ** attempt;\n}\n\nmodule.exports = { nextDelayMs, BASE_MS };\n"
+        },
+        {
+          "path": "src/queue/deadLetter.js",
+          "content": "'use strict';\n\n/**\n * Park a message that exhausted its retries so an operator can inspect it.\n */\nasync function deadLetter(queue, msg, err) {\n  await queue.publish('dead-letter', {\n    id: msg.id,\n    failed_at: new Date().toISOString(),\n    error: String(err && err.message),\n    attempts: msg.deliveries,\n  });\n}\n\nmodule.exports = { deadLetter };\n"
+        },
+        {
+          "path": "src/queue/worker.js",
+          "content": "'use strict';\nconst { nextDelayMs } = require('./backoff');\nconst { deadLetter } = require('./deadLetter');\n\nconst MAX_ATTEMPTS = 8;\nconst attempts = new Map(); // message id -> failed attempts so far\n\n/**\n * Pull a batch, process messages concurrently, retry failures with backoff and\n * dead-letter what keeps failing. Delivery is at-least-once.\n */\nasync function runBatch(queue, handler, { batchSize = 10, logger = console } = {}) {\n  const batch = await queue.receiveBatch(batchSize);\n  if (!batch.length) return { processed: 0 };\n\n  // Acknowledge up front so a slow handler cannot make the broker redeliver\n  // the message while we are still working on it.\n  await Promise.all(batch.map((m) => queue.ack(m.id)));\n\n  await Promise.all(\n    batch.map(async (msg) => {\n      try {\n        await handler(msg.body);\n        attempts.delete(msg.id);\n      } catch (err) {\n        const n = (attempts.get(msg.id) || 0) + 1;\n        attempts.set(msg.id, n);\n        if (n >= MAX_ATTEMPTS) {\n          await deadLetter(queue, msg, err);\n          attempts.delete(msg.id);\n          return;\n        }\n        logger.warn('handler failed', { id: msg.id, attempt: n, error: err.message });\n        await queue.publishDelayed(msg.body, nextDelayMs(n));\n      }\n    })\n  );\n  return { processed: batch.length };\n}\n\nmodule.exports = { runBatch, MAX_ATTEMPTS };\n"
+        }
+      ],
+      "defects": [
+        {
+          "id": "ack-before-process",
+          "pattern": "ack.*(before|up ?front|early|first)|acknowledg.*(before|early|up ?front)|(lost|lose|losing|drop).*(message|work)|at-most-once|crash.*(before|mid)|redeliver",
+          "description": "Messages are acknowledged before the handler runs; a crash (or a handler failure whose retry publish fails) loses the message, contradicting the at-least-once contract."
+        },
+        {
+          "id": "in-memory-attempts",
+          "pattern": "in-memory|process-local|local (map|state)|attempts.*(restart|persist|not shared|per.?process|worker)|restart|multiple workers|retry count",
+          "description": "Attempt counts live in a per-process Map, so they reset on restart and are not shared across workers; with republished copies a poison message may never reach MAX_ATTEMPTS."
+        },
+        {
+          "id": "unbounded-backoff",
+          "pattern": "cap|max(imum)? (delay|backoff)|overflow|unbounded|jitter|thundering|2 \\*\\* ?attempt|exponential.*(huge|large|no (cap|limit))",
+          "description": "Backoff grows as 500ms * 2^attempt with no cap or jitter: the last attempts wait minutes/hours and synchronized retries cause thundering herds."
+        },
+        {
+          "id": "dead-letter-drops-body",
+          "pattern": "payload|body.*(missing|lost|not (stored|included|saved)|omit)|cannot (be )?(replay|reprocess|retry)|dead.?letter.*(body|payload|replay)|only.*error",
+          "description": "The dead-letter record keeps the error and ids but not the message body, so the failed work cannot be inspected or replayed."
+        },
+        {
+          "id": "delayed-publish-loses",
+          "pattern": "publishDelayed|republish|re-?publish.*(fail|throw|lost)|retry.*(fail|throw|lost)|unhandled|rejection|Promise\\.all|allSettled|one (failure|rejection)",
+          "description": "A failing publishDelayed/deadLetter inside the mapped promise rejects Promise.all for the whole batch with no recovery, and because messages were already acked the affected ones are gone."
+        },
+        {
+          "id": "non-idempotent-email",
+          "pattern": "idempoten|duplicate (email|send)|twice|redeliver|welcome_sent_at.*(before|first)|marked.*(sent|before)|mark.*before|send.*fail.*(never|skipped)",
+          "description": "The handler records welcome_sent_at before sending; a send failure leaves the user marked as welcomed and the retry cannot rely on it, while redelivery without a check sends duplicates (no idempotency guard)."
+        }
+      ]
+    },
+    {
+      "id": "ho5-auth-middleware",
+      "title": "Home-grown bearer-token auth + role policy (4 files)",
+      "kind": "multi-file-diff",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "SYNTHETIC: authored for xllm as a realistic multi-file change with defects planted by the author. Not derived from a real incident or repository; no real-world provenance is claimed. Real retrospective bugs are added with `xllm-bench import-cases`."
+      },
+      "diff": "diff --git a/after/src/auth/policy.js b/src/auth/policy.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/auth/policy.js\n@@ -0,0 +1,14 @@\n+'use strict';\n+\n+const PUBLIC_PREFIXES = ['/public', '/healthz'];\n+\n+function isPublic(path) {\n+  return PUBLIC_PREFIXES.some((p) => path.startsWith(p));\n+}\n+\n+/** True when the user holds the required role. */\n+function hasRole(user, required) {\n+  return user.roles.join(',').includes(required);\n+}\n+\n+module.exports = { isPublic, hasRole };\ndiff --git a/after/src/auth/token.js b/src/auth/token.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/auth/token.js\n@@ -0,0 +1,32 @@\n+'use strict';\n+const crypto = require('crypto');\n+\n+function b64url(buf) {\n+  return Buffer.from(buf).toString('base64url');\n+}\n+\n+function sign(payload, secret) {\n+  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));\n+  const body = b64url(JSON.stringify(payload));\n+  const sig = crypto.createHmac('sha256', secret).update(header + '.' + body).digest('base64url');\n+  return header + '.' + body + '.' + sig;\n+}\n+\n+function verifyToken(token, secret) {\n+  const [h, p, sig] = token.split('.');\n+  if (!h || !p) throw new Error('malformed token');\n+  const header = JSON.parse(Buffer.from(h, 'base64url').toString('utf8'));\n+  const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));\n+\n+  const expected =\n+    header.alg === 'HS256'\n+      ? crypto.createHmac('sha256', secret).update(h + '.' + p).digest('base64url')\n+      : null;\n+  if (expected !== null && sig !== expected) throw new Error('bad signature');\n+\n+  // exp is a NumericDate: seconds since the epoch.\n+  if (payload.exp && payload.exp < Date.now()) throw new Error('token expired');\n+  return { id: payload.sub, roles: payload.roles || [], tenant: payload.tenant };\n+}\n+\n+module.exports = { sign, verifyToken };\ndiff --git a/src/http/authMiddleware.js b/src/http/authMiddleware.js\n--- a/src/http/authMiddleware.js\n+++ b/src/http/authMiddleware.js\n@@ -1,18 +1,29 @@\n 'use strict';\n const { verifyToken } = require('../auth/token');\n+const { isPublic, hasRole } = require('../auth/policy');\n \n-function authenticate(secret) {\n+function authenticate(secret, logger) {\n   return (req, res, next) => {\n+    if (isPublic(req.path)) return next();\n+\n     const header = req.get('Authorization') || '';\n+    logger.debug('auth header', { header, path: req.path });\n     const token = header.startsWith('Bearer ') ? header.slice(7) : null;\n     if (!token) return res.status(401).json({ error: 'missing token' });\n     try {\n       req.user = verifyToken(token, secret);\n     } catch (e) {\n       return res.status(401).json({ error: 'invalid token' });\n     }\n     next();\n   };\n }\n \n-module.exports = { authenticate };\n+function requireRole(role) {\n+  return (req, res, next) => {\n+    if (!req.user || !hasRole(req.user, role)) return res.status(403).json({ error: 'forbidden' });\n+    next();\n+  };\n+}\n+\n+module.exports = { authenticate, requireRole };\n",
+      "files": [
+        {
+          "path": "src/auth/policy.js",
+          "content": "'use strict';\n\nconst PUBLIC_PREFIXES = ['/public', '/healthz'];\n\nfunction isPublic(path) {\n  return PUBLIC_PREFIXES.some((p) => path.startsWith(p));\n}\n\n/** True when the user holds the required role. */\nfunction hasRole(user, required) {\n  return user.roles.join(',').includes(required);\n}\n\nmodule.exports = { isPublic, hasRole };\n"
+        },
+        {
+          "path": "src/auth/token.js",
+          "content": "'use strict';\nconst crypto = require('crypto');\n\nfunction b64url(buf) {\n  return Buffer.from(buf).toString('base64url');\n}\n\nfunction sign(payload, secret) {\n  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));\n  const body = b64url(JSON.stringify(payload));\n  const sig = crypto.createHmac('sha256', secret).update(header + '.' + body).digest('base64url');\n  return header + '.' + body + '.' + sig;\n}\n\nfunction verifyToken(token, secret) {\n  const [h, p, sig] = token.split('.');\n  if (!h || !p) throw new Error('malformed token');\n  const header = JSON.parse(Buffer.from(h, 'base64url').toString('utf8'));\n  const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));\n\n  const expected =\n    header.alg === 'HS256'\n      ? crypto.createHmac('sha256', secret).update(h + '.' + p).digest('base64url')\n      : null;\n  if (expected !== null && sig !== expected) throw new Error('bad signature');\n\n  // exp is a NumericDate: seconds since the epoch.\n  if (payload.exp && payload.exp < Date.now()) throw new Error('token expired');\n  return { id: payload.sub, roles: payload.roles || [], tenant: payload.tenant };\n}\n\nmodule.exports = { sign, verifyToken };\n"
+        },
+        {
+          "path": "src/http/authMiddleware.js",
+          "content": "'use strict';\nconst { verifyToken } = require('../auth/token');\nconst { isPublic, hasRole } = require('../auth/policy');\n\nfunction authenticate(secret, logger) {\n  return (req, res, next) => {\n    if (isPublic(req.path)) return next();\n\n    const header = req.get('Authorization') || '';\n    logger.debug('auth header', { header, path: req.path });\n    const token = header.startsWith('Bearer ') ? header.slice(7) : null;\n    if (!token) return res.status(401).json({ error: 'missing token' });\n    try {\n      req.user = verifyToken(token, secret);\n    } catch (e) {\n      return res.status(401).json({ error: 'invalid token' });\n    }\n    next();\n  };\n}\n\nfunction requireRole(role) {\n  return (req, res, next) => {\n    if (!req.user || !hasRole(req.user, role)) return res.status(403).json({ error: 'forbidden' });\n    next();\n  };\n}\n\nmodule.exports = { authenticate, requireRole };\n"
+        },
+        {
+          "path": "src/http/logger.js",
+          "content": "'use strict';\n// Structured JSON logger. Every call is shipped to the central log pipeline.\nfunction make(level = 'info') {\n  const order = ['debug', 'info', 'warn', 'error'];\n  const min = order.indexOf(level);\n  const emit = (lvl) => (msg, fields = {}) => {\n    if (order.indexOf(lvl) < min) return;\n    process.stdout.write(JSON.stringify({ level: lvl, msg, ...fields }) + '\\n');\n  };\n  return { debug: emit('debug'), info: emit('info'), warn: emit('warn'), error: emit('error') };\n}\n\nmodule.exports = { make };\n"
+        }
+      ],
+      "defects": [
+        {
+          "id": "exp-unit-mismatch",
+          "pattern": "exp.*(seconds?|milli|ms|unit|epoch)|Date\\.now\\(\\)|never (expire|expires)|does not expire|NumericDate",
+          "description": "payload.exp is in seconds but is compared to Date.now() in milliseconds, so tokens effectively never expire."
+        },
+        {
+          "id": "alg-confusion",
+          "pattern": "alg(orithm)?.*(none|header|pin|confus|other than|unsupported|skip)|signature.*(skip|bypass|not (checked|verified))|expected !== null|unsigned",
+          "description": "Signature verification only runs when header.alg is HS256; any other alg (including none) skips verification, so forged unsigned tokens are accepted."
+        },
+        {
+          "id": "timing-compare",
+          "pattern": "timing|timingSafeEqual|constant.time|side.channel",
+          "description": "The signature is compared with !==/=== instead of crypto.timingSafeEqual, allowing timing attacks."
+        },
+        {
+          "id": "role-substring",
+          "pattern": "substring|includes\\(|partial match|join\\(|billing_admin|superadmin|string match|prefix|array membership|roles\\.includes",
+          "description": "hasRole joins roles into a string and uses includes, so \"admin\" matches \"billing_admin\" or \"superadmin-readonly\"; it should test array membership."
+        },
+        {
+          "id": "public-prefix-bypass",
+          "pattern": "startsWith|prefix|normali[sz]|traversal|\\.\\./|/publicity|/public[a-z]|dot-?segment",
+          "description": "isPublic uses startsWith on the raw path: /publicity, /public-admin and unnormalised paths such as /public/../admin skip authentication."
+        },
+        {
+          "id": "logs-bearer-token",
+          "pattern": "log(s|ged|ging)?.*(token|authorization|header|credential|secret|bearer)|(token|authorization|header|credential).*(log|leak)|debug.*(header|token)|redact",
+          "description": "The full Authorization header (the bearer token) is written to the central log pipeline at debug level."
+        }
+      ]
+    },
+    {
+      "id": "ho6-config-refactor-long-diff",
+      "title": "Config loader refactor touching 9 files (long mostly-mechanical diff with buried defects)",
+      "kind": "multi-file-diff",
+      "provenance": {
+        "kind": "synthetic",
+        "note": "SYNTHETIC: authored for xllm as a realistic multi-file change with defects planted by the author. Not derived from a real incident or repository; no real-world provenance is claimed. Real retrospective bugs are added with `xllm-bench import-cases`."
+      },
+      "diff": "diff --git a/src/config/env.js b/src/config/env.js\n--- a/src/config/env.js\n+++ b/src/config/env.js\n@@ -1,9 +1,9 @@\n 'use strict';\n \n module.exports = function fromEnv(env) {\n   const out = {};\n-  if (env.MAX_RETRIES) out.maxRetries = parseInt(env.MAX_RETRIES, 10);\n-  if (env.FEATURE_NEW_SEARCH) out.newSearch = env.FEATURE_NEW_SEARCH === 'true';\n+  if (env.MAX_RETRIES) out.maxRetries = env.MAX_RETRIES;\n+  if (env.FEATURE_NEW_SEARCH) out.newSearch = !!env.FEATURE_NEW_SEARCH;\n   if (env.REQUEST_TIMEOUT_MS) out.requestTimeoutMs = Number(env.REQUEST_TIMEOUT_MS);\n   return out;\n };\ndiff --git a/src/config/file.js b/src/config/file.js\n--- a/src/config/file.js\n+++ b/src/config/file.js\n@@ -1,7 +1,11 @@\n 'use strict';\n const fs = require('fs');\n \n module.exports = function fromFile(path) {\n   if (!path) return {};\n-  return JSON.parse(fs.readFileSync(path, 'utf8'));\n+  try {\n+    return JSON.parse(fs.readFileSync(path, 'utf8'));\n+  } catch (err) {\n+    return {};\n+  }\n };\ndiff --git a/src/config/index.js b/src/config/index.js\n--- a/src/config/index.js\n+++ b/src/config/index.js\n@@ -1,13 +1,14 @@\n 'use strict';\n const defaults = require('./defaults');\n const fromEnv = require('./env');\n const fromFile = require('./file');\n \n+/**\n+ * Resolution order (later wins): built-in defaults, config file, environment.\n+ */\n function load(env = process.env, file = process.env.APP_CONFIG) {\n-  const cfg = Object.assign({}, defaults);\n-  Object.assign(cfg, fromFile(file));\n-  Object.assign(cfg, fromEnv(env));\n-  return cfg;\n+  const config = Object.assign(defaults, fromFile(file), fromEnv(env));\n+  return config;\n }\n \n module.exports = load();\ndiff --git a/src/services/billing.js b/src/services/billing.js\n--- a/src/services/billing.js\n+++ b/src/services/billing.js\n@@ -1,18 +1,18 @@\n 'use strict';\n-const cfg = require('../config');\n-const log = require('../logger');\n+const config = require('../config');\n+const logger = require('../logger');\n \n async function chargeCustomer(input, deps) {\n-  const currency = cfg.billing.currency;\n-  const invoiceDay = cfg.billing.invoiceDay;\n-  log.info('billing: starting ' + 'chargeCustomer');\n+  const currency = config.billing.currency;\n+  const invoiceDay = config.billing.invoiceDay;\n+  logger.info({ msg: 'billing: starting', op: 'chargeCustomer' });\n   if (!input) {\n-    log.warn('billing: empty input');\n+    logger.warn({ msg: 'billing: empty input', op: 'chargeCustomer' });\n     return null;\n   }\n   const result = await deps.billingClient.call(input, { currency, invoiceDay });\n-  log.info('billing: finished ' + 'chargeCustomer');\n+  logger.info({ msg: 'billing: finished', op: 'chargeCustomer' });\n   return result;\n }\n \n module.exports = { chargeCustomer };\ndiff --git a/src/services/notifications.js b/src/services/notifications.js\n--- a/src/services/notifications.js\n+++ b/src/services/notifications.js\n@@ -1,18 +1,18 @@\n 'use strict';\n-const cfg = require('../config');\n-const log = require('../logger');\n+const config = require('../config');\n+const logger = require('../logger');\n \n async function dispatch(input, deps) {\n-  const channel = cfg.notifications.channel;\n-  const batchSize = cfg.notifications.batchSize;\n-  log.info('notifications: starting ' + 'dispatch');\n+  const channel = config.notifications.channel;\n+  const batchSize = config.notifications.batchSize;\n+  logger.info({ msg: 'notifications: starting', op: 'dispatch' });\n   if (!input) {\n-    log.warn('notifications: empty input');\n+    logger.warn({ msg: 'notifications: empty input', op: 'dispatch' });\n     return null;\n   }\n   const result = await deps.notificationsClient.call(input, { channel, batchSize });\n-  log.info('notifications: finished ' + 'dispatch');\n+  logger.info({ msg: 'notifications: finished', op: 'dispatch' });\n   return result;\n }\n \n module.exports = { dispatch };\ndiff --git a/src/services/reports.js b/src/services/reports.js\n--- a/src/services/reports.js\n+++ b/src/services/reports.js\n@@ -1,18 +1,18 @@\n 'use strict';\n-const cfg = require('../config');\n-const log = require('../logger');\n+const config = require('../config');\n+const logger = require('../logger');\n \n async function buildReport(input, deps) {\n-  const timezone = cfg.reports.timezone;\n-  const maxRows = cfg.reports.maxRows;\n-  log.info('reports: starting ' + 'buildReport');\n+  const timezone = config.reports.timezone;\n+  const maxRows = config.reports.maxRows;\n+  logger.info({ msg: 'reports: starting', op: 'buildReport' });\n   if (!input) {\n-    log.warn('reports: empty input');\n+    logger.warn({ msg: 'reports: empty input', op: 'buildReport' });\n     return null;\n   }\n   const result = await deps.reportsClient.call(input, { timezone, maxRows });\n-  log.info('reports: finished ' + 'buildReport');\n+  logger.info({ msg: 'reports: finished', op: 'buildReport' });\n   return result;\n }\n \n module.exports = { buildReport };\ndiff --git a/src/services/search.js b/src/services/search.js\n--- a/src/services/search.js\n+++ b/src/services/search.js\n@@ -1,18 +1,18 @@\n 'use strict';\n-const cfg = require('../config');\n-const log = require('../logger');\n+const config = require('../config');\n+const logger = require('../logger');\n \n async function runQuery(input, deps) {\n-  const indexName = cfg.search.indexName;\n-  const pageSize = cfg.search.pageSize;\n-  log.info('search: starting ' + 'runQuery');\n+  const indexName = config.search.indexName;\n+  const pageSize = config.search.pageSize;\n+  logger.info({ msg: 'search: starting', op: 'runQuery' });\n   if (!input) {\n-    log.warn('search: empty input');\n+    logger.warn({ msg: 'search: empty input', op: 'runQuery' });\n     return null;\n   }\n   const result = await deps.searchClient.call(input, { indexName, pageSize });\n-  log.info('search: finished ' + 'runQuery');\n+  logger.info({ msg: 'search: finished', op: 'runQuery' });\n   return result;\n }\n \n module.exports = { runQuery };\ndiff --git a/src/services/sessions.js b/src/services/sessions.js\n--- a/src/services/sessions.js\n+++ b/src/services/sessions.js\n@@ -1,18 +1,18 @@\n 'use strict';\n-const cfg = require('../config');\n-const log = require('../logger');\n+const config = require('../config');\n+const logger = require('../logger');\n \n async function startSession(input, deps) {\n-  const cookieName = cfg.sessions.cookieName;\n-  const ttlMinutes = cfg.sessions.ttlMinutes;\n-  log.info('sessions: starting ' + 'startSession');\n+  const cookieName = config.sessions.cookieName;\n+  const ttlMinutes = config.sessions.ttlMinutes;\n+  logger.info({ msg: 'sessions: starting', op: 'startSession' });\n   if (!input) {\n-    log.warn('sessions: empty input');\n+    logger.warn({ msg: 'sessions: empty input', op: 'startSession' });\n     return null;\n   }\n   const result = await deps.sessionsClient.call(input, { cookieName, ttlMinutes });\n-  log.info('sessions: finished ' + 'startSession');\n+  logger.info({ msg: 'sessions: finished', op: 'startSession' });\n   return result;\n }\n \n module.exports = { startSession };\ndiff --git a/src/services/uploads.js b/src/services/uploads.js\n--- a/src/services/uploads.js\n+++ b/src/services/uploads.js\n@@ -1,18 +1,18 @@\n 'use strict';\n-const cfg = require('../config');\n-const log = require('../logger');\n+const config = require('../config');\n+const logger = require('../logger');\n \n async function storeUpload(input, deps) {\n-  const bucket = cfg.uploads.bucket;\n-  const maxBytes = cfg.uploads.maxBytes;\n-  log.info('uploads: starting ' + 'storeUpload');\n+  const bucket = config.uploads.bucket;\n+  const maxBytes = config.uploads.maxBytes;\n+  logger.info({ msg: 'uploads: starting', op: 'storeUpload' });\n   if (!input) {\n-    log.warn('uploads: empty input');\n+    logger.warn({ msg: 'uploads: empty input', op: 'storeUpload' });\n     return null;\n   }\n   const result = await deps.uploadsClient.call(input, { bucket, maxBytes });\n-  log.info('uploads: finished ' + 'storeUpload');\n+  logger.info({ msg: 'uploads: finished', op: 'storeUpload' });\n   return result;\n }\n \n module.exports = { storeUpload };\n",
+      "files": [
+        {
+          "path": "src/config/defaults.js",
+          "content": "'use strict';\n\nmodule.exports = {\n  maxRetries: 3,\n  newSearch: false,\n  requestTimeoutMs: 10000,\n  billing: { currency: 'USD', invoiceDay: 1 },\n  search: { indexName: 'main', pageSize: 25 },\n  notifications: { channel: 'email', batchSize: 100 },\n  reports: { timezone: 'UTC', maxRows: 50000 },\n  uploads: { bucket: 'uploads-prod', maxBytes: 10485760 },\n  sessions: { cookieName: 'sid', ttlMinutes: 60 },\n};\n"
+        },
+        {
+          "path": "src/config/env.js",
+          "content": "'use strict';\n\nmodule.exports = function fromEnv(env) {\n  const out = {};\n  if (env.MAX_RETRIES) out.maxRetries = env.MAX_RETRIES;\n  if (env.FEATURE_NEW_SEARCH) out.newSearch = !!env.FEATURE_NEW_SEARCH;\n  if (env.REQUEST_TIMEOUT_MS) out.requestTimeoutMs = Number(env.REQUEST_TIMEOUT_MS);\n  return out;\n};\n"
+        },
+        {
+          "path": "src/config/file.js",
+          "content": "'use strict';\nconst fs = require('fs');\n\nmodule.exports = function fromFile(path) {\n  if (!path) return {};\n  try {\n    return JSON.parse(fs.readFileSync(path, 'utf8'));\n  } catch (err) {\n    return {};\n  }\n};\n"
+        },
+        {
+          "path": "src/config/index.js",
+          "content": "'use strict';\nconst defaults = require('./defaults');\nconst fromEnv = require('./env');\nconst fromFile = require('./file');\n\n/**\n * Resolution order (later wins): built-in defaults, config file, environment.\n */\nfunction load(env = process.env, file = process.env.APP_CONFIG) {\n  const config = Object.assign(defaults, fromFile(file), fromEnv(env));\n  return config;\n}\n\nmodule.exports = load();\n"
+        },
+        {
+          "path": "src/retry.js",
+          "content": "'use strict';\nconst config = require('./config');\n\n/** Calls fn up to maxRetries + 1 times, waiting 100ms * attempt between tries. */\nasync function withRetry(fn) {\n  const total = config.maxRetries + 1;\n  let lastErr;\n  for (let attempt = 1; attempt <= total; attempt++) {\n    try {\n      return await fn(attempt);\n    } catch (err) {\n      lastErr = err;\n      await new Promise((r) => setTimeout(r, 100 * attempt));\n    }\n  }\n  throw lastErr;\n}\n\nmodule.exports = { withRetry };\n"
+        },
+        {
+          "path": "src/services/billing.js",
+          "content": "'use strict';\nconst config = require('../config');\nconst logger = require('../logger');\n\nasync function chargeCustomer(input, deps) {\n  const currency = config.billing.currency;\n  const invoiceDay = config.billing.invoiceDay;\n  logger.info({ msg: 'billing: starting', op: 'chargeCustomer' });\n  if (!input) {\n    logger.warn({ msg: 'billing: empty input', op: 'chargeCustomer' });\n    return null;\n  }\n  const result = await deps.billingClient.call(input, { currency, invoiceDay });\n  logger.info({ msg: 'billing: finished', op: 'chargeCustomer' });\n  return result;\n}\n\nmodule.exports = { chargeCustomer };\n"
+        },
+        {
+          "path": "src/services/notifications.js",
+          "content": "'use strict';\nconst config = require('../config');\nconst logger = require('../logger');\n\nasync function dispatch(input, deps) {\n  const channel = config.notifications.channel;\n  const batchSize = config.notifications.batchSize;\n  logger.info({ msg: 'notifications: starting', op: 'dispatch' });\n  if (!input) {\n    logger.warn({ msg: 'notifications: empty input', op: 'dispatch' });\n    return null;\n  }\n  const result = await deps.notificationsClient.call(input, { channel, batchSize });\n  logger.info({ msg: 'notifications: finished', op: 'dispatch' });\n  return result;\n}\n\nmodule.exports = { dispatch };\n"
+        },
+        {
+          "path": "src/services/reports.js",
+          "content": "'use strict';\nconst config = require('../config');\nconst logger = require('../logger');\n\nasync function buildReport(input, deps) {\n  const timezone = config.reports.timezone;\n  const maxRows = config.reports.maxRows;\n  logger.info({ msg: 'reports: starting', op: 'buildReport' });\n  if (!input) {\n    logger.warn({ msg: 'reports: empty input', op: 'buildReport' });\n    return null;\n  }\n  const result = await deps.reportsClient.call(input, { timezone, maxRows });\n  logger.info({ msg: 'reports: finished', op: 'buildReport' });\n  return result;\n}\n\nmodule.exports = { buildReport };\n"
+        },
+        {
+          "path": "src/services/search.js",
+          "content": "'use strict';\nconst config = require('../config');\nconst logger = require('../logger');\n\nasync function runQuery(input, deps) {\n  const indexName = config.search.indexName;\n  const pageSize = config.search.pageSize;\n  logger.info({ msg: 'search: starting', op: 'runQuery' });\n  if (!input) {\n    logger.warn({ msg: 'search: empty input', op: 'runQuery' });\n    return null;\n  }\n  const result = await deps.searchClient.call(input, { indexName, pageSize });\n  logger.info({ msg: 'search: finished', op: 'runQuery' });\n  return result;\n}\n\nmodule.exports = { runQuery };\n"
+        },
+        {
+          "path": "src/services/sessions.js",
+          "content": "'use strict';\nconst config = require('../config');\nconst logger = require('../logger');\n\nasync function startSession(input, deps) {\n  const cookieName = config.sessions.cookieName;\n  const ttlMinutes = config.sessions.ttlMinutes;\n  logger.info({ msg: 'sessions: starting', op: 'startSession' });\n  if (!input) {\n    logger.warn({ msg: 'sessions: empty input', op: 'startSession' });\n    return null;\n  }\n  const result = await deps.sessionsClient.call(input, { cookieName, ttlMinutes });\n  logger.info({ msg: 'sessions: finished', op: 'startSession' });\n  return result;\n}\n\nmodule.exports = { startSession };\n"
+        },
+        {
+          "path": "src/services/uploads.js",
+          "content": "'use strict';\nconst config = require('../config');\nconst logger = require('../logger');\n\nasync function storeUpload(input, deps) {\n  const bucket = config.uploads.bucket;\n  const maxBytes = config.uploads.maxBytes;\n  logger.info({ msg: 'uploads: starting', op: 'storeUpload' });\n  if (!input) {\n    logger.warn({ msg: 'uploads: empty input', op: 'storeUpload' });\n    return null;\n  }\n  const result = await deps.uploadsClient.call(input, { bucket, maxBytes });\n  logger.info({ msg: 'uploads: finished', op: 'storeUpload' });\n  return result;\n}\n\nmodule.exports = { storeUpload };\n"
+        }
+      ],
+      "defects": [
+        {
+          "id": "env-retries-string",
+          "pattern": "string|parseInt|Number\\(|coerc|type|maxRetries.*(\\+ ?1|concat|\"31\"|\"51\")|retries.*(string|text)",
+          "description": "MAX_RETRIES is no longer parsed: it becomes a string, so withRetry computes maxRetries + 1 as string concatenation (\"5\" + 1 = \"51\") and loops far too many times."
+        },
+        {
+          "id": "env-boolean-truthy",
+          "pattern": "'false'|\"false\"|truthy|boolean|!!|string.*false|=== ?'true'|parse.*flag|FEATURE_NEW_SEARCH",
+          "description": "FEATURE_NEW_SEARCH=false (any non-empty string) now enables the feature because the === 'true' check was replaced by !!."
+        },
+        {
+          "id": "defaults-mutated",
+          "pattern": "mutat|Object\\.assign\\(defaults|shared (default|object)|defaults (object )?(is|are) (modif|overwr|mutat)|leak|copy|clone|spread|empty object as the target",
+          "description": "Object.assign(defaults, ...) mutates the shared defaults module object (the previous code copied into {}), so overrides leak into the defaults for every other importer and later load() calls."
+        },
+        {
+          "id": "file-errors-swallowed",
+          "pattern": "swallow|silent|ignore[sd]? (the )?(error|parse|failure)|empty object|catch|fail.?(open|fast|loud)|misconfig|malformed|invalid json",
+          "description": "fromFile now swallows every error (missing file, bad JSON) and returns {}, so a broken config silently falls back to defaults instead of failing at startup."
+        }
+      ]
+    }
+  ]
+}

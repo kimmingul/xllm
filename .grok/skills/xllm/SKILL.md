@@ -2,7 +2,7 @@
 name: xllm
 description: >
   Multi-LLM review and synthesis for xllm (headless). Decomposes the task,
-  runs 2+ external CLIs (codex, antigravity, grok, claude, ollama, lmstudio, …)
+  runs 2+ external CLIs (codex, claude, ollama, lmstudio, …)
   via the advisor script, captures artifacts, then synthesizes agreements and
   disagreements. Primary multi-advisor skill (replaces the former OMC-style /ccg name).
 argument-hint: "[provider1,provider2[,provider3]] <task>"
@@ -13,19 +13,28 @@ user-invocable: true
 
 Grok is the **synthesizer**. External CLIs are the **advisors**.
 
+**Escalate by need:** host alone → `/ask` one other vendor → blind independent
+review (below) when a measured spread of several models is worth the calls. Only
+advisors whose read-only boundary xllm can verify are eligible by default —
+`doctor` shows eligibility separately from "binary installed".
+
 ## Defaults
 
 If the user omits providers, use profile defaults from `.xllm/xllm-providers.toml` (legacy `.grok/`):
 
 | Role | Preferred | Fallback |
 |------|-----------|----------|
-| Analysis | `codex` | `claude`, `grok` |
-| Design | **`antigravity`** (over gemini, every platform) | `gemini` (only when `agy` is absent) |
-| Mix | local + cloud when both READY | e.g. `ollama:…,codex` |
+| Analysis | `codex` | `claude` |
+| Design | `claude` or a local model | another eligible advisor |
+| Mix | local + cloud when both eligible | e.g. `ollama:…,codex` |
+
+Eligible default advisors are those whose read-only boundary xllm verifies:
+`codex`, `claude`, `ollama`, `lmstudio`. `antigravity`/`gemini`/`grok`/`cursor`/`lemonade`
+are refused by default (installed ≠ eligible) until a boundary can be verified.
 
 Resolve advisor path like `/ask` (`.xllm/xllm-advisor-path` or legacy `.grok/` → env → `./scripts/…`).  
-Run `node <advisor.js> --doctor` for READY set.  
-Doctor prints a suggested pair with **antigravity > gemini**.
+Run `node <advisor.js> --doctor` for the READY set and eligibility (safety is
+reported separately from "binary installed").
 
 Or:
 
@@ -47,9 +56,9 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
 
    ```bash
    node <advisor.js> codex@high "<analysis prompt>"
-   node <advisor.js> antigravity "<design prompt>"
+   node <advisor.js> claude "<design prompt>"
    # or review roles when the same prompt is acceptable (providers run in parallel):
-   node <xllm.mjs> review roles codex@high,antigravity "<shared prompt>"
+   node <xllm.mjs> review roles codex@high,claude "<shared prompt>"
    ```
 
    Advisors run **read-only by default** (`--allow-write` only on explicit user request).
@@ -61,7 +70,7 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
 
    ```markdown
    ## Claims
-   - [unanimous] <claim> (codex@high, antigravity)
+   - [unanimous] <claim> (codex@high, claude)
    - [majority] <claim> (2/3 support; one silent)
    - [split] <claim> — A says … / B says … → tiebreaker or explicit decision
    - [single-source] <claim> (one advisor — lead, not finding)
@@ -82,50 +91,57 @@ node <plugin>/scripts/xllm-routing.js pick design "<task>" --json
 ## Deliberation modes
 
 `/xllm` above runs the **roles** mode (parallel advisors, host synthesizes —
-coverage, **not measured**). For a measured spread or adversarial stress-test,
-drop to the review family directly (same `<xllm.mjs>` as step 3):
+coverage, **not measured**). For the default independent review use **blind**;
+debate/council are **experimental**. Same `<xllm.mjs>` as step 3:
 
 ```bash
+node <xllm.mjs> review blind   p1,p2[,p3] "<question>"    # blind independent panel, measured agreement
 node <xllm.mjs> review roles   p1,p2[,p3] "<prompt>"      # coverage — NOT measured
-node <xllm.mjs> review blind   p1,p2[,p3] "<question>"    # measured independent panel
-node <xllm.mjs> review debate  p1,p2[,p3] "<claim>"       # SURVIVED / KILLED / UNRESOLVED
-node <xllm.mjs> review council p1,p2[,p3] "<question>"    # blind → debate, highest stakes
+node <xllm.mjs> review debate  p1,p2[,p3] "<claim>"       # EXPERIMENTAL
+node <xllm.mjs> review council p1,p2[,p3] "<question>"    # EXPERIMENTAL
 ```
 
-| mode | epistemology | cost | reach for it when |
+| mode | what it gives | cost | status |
 |---|---|---|---|
-| roles | coverage — synthesis labels, **not measured** | 1× | advisors need different prompts (this skill's default) |
-| blind | measurement — identical blind prompt, ledgered | ~1× | you want the measured spread |
-| debate | adversarial — decisive falsifiers kill wrong claims | ~2–3× | being wrong is expensive |
-| council | independent divergence → hostile convergence | ~3–4× | the highest-stakes calls |
+| blind | identical blind prompt, ledgered, measured agreement | ~1× per model | default recommendation |
+| roles | different prompts per advisor, your synthesis | 1× | coverage, not measured |
+| debate | adversarial refutation → SURVIVED / KILLED / UNRESOLVED | ~2–3× | experimental |
+| council | blind → debate | ~3–4× | experimental |
+
+debate/council benefit is **unproven** (earlier runs showed no quality
+discrimination and lower recall than blind; re-evaluation under the strict
+identity method is pending). Never base a high-stakes recommendation on them;
+a failed round is UNRESOLVED, not survived.
 
 Any mode accepts one diff source: `--staged | --base <ref> | --diff-file <path>`
-(`--base` is two-dot `git diff <ref>` — working tree vs ref, uncommitted included).
-`review stats` prints the pairwise agreement matrix (measured decorrelation);
-`review outcome <run-id> --adopted <spec|majority|minority|none> --helpful
-yes|no` records what the host adopted, feeding measured routing.
+(`--base` is two-dot `git diff <ref>` — working tree vs ref, uncommitted
+included). If the diff is truncated the run reports covered vs omitted hunks —
+relay that, never claim a whole-diff review. `review stats` prints the pairwise
+agreement matrix (strict-identity evidence only); `review outcome <run-id>
+--adopted <spec|majority|minority|none> --helpful yes|no` records what the host
+adopted.
 
 Only blind/council/stats speak measured agreement — roles output is your
-synthesis, never a rate. SURVIVED ≠ proven; re-verify consequential claims.
-On a blind split, spend the measured tiebreaker (`--tiebreak`) — never
-hand-pick one by vendor pedigree.
+synthesis, never a rate. On a blind split, spend the measured tiebreaker
+(`--tiebreak`) — never hand-pick one by vendor pedigree.
 
 ## Provider syntax
 
-Same as `/ask`: `codex`, `codex@high`, `claude:opus@medium`, `antigravity`, `ollama:qwen3.6:latest`, …
+Same as `/ask`: `codex`, `codex@high`, `claude:opus@medium`, `ollama:qwen3.6:latest`, …
 
 ```text
 /xllm Review payment error handling for security and UX
 /xllm ollama:llama3.2,codex Critique the caching design
-/xllm codex@high,antigravity Security + design review of auth rewrite
+/xllm codex@high,claude Security + design review of auth rewrite
 ```
 
 ## Failure policy
 
 - One advisor fails → continue; note failure in synthesis.
 - All fail → explain + best-effort Grok-only analysis labeled as degraded.
-- `antigravity`/`gemini` requested but its binary is absent → substitute the
-  other one and warn once. Platform is never a reason to substitute.
+- A requested provider is not eligible (unverified read-only boundary, or
+  refused by `execution_policy = "local-only"`) → report the refusal; never
+  substitute silently or work around the policy.
 
 ## Relation to other skills
 

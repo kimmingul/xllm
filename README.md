@@ -7,7 +7,7 @@
 에이전틱 코딩 도구(Claude Code · Codex · Grok Build)는 제조사 단일 LLM에 락인됩니다.
 **xllm**은 다른 벤더와 로컬 모델을 그 세션 안으로 불러옵니다 — 기본은 read-only.
 
-**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.35.4** · MIT
+**[🌐 소개 페이지](https://kimmingul.github.io/xllm/)** · **v0.36.0** · MIT
 
 `codex` · `claude` · `gemini` · `grok` · `antigravity` · `cursor` · `ollama` · `lmstudio` · `lemonade`
 
@@ -27,6 +27,13 @@ provider · model · effort)을 제공하고, 그것이 실제로 도움이 되�
 
 ---
 
+## 워크플로: 호스트 단독 → ask → 블라인드 독립 리뷰
+
+필요한 만큼만 올라갑니다. **호스트 단독**으로 충분하면 xllm을 부르지 않습니다. 독립적인 다른
+모델의 의견이 비용만큼 값어치가 있을 때 `ask`로 **한 명**에게 묻고, 여러 모델의 *측정된* 의견
+분포가 필요할 때만 `review blind`(서로 못 보는 독립 리뷰)로 올립니다. `review debate`/`council`은
+**실험 기능**이며 고위험 결정의 근거로 쓰지 않습니다(아래 심의 레퍼런스 참고).
+
 ## 에스컬레이션 사다리: ask → propose → exec
 
 단이 올라갈수록 어드바이저의 자유는 커지지만, **당신의 체크아웃에 대한 권한은 모든 단에서
@@ -45,9 +52,10 @@ node scripts/xllm.mjs exec codex@high "X를 구현해줘" --test-cmd "npm test"
 ```
 
 **exec 불변식** — 체크아웃·브랜치·index·config는 절대 불가침(`.git` 분리 클론, fetch 전용
-`refs/xllm/exec/<id>` 반환, 변조 트립와이어) · 병합/push/자격증명은 호스트 측 · 샌드박스 가능한
-프로바이더만(codex/claude) · OS 샌드박스 고장 시 fail-closed · executor의 green은 증거이지 신뢰가
-아님(병합 후 재검증).
+`refs/xllm/exec/<id>` 반환, 변조 트립와이어) · 병합/push/자격증명은 호스트 측 · **검증된 OS 샌드박스가
+있는 provider(현재 codex)만**, 우회 옵션 없음(호스트 셸에서 테스트를 돌리지 않음; 샌드박스 검증 실패 시
+fail-closed) · `--test-cmd` 검증 없이는 green이라 부르지 않음(`unverified`) · executor의 green은 증거이지
+신뢰가 아님(병합 후 재검증).
 
 ---
 
@@ -55,25 +63,28 @@ node scripts/xllm.mjs exec codex@high "X를 구현해줘" --test-cmd "npm test"
 
 | 기능 | 설명 |
 |------|------|
-| **블라인드 패널 (`review blind`)** | 동일 프롬프트를 N개 모델에 블라인드로 보내 **다양성을 측정**. 구조화 판정이 산문보다 먼저 append-only 원장에 기록되고, 누적 쌍별 일치 행렬을 제공. |
-| **측정 타이브레이커** | 패널이 **split**이면 원장의 실측 일치율이 가장 낮은 **미참여** 프로바이더를 자동 선정(혈통 아님) — 제안은 항상 무료 기록, 실제 추가 호출은 `--tiebreak` 옵트인. 타이브레이크의 쌍별 행이 다시 원장에 쌓여 **다음 선정의 근거**가 됨(측정→라우팅 루프 폐쇄). |
-| **특성 프로파일 (`traits`)** | 원장·벤치마크·계약 캐시에서 **실측 특성만** 파생(손으로 쓴 모델 인상론 금지, 표본 수 상시 노출). 판단 역할 라우팅은 시딩 결함 검출률의 **Wilson 95% 하한**을 공유 결함셋 게이트(과제≥4·기회≥12·+0.10) 하에 소비 — 측정이 tier/비용 경계를 넘을 수 있음. 증거 없으면 기존 라우팅과 비트 동일. `--no-traits`로 비활성. |
-| **적대적 검토 (`review debate`)** | 모델들이 서로 **반박**해 틀린 주장을 죽이고 **품질로 수렴**. 정체성은 provider가 아닌 **모델 단위** — 같은 로컬 런타임의 다른 모델(예: ollama의 llama↔gemma)도 서로 공격. decisive falsifier만 KILL, 단순 이견은 UNRESOLVED. judge LLM 없는 기계적 판정. 이 기능 자체가 xllm 적대 방식으로 설계됨. |
-| **2단계 파이프라인 (`review council`)** | `review blind`(독립 발산) → `review debate`(적대 수렴)을 한 명령으로. 독립적으로 도출된 주장을 반박 검증 → survived/killed/unresolved. 최고 중요도 결정용. |
+| **블라인드 독립 리뷰 (`review blind`)** | 동일 프롬프트를 N개 모델에 블라인드로 보내 **다양성을 측정**. 구조화 판정이 산문보다 먼저 append-only 원장에 기록되고, 누적 쌍별 일치 행렬을 제공. 권장 기본 심의 모드. |
+| **측정 타이브레이커** | 패널이 **split**이면 원장의 실측 일치율이 가장 낮은 **미참여** 프로바이더를 자동 선정(혈통 아님) — 제안은 항상 무료 기록, 실제 추가 호출은 `--tiebreak` 옵트인. 일치율은 **strict 정체성 증거**(아래)만 사용. |
+| **strict 증거 기반 특성 (`traits`)** | 원장·벤치마크에서 **실측 특성만** 파생(손으로 쓴 모델 인상론 금지, 표본 수 상시 노출). 증거는 실행된 provider·보고된 모델/리비전·유효 effort·표면·CLI 버전으로 키잉되며, 모델 정체성이 *resolved*가 아닌 기록(레거시·bare 모델명·별칭)은 **라우팅에 쓰지 않습니다**. 증거가 없으면 내장 라우팅. `pick --no-traits`는 실측 품질 라우팅만 끕니다. |
+| **적대적 검토 (`review debate`) — 실험** | 모델들이 서로 **반박**해 주장을 SURVIVED/KILLED/UNRESOLVED로 판정(judge LLM 없는 기계적 판정, 실패한 라운드는 UNRESOLVED). 이전 측정에서 품질 판별력이 확인되지 않았고 strict 방식의 재평가는 **보류 중**입니다. 고위험 권고의 근거로 쓰지 마세요. |
+| **2단계 파이프라인 (`review council`) — 실험** | `review blind` → `review debate`을 한 명령으로. debate와 같은 이유로 실험 기능이며, 이전 측정에서 재현율이 블라인드 패널보다 낮았습니다. |
 | **합의 깊이 종합** | 주장별로 만장일치/다수결/의견분열/단일출처 라벨. 실패 어드바이저는 기권. 합의는 신뢰도 메타데이터이지 진리가 아님. |
 | **비용 인지 라우팅** | 가벼운 일은 무료 로컬·low effort, 무거운 판단은 strong tier. 초소형 로컬 모델은 판단 역할 투표권 거부(능력 하한). |
-| **scribe** | 커밋 메시지·PR 본문·릴리스 노트를 가장 싼 healthy 모델이 작성, 결정적 검증. 기계적 작업에 SOTA 요금을 쓰지 않음. |
-| **구조화 출력 견고성** | `review`(roles/blind/debate/council) 계열의 JSON 계약 파싱을 견고한 단일 추출기로 통합(맨 JSON·트레일링 콤마·줄바꿈 래핑 처리) + 비준수 시 1회 교정 재시도. 프로바이더별 **계약 준수도**(first/retry/failed) 리포트로 약한·로컬 모델도 안정 참여. |
-| **계약 플로어** | 설치된 CLI의 플래그를 프로브해 버전 드리프트 감지, 실패 분류, transient만 재시도. |
-| **read-only 안전 모델** | 샌드박스 탈출·승인 우회 없음. 동일 벤더 중첩 거부. 세션 env 스트리핑. 아티팩트 시크릿 마스킹. |
+| **scribe (선택)** | 커밋 메시지·PR 본문·릴리스 노트를 가장 싼 healthy 모델이 작성, 결정적 검증. diff/log가 라우팅된 provider로 전송되므로 비용·프라이버시를 따져 고르는 선택 기능입니다. |
+| **구조화 출력 견고성** | `--schema-file`로 스키마를 주면 네이티브 지원 provider는 그 경로를, 아니면 프롬프트 계약 + 견고한 추출기 + 1회 교정 재시도로 폴백합니다(제약된 생성이 아니라 best-effort JSON). 프로바이더별 **계약 준수도**(first/retry/failed) 리포트. |
+| **계약 플로어** | 설치된 CLI의 플래그를 프로브해 버전 드리프트 감지, 실패 분류, transient만 재시도. 인증은 **관측 전까지 unknown**이며 관측된 실패만 거부권을 가집니다. |
+| **local-only 실행 정책** | `execution_policy = "local-only"`면 위치가 *검증된* 로컬 provider만 통과(fail-closed). unknown은 통과하지 못하고 우회 플래그도 없습니다. |
+| **read-only 안전 모델** | 샌드박스 탈출·승인 우회 없음. 읽기 전용 경계를 xllm이 **검증할 수 있는** 어댑터만 기본 허용(설치 ≠ 적격 — `doctor`가 구분 표시). 동일 벤더 중첩 거부. 세션 env 스트리핑. 아티팩트 시크릿 마스킹. |
 
 ---
 
-## scribe — 커밋 메시지에 SOTA 요금 쓰지 않기
+## scribe (선택) — 기계적 git 산문을 싼 모델에게
 
-기계적 git 산문을 메인 세션의 비싼 모델 대신 가장 싼 healthy 모델(무료 로컬 우선)에게 맡깁니다.
-결정적 수집기가 diff/log를 모으고, 모델은 **산문만** 작성하며, git 실행은 항상 사용자가 합니다.
-push/tag는 모델 호출 자체가 없습니다.
+선택 기능입니다. 기계적 git 산문을 메인 세션의 비싼 모델 대신 가장 싼 healthy 모델(로컬 우선)에게
+맡길 수 있고, 직접 쓰는 것이 언제나 대안입니다. 결정적 수집기가 diff/log를 모으고, 모델은
+**산문만** 작성하며, git 실행은 항상 사용자가 합니다. **diff/log는 라우팅된 provider로
+전송됩니다** — 클라우드 provider면 원격 전송이므로 비공개 코드는 로컬 모델에 핀하고
+`execution_policy = "local-only"`를 쓰세요. push/tag는 모델 호출 자체가 없습니다.
 
 ```bash
 MSG=$(node scripts/xllm.mjs scribe commit) && git commit -m "$MSG"
@@ -113,10 +124,10 @@ Claude Code와 Codex는 동일한 호스트 중립 스킬 5종을 `./skills/`에
 | 스킬 | 하는 일 | 실행하는 스크립트 |
 |------|---------|-------------------|
 | `/xllm:ask` | 외부 어드바이저 1명의 의견 (read-only) | `scripts/xllm-advisor.js` |
-| `/xllm:review` | roles(커버리지)·blind(측정 패널)·debate(적대)·council(blind→debate) 4모드 심의 | `scripts/xllm-review.js` |
-| `/xllm:exec` | 격리 클론에서 구현 위임 → 검증된 브랜치 | `scripts/xllm-exec.js` |
-| `/xllm:scribe` | 커밋/PR/릴리스 산문을 최저가 모델로 | `scripts/xllm-scribe.js` |
-| `/xllm:setup` | 머신 인벤토리 + 역할 핀 위저드 + 규율 블록 옵트인 | `scripts/xllm-advisor.js --inventory/--remember/--set-role/--discipline` |
+| `/xllm:review` | blind(독립 측정 패널, 기본)·roles(커버리지) + 실험 기능 debate·council 심의 | `scripts/xllm-review.js` |
+| `/xllm:exec` | 검증된 OS 샌드박스의 격리 클론에서 구현 위임 → 검증된 브랜치 | `scripts/xllm-exec.js` |
+| `/xllm:scribe` | (선택) 커밋/PR/릴리스 산문을 저가 모델로 | `scripts/xllm-scribe.js` |
+| `/xllm:setup` | 머신 인벤토리 + 역할 핀 위저드 + 실행 정책 | `scripts/xllm-advisor.js --inventory/--remember/--set-role/--setup` |
 | `setup [pack]` | 인벤토리→역할 핀을 결정적으로 해석(포스처 팩); `--apply` 전엔 미리보기 | `scripts/xllm-advisor.js --setup` |
 
 Grok Build 어댑터는 별도 3종입니다: `/ask` · `/xllm` · `/xllm-setup` (`.grok/skills/`).
@@ -139,7 +150,11 @@ setup이 하는 일(그리고 남기는 프로젝트-로컬 상태):
 | **1. 머신 인벤토리** | 설치된 어드바이저 CLI·로컬 모델·tier·비용을 프로브(24h 캐시) | `~/.xllm` 캐시(머신 단위) |
 | **2. 마커 + 아티팩트** | 호스트가 이 프로젝트에서 advisor 스크립트를 해석하도록 경로 마커 생성 + 시크릿 마스킹 아티팩트 디렉토리 | `.xllm/xllm-advisor-path` · `.xllm/artifacts/{ask,xllm,proposals,exec}/`(자기 무시 `.gitignore`) |
 | **3. 역할 핀 위저드** | 역할별(analysis·security·design·critic…) `provider:model@effort`를 프로젝트에 고정 — 내장 라우팅을 정확히 오버라이드 | `.xllm/xllm-providers.toml` |
-| **4. 규율 블록(옵트인)** | superpowers류 프로세스 규율 ≤25줄을 CLAUDE.md/AGENTS.md에 설치(전문 미리보기 후 동의; 멱등 마커 블록; `--discipline remove`로 제거) | `CLAUDE.md`/`AGENTS.md`의 `<!-- xllm:discipline -->` 블록 |
+| **4. 실행 정책** | `execution_policy`(`any` 기본 · `local-only`)를 프로젝트 프로파일에 기록 — `local` 팩은 `local-only`를 영속, 다른 팩은 기존 정책을 조용히 완화하지 않음 | `.xllm/xllm-providers.toml`의 `[defaults]` |
+
+xllm은 CLAUDE.md/AGENTS.md에 규율 블록을 설치하지 않으며 사용자의 지침 파일을 자동으로 바꾸지
+않습니다. 이전 버전이 설치한 마커 블록이 있다면 사용자 요청 시에만 `xllm discipline remove`로
+제거합니다.
 
 setup을 건너뛰어도 내장 라우팅으로 동작하지만, **마커가 없으면** 스킬이 경로 해석 휴리스틱에
 의존하고 **역할 핀이 없으면** 프로젝트 맞춤 어드바이저 선택을 못 합니다. 그래서 프로젝트마다 한 번
@@ -159,8 +174,9 @@ node scripts/xllm.mjs remember     # 마커 + 아티팩트 디렉토리 생성
 ### 기본 사용법 — 5분 온보딩
 
 설치 후 처음 쓰는 프로젝트라면 이 순서 그대로면 됩니다. 스펙 문법은 어디서나
-`provider[:model][@effort]` 하나이고(예: `codex@high`, `ollama:qwen3.6:latest`),
-모든 명령의 **마지막 stdout 줄이 결과 아티팩트 경로**입니다.
+`provider[:model][@effort]` 하나입니다(예: `codex@high`, `ollama:qwen3.6:latest`).
+사람용 출력은 **마지막 stdout 줄이 결과 아티팩트 경로**이고, 기계용으로는 `ask --json`이
+stdout에 **JSON 객체 하나**(진행 로그는 stderr)를 냅니다.
 
 ```bash
 # 0. 이 머신에서 뭘 쓸 수 있는지 확인 (READY 프로바이더 + 추천 페어)
@@ -172,34 +188,37 @@ node scripts/xllm.mjs setup
 # 2. 다른 벤더의 의견 하나 받기 — 가장 기본 동작 (read-only)
 node scripts/xllm.mjs ask codex@high "이 마이그레이션 설계의 위험을 짚어줘"
 
-# 3. 여러 어드바이저를 병렬로 — 역할 분담 + 합의 깊이 종합
-node scripts/xllm.mjs review roles codex,grok "auth 모듈 보안 리뷰"
+# 3. 여러 모델의 서로 못 보는 독립 의견 — 블라인드 리뷰(측정된 일치율)
+node scripts/xllm.mjs review blind codex,grok "auth 모듈 보안 리뷰"
 
-# 4. 커밋 메시지는 무료 로컬 모델에게 (git 실행은 항상 당신이)
+# 4. (선택) 커밋 메시지를 싼 모델에게 — diff가 라우팅된 provider로 전송됨, 비공개 코드는 로컬 모델
 MSG=$(node scripts/xllm.mjs scribe commit) && git commit -m "$MSG"
 ```
 
 호스트 안에서는 스킬로 부릅니다 — Claude Code/Codex: `/xllm:ask`, `/xllm:review`,
 `/xllm:scribe`, `/xllm:setup` 또는 자연어("codex한테 이 설계 물어봐줘"). Grok Build:
-`/ask`, `/xllm`, `/xllm-setup`. 어드바이저는 **기본 read-only**라 트리를 건드리지 못하고,
+`/ask`, `/xllm`, `/xllm-setup`. 어드바이저는 **기본 read-only**(읽기 전용 경계를 검증할 수 있는
+어댑터만 — 설치된 CLI라고 자동으로 적격이 되지 않습니다)라 트리를 건드리지 못하고,
 API 키 없이 **각 CLI의 기존 로그인**을 그대로 씁니다. 로컬 모델(ollama 등)이 있다면 비용 0으로
 같은 문법으로 참여합니다: `ask ollama:qwen3.6:latest "..."`.
 
 ### 고급 사용법 — 측정 기반 워크플로
 
 **① 코드를 놓고 리뷰받기 (diff 입력).** 어느 심의 모드든 diff 소스를 하나 붙이면
-결정적으로 수집·상한 적용 후 어드바이저에게 전달됩니다(원장에는 메타데이터만):
+결정적으로 수집·상한 적용 후 어드바이저에게 전달됩니다. 상한에 걸리면 **어느 hunk를 봤고 어느
+hunk가 빠졌는지** 결과가 그대로 보고합니다(전체를 리뷰했다고 말하지 마세요). 저장 정책은 아래
+[명령 레퍼런스의 diff 입력](#명령-레퍼런스) 참고:
 
 ```bash
-node scripts/xllm.mjs review roles codex,grok "이 변경 리뷰" --staged        # git add 된 것
-node scripts/xllm.mjs review blind codex,grok,gemini "머지 안전?" --base main # 워킹트리 vs ref(two-dot)
-node scripts/xllm.mjs review debate a,b "이 diff는 회귀 없음" --diff-file x.patch
+node scripts/xllm.mjs review blind codex,grok "이 변경 리뷰" --staged           # git add 된 것
+node scripts/xllm.mjs review blind codex,grok,gemini "머지 안전?" --base main   # 워킹트리 vs ref(two-dot)
+node scripts/xllm.mjs review roles a,b "리스크 나열" --diff-file x.patch       # 커버리지(측정 아님)
 ```
 
-**② 측정 패널 루프 — 의견이 갈릴 때 세게 쓰는 길.** `blind`는 동일 프롬프트를 블라인드로
+**② 블라인드 패널 루프 — 의견이 갈릴 때 쓰는 길.** `blind`는 동일 프롬프트를 블라인드로
 보내 **일치율을 측정**하고 append-only 원장에 기록합니다. split이 나면 실측 일치율이 가장
-낮은 미참여 모델을 타이브레이커로 제안하고(`--tiebreak`으로 실행), 결과 채택까지 기록하면
-다음 라우팅의 근거가 됩니다:
+낮은 미참여 모델을 타이브레이커로 제안하고(`--tiebreak`으로 실행), 채택 결과(`review outcome`)는
+기록됩니다. 일치율·증거는 모델 정체성이 resolved인 기록만 집계합니다(unresolved는 표시만):
 
 ```bash
 node scripts/xllm.mjs review blind codex,grok,gemini "이 캐시 설계 안전?" --tiebreak
@@ -207,14 +226,14 @@ node scripts/xllm.mjs review stats                # 누적 쌍별 일치 행렬 
 node scripts/xllm.mjs review outcome <run-id> --adopted majority --helpful yes
 ```
 
-**③ 적대 검증 — 어디에 쓰고, 어디엔 쓰지 말 것 (실측).** `debate`(상호 반박)와
-`council`(blind→debate)은 주장을 SURVIVED/KILLED/UNRESOLVED로 판정합니다. 우리 벤치마크
-실측(10막): **결함을 찾는 용도라면 blind가 우월**합니다(심의는 재현율을 깎음). debate/council은
-"이 주장이 공격을 버티는가"를 볼 때 — 즉 이미 세운 특정 주장·설계 결정의 스트레스 테스트에
-쓰세요. SURVIVED는 증명이 아니라 프로토콜 결과입니다.
+**③ 적대 검증 — 실험 기능.** `debate`(상호 반박)와 `council`(blind→debate)은 주장을
+SURVIVED/KILLED/UNRESOLVED로 판정하지만 **실험 기능**입니다. 이전 벤치마크(10막)에서 품질
+판별력이 확인되지 않았고 결함 검출은 blind가 우월했으며, 현행 strict 방식의 재평가는 **보류
+중**이라 개선이 측정된 것으로 주장하지 않습니다. 고위험 권고의 근거로 쓰지 말고, 쓰더라도 이미
+세운 특정 주장의 스트레스 테스트에 한정하세요. SURVIVED는 증명이 아니라 프로토콜 결과입니다.
 
 **④ 에스컬레이션 — 의견에서 구현까지.** `ask`(의견) → `propose`(정적 `.patch`, 아무것도 적용
-안 됨) → `exec`(격리 클론에서 편집·빌드·테스트 → 검증된 브랜치 반환, 당신 트리 불가침):
+안 됨) → `exec`(검증된 OS 샌드박스의 격리 클론에서 편집·빌드·테스트 → 검증된 브랜치 반환, 당신 트리 불가침):
 
 ```bash
 node scripts/xllm.mjs propose codex@high "login()에 입력 검증 추가"
@@ -222,23 +241,28 @@ node scripts/xllm.mjs exec codex@high "X 구현" --test-cmd "npm test"
 ```
 
 **⑤ 라우팅을 프로젝트에 맞추기.** `setup [pack]`(balanced/quality/frugal/local/skip)으로
-포스처를 고르거나 역할 단위로 핀 — 이후 스킬·라우팅이 자동으로 따릅니다. `traits`는 원장·벤치
-증거에서 실측 특성을 파생해(표본 수 노출) 판단 역할 라우팅에 반영됩니다:
+포스처를 고르거나 역할 단위로 핀 — 이후 스킬·라우팅이 자동으로 따릅니다. `traits`는 strict 정체성
+증거에서만 실측 특성을 파생(표본 수 노출)해 판단 역할 라우팅에 반영하며, 레거시/unresolved 기록은
+라우팅에 쓰지 않습니다. 코드를 밖으로 내보내고 싶지 않다면 `local-only`를 쓰세요:
 
 ```bash
 node scripts/xllm.mjs setup frugal --apply
 node scripts/xllm.mjs profile set-role security codex@high
+node scripts/xllm.mjs profile set-default execution_policy local-only   # unknown 위치는 거부(fail-closed)
 node scripts/xllm.mjs traits
 ```
 
-**⑥ 무료 로컬 트리오 레시피 (9막 실측).** VRAM에 올라가는 경량 모델 3개면 프론티어 단일과
-결함 1개 차이의 검출 union이 나옵니다(배당 +3.33, 비용 0) — 검출 목적이면 이것부터:
+**⑥ 무료 로컬 트리오 (검출용 후보).** VRAM에 올라가는 경량 모델 3개를 블라인드로 묶는 구성은
+과거 측정(9막)에서 검출 합집합이 프론티어 단일과 비슷했고 비용이 0이었습니다. 단, 그 측정은
+모델 정체성 증거(strict) 도입 **이전**의 단일 세트 결과라 현행 증거 체계로는 재검증 대상입니다 —
+`xllm bench`로 직접 재측정하세요(아래 [벤치마크](#벤치마크--우리는-측정했습니다)):
 
 ```bash
 node scripts/xllm.mjs review blind ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b "이 diff의 결함 전부 나열" --staged
 ```
 
-ollama 모델은 `@high`를 붙이면 thinking이 켜집니다(v0.29+, 미지원 모델은 자동 폴백).
+ollama 모델은 `@high`를 붙이면 thinking이 켜집니다(미지원 모델은 자동 폴백). 보고된 모델·digest가
+없으면 정체성은 unresolved로 남고 라우팅 증거가 되지 못합니다.
 
 **⑦ 알아두면 좋은 함정.** Windows argv ~32KB — 긴 프롬프트는 `--prompt-file <경로>`(review
 계열은 24KB 초과 시 자동 파일 경유); grok/gemini는 argv 전달이라 회피 불가, codex/claude는
@@ -253,8 +277,8 @@ stdin. 안전 플래그(`--allow-write`/`--allow-self`/`--no-artifacts`)는 명�
 벤더는 xllm 릴리스보다 빠르게 모델을 은퇴시킵니다. 그래서 xllm은 클라우드
 모델 목록을 하드코딩하지 않습니다 — 모르는 이름은 그대로 CLI에 넘깁니다.
 
-- **모델을 생략하면** 각 CLI의 자체 기본 모델이 쓰입니다. 벤더가 최신으로
-  바꾸면 자동으로 따라갑니다.
+- **모델을 생략하면** 각 CLI의 설정·기본 모델이 쓰입니다. CLI 설정이나 xllm의
+  `default_model`이 고정되어 있으면 새 모델 출시 후에도 그 고정값이 유지됩니다.
 - **은퇴한 이름은 교정됩니다.** 실측된 소수(`gpt-5.6` → `gpt-5.6-sol`,
   `grok-4` → `grok-4.6`)는 내장 씨앗으로, 그 외에는 프로젝트 설정에서
   직접 지정합니다. 교정되면 stderr로 알리고 아티팩트에 요청/전송 모델을
@@ -272,23 +296,32 @@ stdin. 안전 플래그(`--allow-write`/`--allow-self`/`--no-artifacts`)는 명�
 "grok-4" = ""                 # 빈 값 = 교정하지 않음 (그대로 CLI에 넘김)
 ```
 
-자세한 내용은 [`docs/local-llms.md`](docs/local-llms.md).
+**2026-09-12 확인:** GPT-6 Astra, Claude Fable 5.1·Opus 5·Sonnet 5,
+Antigravity의 Gemini 3.8 Flash와 CLI 옵션 변경 사항은
+[`모델·CLI 호환성 문서`](docs/current-models-and-clis.md)에 정리했습니다.
+로컬 모델은 [`docs/local-llms.md`](docs/local-llms.md)를 참고하세요.
 
-### Gemini는 Antigravity(`agy`)로도 씁니다
+### 어댑터 적격성 — 설치 ≠ 적격
 
-`gemini` CLI가 없어도 Antigravity(`agy`)가 설치돼 있으면 Gemini 계열을
-그대로 쓸 수 있습니다 — xllm이 PATH에 실제로 있는 쪽으로 보냅니다
-(플랫폼이 아니라 설치 여부로 판단). 설계 배경은
+기본 read-only 어드바이저로 허용되는 어댑터는 읽기 전용 경계를 xllm이 *검증할 수 있는* 것뿐입니다:
+`codex` · `claude` · `ollama` · `lmstudio`(inventory의 `advisor_eligible: true`). `gemini` ·
+`antigravity`(`agy`) · `grok` · `cursor` · `lemonade`는 설치되어 있어도 경계를 검증할 수 없어
+기본값에서 거부됩니다 — 예컨대 설치된 `agy`의 샌드박스는 워크스페이스 쓰기를 허용하고 신뢰할 도구
+허용목록이 없습니다. `doctor`/`inventory`가 "설치됨/READY"와 "적격(안전)"을 따로 표시합니다. 검증된
+네이티브 안전 모드가 생기면 그때 적격으로 바뀝니다. 설계 배경은
 [`docs/model-version-tracking-design.md`](docs/model-version-tracking-design.md).
 
 ## 안전 모델
 
-경계는 프롬프트가 아니라 **실행 플래그와 샌드박스로** 강제됩니다.
+경계는 프롬프트가 아니라 **실행 플래그와 샌드박스로** 강제되며, **검증되지 않은 경계는 광고하지
+않습니다**(fail-closed).
 
-- **어드바이저는 기본 read-only** — codex `--sandbox read-only`; `--yolo`/`--dangerously-*`/`--always-approve` 미사용. 변경은 `--allow-write`로 명시적 옵트인.
+- **어드바이저는 기본 read-only — 검증 가능한 어댑터만.** codex는 `--sandbox read-only`(+ 사용자 설정/규칙 무시·ephemeral), claude는 제한된 도구 허용목록·`dontAsk` 권한 모드; ollama/lmstudio HTTP는 클라이언트 도구가 없는 프롬프트 전용입니다. 읽기 전용을 검증할 수 없는 CLI 어댑터는 기본값에서 거부되며, `--yolo`/`--dangerously-*`/`--always-approve`는 쓰지 않습니다. 변경은 `--allow-write`로 명시적 옵트인(별도의 비안전 선택이며 exec 샌드박스 우회가 아님).
 - **당신의 체크아웃은 불가침** — `exec`는 `.git` 분리 클론에서만 작업, fetch 전용 반환.
 - **동일 벤더 중첩 거부** — Claude Code 안 claude, Codex 안 codex 어드바이저 거부(`--allow-self`로 해제).
-- **시크릿은 디스크에 남지 않음** — 알려진 키/토큰 포맷 마스킹, scribe는 diff 미저장.
+- **local-only는 엄격** — `execution_policy = "local-only"`는 위치가 검증된 로컬 provider만 허용(Ollama: loopback 엔드포인트 + 신뢰할 로컬 모델 메타데이터; `:cloud`·원격 호스트·클라우드 CLI는 remote; LM Studio/lemonade는 검증 가능한 로컬 메타데이터가 없으면 unknown). unknown은 통과하지 못하고 `--ready`/`--allow-write`로 우회할 수 없으며, 알 수 없는 정책 값도 거부합니다.
+- **인증은 관측 전까지 unknown** — 토큰 없는 프로브는 버전/플래그 상태만 갱신하고 이전 인증 관측은 고유 타임스탬프로 보존합니다. 관측된 실패만 거부권을 가지며 unknown을 성공으로 표시하지 않습니다(CLI 버전·연결/인증 컨텍스트가 바뀌면 무효화, 비밀 값은 저장 안 함).
+- **시크릿은 디스크에 남지 않음** — 알려진 키/토큰 포맷 마스킹. 단 마스킹은 완전하지 않고 어드바이저별 응답 아티팩트에는 프롬프트 전문(diff 포함)이 남을 수 있습니다(아래 diff 입력·`--no-artifacts`·`clean` 참고). scribe는 xllm 아티팩트를 쓰지 않지만 provider 측 보존은 xllm이 통제하지 못합니다.
 - **병합·push·자격증명은 호스트 측** — xllm은 git push/tag 생성/자격증명 전달을 하지 않음.
 - **정직한 실패** — 사용 불가 프로바이더는 합성 출력 대신 명확한 실패.
 
@@ -307,52 +340,77 @@ node <plugin-root>/scripts/xllm.mjs …      # 플러그인 설치본에서
 
 - **스펙 문법** — `provider[:model][@effort]`. 예: `codex@high`, `claude:opus@medium`,
   `grok:grok-4.6@high`, `ollama:qwen3.6:latest`. 프로젝트 프로파일: `.xllm/xllm-providers.toml`.
-- **출력 규약** — 실행 결과의 **마지막 stdout 줄이 아티팩트/인덱스 경로**입니다
-  (`.xllm/artifacts/…`). `review`의 blind/debate/council(roles 제외) 구조화 판정은 산문보다 먼저
-  `.xllm/panel-ledger.jsonl`(append-only)에 기록됩니다.
-- **안전 플래그** (ask/review roles) — `--allow-write`(어드바이저 파일 쓰기 옵트인) ·
-  `--allow-self`(동일 벤더 중첩 해제) · `--no-artifacts`(아티팩트 미저장).
-  셋 모두 사용자의 명시적 요청 없이는 쓰지 않는 것이 규약입니다.
+- **출력 규약** — 사람용 실행 결과의 **마지막 stdout 줄이 아티팩트/인덱스 경로**입니다
+  (`.xllm/artifacts/…`). 기계용은 `ask --json` / `review blind|debate|council --json`이 stdout에
+  **JSON 객체 하나**(`schema_version:2`, 진행 로그는 stderr)를 냅니다. `review`의
+  blind/debate/council(roles 제외) 구조화 판정은 산문보다 먼저 `.xllm/panel-ledger.jsonl`(append-only)에
+  기록됩니다.
+- **안전 플래그** (ask/review) — `--allow-write`(어드바이저 파일 쓰기 옵트인) ·
+  `--allow-self`(동일 벤더 중첩 해제) · `--no-artifacts`(아티팩트 미저장; `XLLM_NO_ARTIFACTS=1`도 동일).
+  `--allow-write`/`--allow-self`는 사용자의 명시적 요청 없이는 쓰지 않는 것이 규약입니다.
 - **긴 프롬프트** — Windows argv ~32KB 한계가 있습니다. `--prompt-file <경로>`를 쓰세요
   (review 계열은 24KB 초과 시 자동으로 파일 경유).
 - **diff 입력** — 어느 심의 모드에서든 `--staged | --base <ref> | --diff-file <path>` 중 하나로
   diff를 넣을 수 있습니다. `--base <ref>`는 `git diff <ref>`(two-dot) — **워킹트리 대 ref** 비교라
   미커밋 변경까지 포함합니다(merge-base 삼점 비교가 아님; 커밋된 브랜치 diff만 원하면 커밋 후 사용).
-  git으로 결정적으로 수집되어 크기 상한 후 어드바이저에 전달되며,
-  **절대 저장되지 않습니다**(원장/인덱스는 source/stat/bytes/truncated 메타데이터만 남김; 단 어드바이저별 응답 아티팩트에는 프롬프트 전문이 남는다: `ask`와 동일하며 `--no-artifacts`로 생략 가능 — roles 한정; blind/debate/council은 구조화 파싱이 아티팩트를 사용).
+  git으로 결정적으로 수집되어 **24KB**(diff 바이트) 예산 안에서 파일/hunk 경계로 잘려 모든
+  어드바이저에 **전달됩니다**(너무 큰 단일 hunk는 줄 경계로 분할, 바이너리는 불투명 파일로 표기).
+  생략된 모든 파일/hunk는 **DIFF COVERAGE 매니페스트**로 열거되어 md·원장·JSON 결과에 나타납니다
+  — "전체를 봤다"고 말하지 말고 covered/omitted를 그대로 전하세요.
+  **저장 정책(정확히):** 원장과 md 인덱스에는 diff 본문이 쓰이지 않고 메타데이터+커버리지 매니페스트만
+  남습니다. 그러나 기본 실행에서는 어드바이저별 응답 아티팩트에 `Original task`와 프롬프트(**diff 본문
+  포함**, 시크릿 마스킹)가 남으므로 "diff를 저장하지 않는다"는 말은 사실이 아닙니다.
+  `--no-artifacts`를 주면 blind/debate/council의 자식 호출은 아티팩트를 만들지 않고, md 인덱스도 쓰지
+  않으며(결과는 출력 또는 `--json`), 원장에는 판정·상태·attribution·usage·adherence·커버리지 메타데이터만
+  남고 질문/주장 텍스트와 diff는 쓰이지 않습니다. 이미 보존된 아티팩트는 `clean`으로 지우세요.
 
 ### 의견 — `ask`
 
 ```text
-ask   <spec> "<prompt>"  [--propose] [--prompt-file <path>] [--allow-write] [--allow-self] [--no-artifacts]
+ask   <spec> "<prompt>"  [--json] [--schema-file <path>] [--propose] [--prompt-file <path>] [--allow-write] [--allow-self] [--no-artifacts]
 ```
 
 ```bash
 node scripts/xllm.mjs ask codex@high "이 마이그레이션 설계의 위험을 짚어줘"
 ```
 
-- `ask`는 어드바이저 1명의 진짜 답을 `.xllm/artifacts/ask/…` 아티팩트로 남깁니다(프롬프트+출력,
+- 사람용 출력: 어드바이저 1명의 진짜 답을 `.xllm/artifacts/ask/…` 아티팩트로 남깁니다(프롬프트+출력,
   시크릿 마스킹). 어드바이저는 이 대화를 볼 수 없으므로 필요한 컨텍스트만 프롬프트에 담으세요.
+- `--json`: stdout에 **JSON 객체 하나**(진행 로그는 stderr), 치명적 오류도 같은 봉투로 반환합니다.
+  `{ schema_version:2, raw, exitCode, durationMs, artifactPath, patchPath, failure, attribution, usage,
+  cost_estimate, structured }` — `raw`는 최종 응답 텍스트뿐(프롬프트·stderr 없음). `attribution`은
+  요청 대 실행을 구분합니다: `requested_provider/model`, `executed_provider`, `transmitted_model`,
+  `substituted_from`, `reported_model`(provider가 보고하지 않으면 `null` — 요청·전송 모델이나 답변
+  본문에서 추정하지 않음), `identity_status`(`resolved`|`mutable`|`unresolved`; 전체 모델 ID는 불변 정체성이
+  없으면 mutable이고 `opus`/`sonnet`/`latest`/`default`/`auto` 같은 별칭은 resolved가 아님),
+  `model_revision`, `requested_effort`/`effective_effort`, `cli_version`, `surface`
+  (`cli-agentic`|`http-completion`), `execution_location`(`local`|`remote`|`unknown`). 네이티브 머신 출력이
+  있는 어댑터(Codex `--json`, Claude `--output-format json`, Ollama/LM Studio HTTP)는 보고된 메타데이터를
+  채우고, 나머지 어댑터는 거짓 정체성 대신 `unresolved`로 남습니다. **resolved 결과만 증거/라우팅 키**가 됩니다.
+- `--schema-file <path>`: 구조화 출력 요청. 네이티브 스키마를 지원하는 provider는 그것을 쓰고, 아니면
+  프롬프트 계약 + 제한된 재시도로 폴백합니다(제약된 생성을 주장하지 않음). 결과 객체는 `structured`.
 - `--propose`를 붙이면 의견 대신 **unified diff**를 받습니다 — `artifacts/proposals/`에 `.patch`
   사이드카로 저장되고, 아무것도 적용되지 않습니다.
 - 병렬 다중 어드바이저 + 합의 깊이 종합은 이제 `review roles` — 아래 참고.
 
-### 심의 — `review` (`roles`·`blind`·`debate`·`council`)
+### 심의 — `review` (`blind` · `roles` · `debate`* · `council`*)
+
+\* debate/council은 **실험 기능**입니다.
 
 ```text
+review blind   p1,p2[,p3] "<질문>"      [--tiebreak] [--ready=a,b,c]      # 권장 기본
 review roles   p1,p2[,p3] "<prompt>"   [--propose] [--prompt-file <path>] [--allow-write] [--allow-self] [--no-artifacts]
-review blind   p1,p2[,p3] "<질문>"      [--tiebreak] [--ready=a,b,c]
-review debate  p1,p2[,p3] "<질문/주장>"
-review council p1,p2[,p3] "<질문>"      [--tiebreak] [--ready=a,b,c]
-review stats [--json]                  쌍별 일치 행렬 (실측 탈상관 + tiebreak 행 합산)
+review debate  p1,p2[,p3] "<질문/주장>"                                  # 실험
+review council p1,p2[,p3] "<질문>"      [--tiebreak] [--ready=a,b,c]      # 실험
+review stats [--json]                  쌍별 일치 행렬 (strict 정체성 증거 + tiebreak 행 합산)
 review outcome <run-id> --adopted <spec|majority|minority|none> --helpful yes|no
 
 diff 입력(위 모든 모드): --staged | --base <ref> | --diff-file <path>
 ```
 
 ```bash
-node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "advisor 스크립트 보안 리뷰"
 node scripts/xllm.mjs review blind codex,grok,gemini "이 캐시 설계가 동시성에 안전한가?" --tiebreak
+node scripts/xllm.mjs review roles ollama:qwen3.6:latest,codex "advisor 스크립트 보안 리뷰"
 node scripts/xllm.mjs review debate ollama:llama3.2,ollama:gemma4 "이 인증 흐름은 토큰 재사용에 취약하다" --staged
 node scripts/xllm.mjs review council codex,grok,gemini "결제 웹훅을 재설계해야 하는가?" --tiebreak
 ```
@@ -371,12 +429,16 @@ node scripts/xllm.mjs review council codex,grok,gemini "결제 웹훅을 재설�
   무료로 선정·기록하고, `--tiebreak`을 줬을 때만 실제 추가 호출을 지불합니다(벤더를 손으로 고르지
   않는 것이 규약; `--ready=`는 가용 프로바이더 제약일 뿐). 실행 후 `review outcome`으로 무엇을
   채택했는지 기록하면 측정→라우팅 루프가 이어집니다.
-- **debate** — R0 블라인드 주장 → R1 상호 반박(구체적 메커니즘+falsifier, decisive/soft 태그) →
+- **debate (실험)** — R0 블라인드 주장 → R1 상호 반박(구체적 메커니즘+falsifier, decisive/soft 태그) →
   R2 저자 방어 → **기계적 판정**(judge LLM 없음, 순서 불변). 저자가 못 막은 decisive falsifier만
-  주장을 KILL하고, 단순 이견은 UNRESOLVED입니다. 정체성은 모델 단위 — 같은 ollama 위의
-  llama↔gemma도 서로 공격합니다.
-- **council** — blind(독립 발산) → debate(적대 수렴)을 한 명령으로. 1단계가 split이면 타이브레이커
+  주장을 KILL하고, 단순 이견은 UNRESOLVED이며 **라운드가 실패하면 UNRESOLVED**입니다.
+  정체성은 모델 단위 — 같은 ollama 위의 llama↔gemma도 서로 공격합니다.
+- **council (실험)** — blind(독립 발산) → debate(적대 수렴)을 한 명령으로. 1단계가 split이면 타이브레이커
   주장이 2단계에 **저자로만** 참여합니다(원 멤버 주장을 밀어내지 않음, 토론자 아님).
+- **실험 상태** — debate/council의 이득은 입증되지 않았습니다. 이전 측정(5·10막)은 SURVIVED 라벨이 시딩
+  결함 대응 여부를 추적하지 못했고(품질 판별 ≈0), council의 생존 주장이 blind 합집합보다 재현율이
+  낮았습니다. strict 정체성·반복·보류 평가 방식의 재평가는 **보류 중**이며, 개선이 측정되었다고
+  주장하지 않습니다. 고위험 권고의 근거로 쓰지 마세요.
 - **비용 감각** — `ask`/`review roles` < `review blind` < `review debate`(~2–3×) <
   `review council`(~3–4×). SURVIVED는 "적대적 검증을 통과했다"는 프로토콜 결과이지 증명이 아니며,
   중요한 것은 직접 재검증하세요.
@@ -385,7 +447,8 @@ node scripts/xllm.mjs review council codex,grok,gemini "결제 웹훅을 재설�
 
 ```text
 propose <spec> "<변경 요청>"
-exec <spec> "<과제>" --test-cmd "npm test"  [--sandbox-mode bypass]
+exec sandbox-check                          # OS 샌드박스 검증(모델 호출 없음; exit 0 ok / 3 not ok, JSON 리포트)
+exec <spec> "<과제>" --test-cmd "npm test"  [--timeout-ms N] [--keep-clone] [--allow-self]
 exec list | exec cleanup <id>|--all
 ```
 
@@ -397,15 +460,29 @@ node scripts/xllm.mjs exec codex@high "slugify 유닛 테스트 추가" --test-c
 - `propose`는 read-only 그대로입니다 — 산출물은 `.patch`뿐이고 적용은 항상 사용자 몫
   (`git apply --check` → 리뷰 → 병합).
 - `exec`는 **임시 로컬 클론**에서 편집→빌드→테스트를 돌리고 `refs/xllm/exec/<id>`(fetch 전용) +
-  `.patch` + 테스트 증거 아티팩트를 돌려줍니다. `--test-cmd`가 없으면 증거는 executor의 주장뿐이니
-  가능하면 항상 지정하세요. 샌드박스 가능한 프로바이더만 허용(codex; 호스트가 아닐 때 claude) —
-  gemini/grok/cursor(비샌드박스), ollama(순수 텍스트)는 거부됩니다. OS 샌드박스가 없으면
-  **fail-closed**; `--sandbox-mode bypass`는 클론 격리만 남는다는 것을 이해하고 명시적으로만.
-- **핸드백 절차** — 증거 아티팩트의 `Status`(green/not-green/no-change/timeout) 확인 →
+  `.patch` + 증거 아티팩트(`.md` + 기계용 `.json`, `<state>/artifacts/exec/`)를 돌려줍니다.
+  **codex만** 허용됩니다(네이티브 OS 샌드박스: 클론에만 쓰기, 시스템 temp·호스트 저장소·홈 자격증명
+  디렉터리 차단, 네트워크 off, 사용자 codex 설정 무시). claude는 샌드박스가 Bash 도구에만 적용되고
+  권한 모드는 격리가 아니므로 거부되며 나머지 provider도 거부됩니다. **우회 옵션이 없습니다** —
+  `--sandbox-mode`/`--allow-write`/`--ready`는 거부되고, `execution_policy = "local-only"`는 클론 전에
+  exec를 거부합니다(codex는 클라우드).
+- **fail-closed** — 클론 전에 이 머신에서 샌드박스를 프로브합니다(클론 안 쓰기만 성공, temp/홈/저장소 쓰기
+  실패, 저장소·자격증명 읽기 거부, 비밀 env 없음). 실패하면 `blocked`(exit 3)이고 아무것도 클론하지
+  않습니다. 클론은 `origin` 제거·hardlink 없음·`.git` 읽기 전용(커밋은 호스트가, 훅 비활성)이며,
+  메인 저장소/클론의 HEAD·refs·config·hooks 변조가 감지되면 `tampered`로 가져오지 않습니다.
+- **검증** — `--test-cmd`는 호스트 셸이 아니라 같은 샌드박스(`codex sandbox`)에서 허용목록 환경으로
+  실행됩니다. 없으면 결과는 `unverified`이고 **green이 아닙니다**. executor의 주장은 증거가 아닙니다.
+- **상태** — `green`(변경 + 샌드박스 테스트 통과 + 검증 정의 불변, exit 0) · `no-change`/`timeout`/`refused`/`executor-failed`
+  (executor가 비정상 종료했고 변경 없음 — `no-change`와 구분; 변경이 있으면 `not-green`; exit 1) ·
+  `unverified`/`not-green`/`definition-changed`(package scripts·러너 설정·CI·테스트 명령에 지명된 파일을
+  executor가 편집함 — 통과가 원래 기준을 증명하지 못함; exit 2) · `blocked`/`tampered`(exit 3).
+- **Windows** — 읽기 거부(deny-read)가 필요한 Windows 백엔드는 프로비저닝된 `elevated` 샌드박스(또는 명시적 MXC)가
+  있어야 하며, 없으면 프리플라이트가 지원 불가로 `blocked` 처리합니다(프리플라이트와 실행 모두 `windows.sandbox = elevated` 고정).
+- **핸드백 절차** — 증거 아티팩트의 `status`·`verification`·`tamper` 확인 →
   `git diff <base>..refs/xllm/exec/<id>` 리뷰 → `git merge --no-ff` → **병합 후 직접 재검증**
   (executor-green은 증거이지 신뢰가 아님) → `exec cleanup <id>`.
 
-### 저비용 산문 — `scribe`
+### 저비용 산문 (선택) — `scribe`
 
 ```text
 scribe commit                     staged diff → 커밋 메시지
@@ -419,13 +496,14 @@ scribe notes --from <tag>         로그 범위 → CHANGELOG 항목
   기본입니다. git/gh 실행은 항상 사용자가 합니다.
 - 출력은 결정적으로 검증됩니다(Conventional Commits, 제목 ≤72자, 펜스 금지 등) + 1회 교정 재시도.
   **exit 3**은 검증 실패 — 원문을 그대로 쓰지 말고 검토하라는 신호입니다.
-- diff는 라우팅된 어드바이저에게만 가고 **절대 디스크에 저장되지 않습니다**. 민감한 저장소는
-  scribe를 로컬 모델에 핀하세요: `profile set-role scribe ollama:qwen3.6:latest@low`.
+- diff/log는 라우팅된 어드바이저에게 **전송됩니다**(클라우드면 원격). xllm은 이를 아티팩트로 쓰지
+  않지만(`--no-artifacts`) provider 측 보존은 통제하지 못합니다. 민감한 저장소는 scribe를 로컬
+  모델에 핀하고 `execution_policy = "local-only"`를 쓰세요: `profile set-role scribe ollama:qwen3.6:latest@low`.
 
-### 계측·진단 — `traits` · `contracts` · `inventory` · `doctor` · `smoke` · `dry-run`
+### 계측·진단 — `traits` · `bench` · `contracts` · `inventory` · `doctor` · `smoke` · `dry-run`
 
 ```text
-traits [--json]          실측 특성 프로파일 (원장·벤치·계약 파생, 표본 수 상시 노출)
+traits [--json]          strict 증거 기반 특성 프로파일 (표본 수 상시 노출; 레거시·unresolved 기록은 라우팅 제외)
 contracts [--live]       CLI 계약 프로브: 플래그 드리프트, 실패 분류; --live는 클라우드별 소형 호출 1회
 inventory [--refresh]    머신 역량 캐시 (설치된 CLI, pull된 ollama 모델; 24h TTL)
 doctor                   프로바이더 + 경로 건강 진단 (사람용)
@@ -433,14 +511,15 @@ smoke [--live]           드라이 스모크 / READY 프로바이더 라이브 �
 dry-run <spec> "<p>"     실제 호출 없이 조립될 커맨드라인 확인
 ```
 
-- `traits`는 손으로 쓴 모델 인상론을 배제하고 실측만 파생합니다. 판단 역할 라우팅은 시딩 결함
-  검출률의 Wilson 95% 하한을 게이트(과제≥4 · 기회≥12 · 마진 +0.10) 하에 소비합니다 — 3막의
-  `grok LCB 0.7733 vs codex 0.5004`가 정확히 이 경로입니다.
+- `traits`는 손으로 쓴 모델 인상론을 배제하고 실측만 파생합니다. 증거 키는 실행된 provider · 보고된
+  모델/리비전 · 유효 effort · 표면 · CLI 버전이며, 모델 정체성이 resolved가 아니거나 bare 모델명/
+  레거시 기록이면 **비라우팅**입니다(표시는 하되 선택에 영향 없음). `xllm bench`의 상세는 아래
+  [벤치마크 재현](#재현).
 
 ### 라우팅 — `pick` · `infer` · `roles` · `profile`
 
 ```text
-pick <role> <task>       역할×과제 → 모델/강도 자동 선정 (+실측 특성; --no-traits로 레거시와 비트 동일)
+pick <role> <task>       역할×과제 → 모델/강도 자동 선정 (+실측 특성; --no-traits는 실측 품질 라우팅만 끔)
 infer <task>             과제 강도 추정 low|medium|high
 roles                    라우팅 역할 목록
 profile show             해석된 프로젝트 프로파일 + 상태 디렉토리
@@ -453,6 +532,26 @@ node scripts/xllm.mjs pick security "auth token refresh"
 node scripts/xllm.mjs profile set-role critic ollama:qwen3.6:latest@low
 ```
 
+- `pick` 출력에는 `execution:`(위치+정책), `cost:`(정적 휴리스틱 — 가격 아님; 원격에서 서빙되는 로컬 런타임
+  모델은 0이 아닌 unknown-remote), `measured:`(measured | measured-baseline-kept | none | not-applicable | disabled),
+  `refused:` 줄이 붙습니다. 거부 종류: `policy`(local-only는 검증된 로컬 가중치 필요) · `safety`(`advisor_eligible`
+  false — "safety unverified") · `health`(관측된 실패). 만족하는 후보가 없으면 stderr
+  `unsatisfiable: <reason>`(`--json`이면 `{ok:false, error:{code:'ROUTING_UNSATISFIABLE', …}}`)와 exit 2.
+- `doctor`/계약 상태는 `flags ok · auth unknown|verified|failed @ts · safety native-flags|unverified|prompt-only`를
+  분리해 보여줍니다. 인증 관측은 토큰 없는 프로브 후에도 유지되고(자체 12h TTL), CLI 버전·계정/엔드포인트
+  컨텍스트가 바뀌면 폐기되며, 관측된 실패만 거부권을 갖습니다.
+  **건강 게이트(정확히):** 유효한(같은 CLI 버전·계정/엔드포인트 컨텍스트, 12h TTL 이내) 인증 실패 관측은 역할 핀과
+  명시적 `--ready` 목록을 포함한 **모든 라우트**에서 provider를 막으며, 우회 플래그는 없습니다. 더 새로운 성공 관측
+  (실제 호출 또는 `xllm-contracts --live`)·TTL 만료·버전/컨텍스트 변경으로만 풀립니다. 인증 외 건강 종류는
+  기존 규칙(명시적 `--ready`는 바이너리 유무/계약 드리프트에 대해 권위 있고, 역할 핀은 우회)을 유지합니다.
+  관측이 없는(unknown) 상태는 막지 않습니다. `--no-traits`는 실측 **품질**(벤치) 라우팅만 끄고, 관측된 인증 실패
+  건강 게이트는 로드된 캐시로 계속 적용됩니다(`measured: disabled — … (health observations still apply)`).
+- 모델 선택: 명시 모델(`--model`/역할 핀/프로파일 기본값)이 없고 inventory `model_details`가 있으면 `pick`은
+  설치된 모델마다 후보를 만들어 각자의 메타데이터로 게이트하고(local-only: 검증된 로컬 가중치만, `:cloud`·미검증
+  모델은 개별 거부) 승자 모델을 스펙에 담습니다(예: `ollama:llama3.2:latest@high`). any-ready 폴백도 동일하게
+  확장되며 준비 상태를 우회하지 않습니다. inventory 메타데이터도 기본 모델도 없으면 local-only에서 bare provider는
+  라우팅 불가입니다.
+
 ### 유지관리 — `which` · `remember` · `list-providers` · `clean`
 
 ```text
@@ -460,9 +559,7 @@ which                    해석된 advisor 스크립트 경로 출력
 remember                 .xllm/xllm-advisor-path 마커 + 아티팩트 디렉토리(자기 무시 .gitignore) 생성
 list | list-providers    프로바이더 목록 JSON
 clean [--older-than=DAYS]   보존된 어드바이저 아티팩트 삭제
-discipline show|install|remove [--target <path>]
-                         프로세스 규율 블록(≤25줄)을 CLAUDE.md/AGENTS.md에 설치/제거 —
-                         마커 블록으로 멱등, setup 위저드에서 전문 미리보기 후 옵트인
+discipline remove [--target <path>]   이전 버전이 설치한 xllm 마커 블록 제거(제거 전용 — xllm은 더 이상 지침 블록을 설치하지 않음)
 ```
 
 ---
@@ -470,10 +567,11 @@ discipline show|install|remove [--target <path>]
 ## 개발
 
 ```bash
-npm test          # 단위 테스트 184개 (라이브 LLM 불필요)
-npm run check     # 문법 + 3개 호스트 매니페스트/스킬 검증
-npm run ci        # check + test + smoke + bench selftest
-npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바이더 필요)
+npm test              # 278개 테스트 (라이브 LLM 불필요)
+npm run check         # 문법 + 3개 호스트 매니페스트/스킬 검증
+npm run ci            # check + test + smoke + bench selftest
+npm run bench:selftest   # 채점기 결정적 자체 검사 (호출 없음)
+node scripts/xllm.mjs bench run …   # 라이브 평가: --live --max-calls --deadline-minutes 명시 시에만 호출
 ```
 
 **레이아웃**
@@ -483,7 +581,7 @@ npm run bench:live   # 시딩 결함 다양성 벤치마크 (라이브 프로바
 skills/                                    Claude Code + Codex 공유 스킬 5종
 scripts/  xllm-advisor.js  xllm-exec.js  xllm-scribe.js  xllm-review.js  xllm-diff.js
           xllm-panel.js  xllm-debate.js  xllm-council.js  xllm-contracts.js  xllm-bench.js
-          xllm-structured.js  xllm-routing.js  xllm-traits.js  xllm.mjs
+          xllm-structured.js  xllm-routing.js  xllm-traits.js  xllm-evidence.js  xllm.mjs
 benchmarks/  tasks/  FINDINGS.md            시딩 결함 벤치마크
 docs/  index.html SCOPE.md *-design.md …   소개 페이지 + 스코프/설계/로드맵 문서
 .grok/  skills/                             Grok Build 어댑터 (ask/xllm/xllm-setup)
@@ -494,12 +592,12 @@ docs/  index.html SCOPE.md *-design.md …   소개 페이지 + 스코프/설계
 ## 범위 (Scope)
 
 **포함**: 크로스-벤더 어드바이저, 로컬 LLM, diff 제안, 단일 태스크 격리 실행, 저비용 산문 레인,
-비용 라우팅, 다양성 계측(패널·원장·벤치마크), 경계가 명확한 심의(적대적 debate, 2단계 council).
+비용 라우팅, 다양성 계측(패널·원장·벤치마크), 심의(블라인드 패널 + 실험적 debate/council).
 
 **불포함(의도적)**: 에이전트 OS 이식, HUD/훅 엔진, 대형 스킬 카탈로그, xllm 자체 **무한 루프·자율 팀·
 오케스트레이션 상태기계**(autopilot류), 자동 병합, push/배포, 자격증명 처리, 다수결 자동 적용
 ("투표=진리" 엔진) — 실행 오케스트레이션과 다중 태스크 조합은 호스트 네이티브의 몫입니다.
-(debate/council은 한 질문에 대한 **유한한** 심의 파이프라인이지 실행 루프가 아닙니다.)
+(debate/council은 한 질문에 대한 **유한한** 실험적 심의 파이프라인이지 실행 루프가 아닙니다.)
 
 ---
 
@@ -509,6 +607,13 @@ xllm은 **자기 핵심 주장을 반증할 수 있는** 시딩 결함 벤치마
 코드 리뷰 과제에서 검출률·**쌍별 오류 상관**·심의 결과를 측정합니다. 실측은 시간순으로 누적됐고,
 "탈상관이 측정된 곳에만 다양성을 쓰고, 그것이 실제로 도움이 되는지도 잰다"는 제품 동작으로
 귀결됩니다. **긍정적 결과를 보장하는 도구가 아니라, 도움이 될 때를 감지하는 계측기입니다.**
+
+> **역사적 기록입니다 — 현행 증거로 쓰이지 않습니다.** 아래 1~11막은 strict 정체성 증거 체계(실행된
+> provider·보고된 모델/리비전·유효 effort·표면·CLI 버전 키) **이전**에 bare 모델명 기준으로 측정한
+> 단일 세트·소수 반복 결과입니다. 그 결과 파일에는 attribution이 없어 **라우팅이 무시**합니다(unresolved
+> legacy data는 비라우팅). 수치는 당시 측정의 기록으로만 읽고, 현행 방법으로는 `xllm bench`(아래
+> [재현](#재현))로 반복·보류 세트·사람 판정과 함께 다시 재야 합니다. 특히 debate/council은 **개선이
+> 측정되었다고 주장하지 않으며** 재평가는 보류 중입니다.
 
 ### 1막 — 쉬운 결함: 다양성은 연극이었다 (2026-07-11 · codex vs grok)
 
@@ -600,7 +705,8 @@ pick verify / pick security (high intensity, legacy baseline = codex):
 ```
 
 측정 → 원장/결과 → `traits`(Wilson 95% 하한) → 라우팅 결정, 근거 문자열에 표본 수 인용.
-벤치마크가 잰 것이 곧 라우터가 하는 일이 됐습니다.
+벤치마크가 잰 것이 곧 라우터가 하는 일이 됐습니다. *(역사적 기록: 현행 라우터는 attribution이 resolved인
+증거만 소비하므로, 이 레거시 결과 파일은 더 이상 선택에 영향을 주지 않습니다.)*
 
 ### 4막 — 4번째 탈상관 모델이 강 모델 쌍의 맹점을 회수한다 (2026-07-13 · 4모델)
 
@@ -862,17 +968,36 @@ read-only이며 모든 클라우드 CLI와 동일합니다. 다만 grok의 `-p`�
 
 ### 재현
 
+현행 벤치는 `xllm bench`(= `scripts/xllm-bench.js`)입니다. **라이브 호출은 명시적 옵트인**이며 예산 상한이
+필수입니다: `--live --max-calls N --deadline-minutes M` 셋 모두 있어야 실행되고, `--live` 없이 `run`을 돌리면
+호출 계획(횟수·표면)만 출력하고 **호출·쓰기는 0**입니다. 모든 호출은 `xllm-advisor.js --json`을 거치며 실패한 셀은
+기록되되 미검출로 채점되지 않습니다. 결과는 프로젝트 상태 디렉터리 `<state>/benchmarks/{results,adjudications,cases}/`
+(기본 `.xllm/benchmarks/`, `XLLM_STATE_DIR` 존중)에 저장되며, 저장소의 `benchmarks/results/`에 있는 attribution 없는
+레거시 파일은 라우팅이 무시합니다.
+
 ```bash
-npm run bench:live                                                                          # 기본 세트(잘 알려진 결함)
-node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks               # 어려운 세트 (single+panel)
-node scripts/xllm-bench.js run --providers codex,grok --tasks-file hard-tasks --modes debate       # 심의 채점
-node scripts/xllm-bench.js run --providers grok,ollama:gemma4:cloud,ollama:nemotron-3-super:cloud --tasks-file hard-tasks --modes single   # 4모델 패널
-node scripts/xllm-bench.js run --providers ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b --tasks-file hard-tasks --modes single   # 경량 로컬 트리오 (9막)
-node scripts/xllm-bench.js run --providers ollama:ornith:latest,ollama:gemma4:latest,ollama:qwen3-coder:30b --tasks-file hard-tasks --modes council --tasks h3-cache-lru   # council 채점 (10막, 태스크당 청크 권장)
-node scripts/xllm-bench.js run --providers ollama:gemma4:cloud@high,ollama:glm-5.2:cloud@high,ollama:nemotron-3-super:cloud@high --tasks-file hard-tasks --modes single    # 고효율 패널 (11막, v0.29+ effort→think)
+# 계획만 출력 (호출 0) → 예산을 정해 라이브 실행. provider 스펙에는 모델이 필수
+node scripts/xllm.mjs bench run --providers codex:gpt-5.5,ollama:qwen3.6:latest --tasks-file heldout-tasks --repeats 3
+node scripts/xllm.mjs bench run --providers codex:gpt-5.5,ollama:qwen3.6:latest --tasks-file heldout-tasks --repeats 3 --live --max-calls 40 --deadline-minutes 60
+node scripts/xllm.mjs bench grade-selftest        # 채점기 결정적 자체 검사 (호출 없음)
 ```
 
-원시 실행 JSON은 gitignore, 요약은 커밋 — 전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md) ·
+- **반복·분할** — `--repeats N`(기본 3; 1은 `--regression`일 때만), `--split dev|heldout|all`. 보류(heldout) 세트는
+  `benchmarks/tasks/heldout-tasks.json`이며 **합성(synthetic) 다중 파일/긴 diff 케이스**이고 실제 사례라는 출처를 주장하지 않습니다.
+- **arms** — `--arms single,anchor-review,final`(`--anchor`/`--reviewer`/`--synthesizer`/`--panel` 지정). 패널은 **같은
+  단일 응답들의 합집합**이라 추가 호출이 없습니다. 최종 채택(final)은 합집합과 분리해 평가합니다.
+- **사람 판정** — regex 적중은 *후보*일 뿐입니다. `bench adjudicate export RUN [--out FILE] [--unblind]` →
+  사람이 claim_id별 판정(불확실성 포함) → `bench adjudicate apply FILE [--replace]`, 진행은 `bench adjudicate status RUN`.
+- **비교** — `bench compare --run RUN[,RUN..] --baseline ARM --arms ARM,ARM [--split heldout] [--difficulty-threshold 0.70]
+  [--strongest SPEC] [--candidate-only]`(ARM: `single:SPEC` · `strongest-single` · `panel:SPEC+SPEC` · `local-panel` ·
+  `anchor-review` · `final` · `native:LABEL`). 난이도 필터는 `--difficulty-threshold`(모든 모델의 검출률이 임계 이하인 과제만 hard)입니다.
+  반복≥3 쌍, 실패 셀은 쌍별 제외, 반복별 분산 유지 — 가짜 정밀도를 만들지 않습니다.
+- **네이티브 기준선·실사례** — `bench export-prompts --tasks-file NAME --out DIR`로 프롬프트(+sha256 매니페스트)를 내보내
+  호스트 안에서 직접 돌린 뒤 `bench import-native FILE`(해시 검증, 호스트/모델은 자기보고라 *unverified*로 표시; 에뮬레이션 없음).
+  사용자가 제공한 회고적 실제 버그는 `bench import-cases FILE [--name N]`(스키마 `xllm-bench-cases/1`)로 가져와 `--tasks-file N`으로 씁니다.
+- `bench report RUN` · `bench list`로 결과를 열람합니다.
+
+전체 기록: [`benchmarks/FINDINGS.md`](benchmarks/FINDINGS.md)(역사적) ·
 로드맵: [`docs/diversity-roadmap.md`](docs/diversity-roadmap.md)
 
 ---
